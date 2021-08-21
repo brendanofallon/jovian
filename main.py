@@ -5,6 +5,7 @@ from torch import optim
 import torch.nn.functional as F
 import math
 import copy
+import pandas as pd
 import pysam
 
 INDEX_TO_BASE = [
@@ -120,7 +121,7 @@ def string_to_tensor(bases):
     return torch.vstack([encode_basecall(b, 50, 0) for b in bases])
 
 
-def target_string_to_tensor(bases, include_stop=True):
+def target_string_to_tensor(bases):
     """
     The target version doesn't include the qual or cigop features
     """
@@ -268,23 +269,45 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads=100):
     reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
     minref = min(r.reference_start for r in reads)
     maxref = max(r.reference_start + r.query_length for r in reads)
-    refseq = fasta.fetch(chrom, minref+1, maxref+1) # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
-    assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch"
+    refseq = fasta.fetch(chrom, minref-1, maxref-1) # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
+    assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
     altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
     reads_encoded = encode_pileup(reads)
     return reads_encoded, refseq, altseq
 
 
-def main():
-    refgenome = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    bam = pysam.AlignmentFile("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam")
-    # reads = reads_spanning(bam, "2", 73613032, max_reads=10)
+def load_from_csv(bampath, refpath, csv):
+    refgenome = pysam.FastaFile(refpath)
+    bam = pysam.AlignmentFile(bampath)
+    for i, row in pd.read_csv(csv).iterrows():
+        if row.status == 'FP':
+            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome)
+        else:
+            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome)
 
-    encoded, refseq, altseq = encode_with_ref("3", 52584431, "T", "TCTC", bam, refgenome)
-    emit_tensor_aln(encoded)
-    print(f"Tensor shape: {encoded.shape}")
-    print(refseq)
-    print(altseq)
+        minseqlen = min(len(refseq), len(altseq))
+        refseq = refseq[0:minseqlen]
+        altseq = altseq[0:minseqlen]
+        reft = target_string_to_tensor(refseq)
+        altt = target_string_to_tensor(altseq)
+        tgt = torch.stack((reft, altt))
+        yield encoded, tgt, row.status
+
+
+def main():
+    # refgenome = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    # bam = pysam.AlignmentFile("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam")
+    # # reads = reads_spanning(bam, "2", 73613032, max_reads=10)
+    # encoded, refseq, altseq = encode_with_ref("1", 16475123, "C", "T", bam, refgenome)
+    # emit_tensor_aln(encoded)
+    # print(f"Tensor shape: {encoded.shape}")
+    # print(refseq)
+    # print(altseq)
+    for enc, tgt, status in load_from_csv("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam",
+                                          "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta",
+                                          "/Volumes/Share/genomics/onccn_15_car641/tp_fp_fn.csv"):
+        print(f"{status}, {enc.shape}, {tgt.shape}")
+
 
 
 
