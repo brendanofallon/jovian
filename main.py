@@ -1,316 +1,157 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from rich.logging import RichHandler
 from torch import optim
 import torch.nn.functional as F
 import math
 import copy
+import logging
 import pandas as pd
+from collections import defaultdict
 import pysam
 
-INDEX_TO_BASE = [
-    'A', 'C', 'G', 'T'
-]
-
-EMPTY_TENSOR = torch.zeros(6)
-
-class MockRead:
-
-    def __init__(self, bases, quals, start, end, cigartups):
-        assert len(bases) == len(quals)
-        self.query_sequence = bases
-        self.query_qualities = quals
-        self.reference_start = start
-        self.query_alignment_start = self.reference_start
-        self.reference_end = end
-        self.query_length = len(self.query_sequence)
-        self.cigartuples = cigartups
-        n_cig_bases = sum(a[1] for a in self.cigartuples)
-        assert n_cig_bases == len(bases), "Cigar bases count doesn't match actual number of bases"
-
-    def get_aligned_pairs(self):
-        refpos = self.reference_start
-        readpos = 0
-        result = []
-        for cigop, nbases in self.cigartuples:
-            ref_base_consumed = cigop in {0, 2, 4, 5, 7}
-            seq_base_consumed = cigop in {0, 1, 3, 4,5,7}
-            for i in range(nbases):
-                read_emit = readpos if seq_base_consumed else None
-                ref_emit = refpos if ref_base_consumed else None
-                result.append((read_emit, ref_emit))
-                if ref_base_consumed:
-                    refpos += 1
-                if seq_base_consumed:
-                    readpos += 1
-        return result
+from bam import target_string_to_tensor, encode_with_ref
+from model import VarTransformer
 
 
+logging.basicConfig(format='%(message)s', level=logging.INFO, handlers=[RichHandler()])
+logger = logging.getLogger(__name__)
 
-def base_index(base):
-    if base == 'A':
-        return 0
-    elif base == 'C':
-        return 1
-    elif base == 'G':
-        return 2
-    elif base == 'T':
-        return 3
-    raise ValueError("Expected [ACTG]")
+DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
-def update_from_base(base, tensor):
-    if base == 'A':
-        tensor[0] = 1
-    elif base == 'C':
-        tensor[1] = 1
-    elif base == 'G':
-        tensor[2] = 1
-    elif base == 'T':
-        tensor[3] = 1
-    elif base == 'N':
-        tensor[0:3] = 0.25
-    elif base == '-':
-        tensor[0:3] = 0.0
-    return tensor
+class ReadLoader:
+
+    def __init__(self, src, tgt):
+        self.src = src
+        self.tgt = tgt
+
+    def __len__(self):
+        return self.src.shape[0]
+
+    def iter_once(self, batch_size):
+        offset = 0
+        while offset < self.src.shape[0]:
+            yield self.src[offset:offset + batch_size, : :, :], self.tgt[offset:offset + batch_size, :, :]
+            offset += batch_size
 
 
-def encode_basecall(base, qual, cigop):
-    ebc = torch.zeros(6)
-    ebc = update_from_base(base, ebc)
-    ebc[4] = qual / 100 - 0.5
-    ebc[5] = cigop
-    return ebc
-
-
-def decode(t):
-    t = t.squeeze()
-    if torch.sum(t[0:4]) == 0.0:
-        return '-'
-    else:
-        return INDEX_TO_BASE[t[0:4].argmax()]
-
-
-def encode_cigop(readpos, refpos):
-    if readpos == refpos:
-        return 0
-    elif readpos is None:
-        return -1
-    elif refpos is None:
-        return 1
-    return 0
-
-
-def variantrec_to_tensor(rec):
-    seq = []
-    for readpos, refpos in rec.get_aligned_pairs():
-        if readpos is not None and refpos is not None:
-            seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
-                                       encode_cigop(readpos, refpos)))
-        elif readpos is None and refpos is not None:
-            seq.append(encode_basecall('-', 50, encode_cigop(readpos, refpos)))  # Deletion
-        elif readpos is not None and refpos is None:
-            seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
-                                       encode_cigop(readpos, refpos)))  # Insertion
-
-    return torch.vstack(seq)
-
-
-
-def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0) for b in bases])
-
-
-def target_string_to_tensor(bases):
-    """
-    The target version doesn't include the qual or cigop features
-    """
-    result = torch.tensor([base_index(b) for b in bases]).long()
-    return result
-
-
-def pad_zeros(pre, data, post):
-    if pre:
-        prepad = torch.zeros(pre, data.shape[-1])
-        data = torch.cat((prepad, data))
-    if post:
-        postpad = torch.zeros(post, data.shape[-1])
-        data = torch.cat((data, postpad))
-    return data
-
-
-def iterate_cigar(rec):
-    cigtups = rec.cigartuples
-    bases = rec.query_sequence
-    quals = rec.query_qualities
-    cig_index = 0
-    n_bases_cigop = cigtups[cig_index][1]
-    cigop = cigtups[cig_index][0]
-    is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
-    is_seq_consumed = cigop in {0, 1, 3, 4, 5, 7}  # 1 is insertion, 3 is 'ref skip'
-    base_index = 0
-    refstart = rec.query_alignment_start - (n_bases_cigop if cigop in {4, 5} else 0)
-    refpos = refstart
-    while True:
-        reftok = refpos if is_ref_consumed else "-"
-        if is_seq_consumed:
-            base = bases[base_index]
-            qual = quals[base_index]
-            base_index += 1
-        else:
-            base = "-"
-            qual = 0
-        if is_ref_consumed:
-            refpos += 1
-
-        # print(f"{base}\t{reftok}\t cig op: {cigop} num bases left in cig op: {n_bases_cigop}")
-        encoded_cig = 0
-        if is_ref_consumed and is_seq_consumed:
-            encoded_cig = 0
-        elif is_ref_consumed and not is_seq_consumed:
-            encoded_cig = -1
-        else:
-            encoded_cig = 1
-        yield encode_basecall(base, qual, encoded_cig), is_ref_consumed
-        n_bases_cigop -= 1
-        if n_bases_cigop <= 0:
-            cig_index += 1
-            if cig_index >= len(cigtups):
-                break
-            n_bases_cigop = cigtups[cig_index][1]
-            cigop = cigtups[cig_index][0]
-            is_ref_consumed = cigop in {0, 2, 4, 5, 7}
-            is_seq_consumed = cigop in {0, 1, 3, 4, 5, 7}
-
-
-def rec_tensor_it(read, minref):
-    for i in range(read.reference_start - minref):
-        yield EMPTY_TENSOR, True
-
-    try:
-        for t in iterate_cigar(read):
-            yield t
-    except StopIteration:
-        pass
-
-    while True:
-        yield EMPTY_TENSOR, True
-
-
-def emit_tensor_aln(t):
-    """
-    Expecting t [read, position, bases]
-    """
-    for read_idx in range(t.shape[1]):
-        for pos_idx in range(t.shape[0]):
-            b = decode(t[pos_idx, read_idx, :])
-            print(b, end='')
-        print()
-
-
-def encode_pileup(reads):
-    minref = min(r.reference_start for r in reads)
-    maxref = max(r.reference_start + r.query_length for r in reads)
-    its = [rec_tensor_it(r, minref) for r in reads]
-    refpos = minref
-    pos_tensors = [next(it) for it in its]
-    everything = []
-    total_positions = 0
-    alldone = False
-    while not alldone:
-        total_positions += 1
-        any_insertion = any(not r[1] for r in pos_tensors)  # r[1] is True if ref is consumed (which implies no insertion)
-        thispos = []
-        if any_insertion:
-            print(f"Found insertion(s) at refpos {refpos} in reads " + ",".join(str(i) for i,r in enumerate(pos_tensors) if not r[1]))
-        while any_insertion:
-            for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
-                if not pos_tensor[1]:
-                    thispos.append(pos_tensor[0])
-                    pos_tensors[i] = next(it)
-                else:
-                    thispos.append(EMPTY_TENSOR)
-
-            any_insertion = any(not r[1] for r in pos_tensors)
-            assert len(thispos) == len(pos_tensors), "Yikes, this pos somehow has more entries than pos_tensors"
-            all_stacked = torch.stack(thispos)
-            thispos = []
-            everything.append(all_stacked)
-
-        thispos = []
-        refpos += 1
-        for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
-            thispos.append(pos_tensor[0])
-            pos_tensors[i] = next(it)
-        all_stacked = torch.stack(thispos)
-        everything.append(all_stacked)
-        alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
-    return torch.stack(everything)
-
-
-def format_cigar(cig):
-    return cig.replace("M", "M ").replace("S", "S ").replace("I", "I ").replace("D", "D ")
-
-
-def reads_spanning(bam, chrom, pos, max_reads=1e9):
-    start = pos - 10
-    bamit = bam.fetch(chrom, start)
-    reads = []
-    read = next(bamit)
-    while read.reference_start < pos:
-        if read.reference_start < pos and read.reference_end > pos:
-            reads.append(read)
-        read = next(bamit)
-    mid = len(reads) // 2
-    return reads[max(0, mid-max_reads//2):min(len(reads), mid+max_reads//2)]
-
-
-def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads=100):
-    reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
-    minref = min(r.reference_start for r in reads)
-    maxref = max(r.reference_start + r.query_length for r in reads)
-    refseq = fasta.fetch(chrom, minref-1, maxref-1) # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
-    assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
-    altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
-    reads_encoded = encode_pileup(reads)
-    return reads_encoded, refseq, altseq
-
-
-def load_from_csv(bampath, refpath, csv):
+def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
     for i, row in pd.read_csv(csv).iterrows():
         if row.status == 'FP':
-            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome)
+            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
         else:
-            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome)
+            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
 
         minseqlen = min(len(refseq), len(altseq))
-        refseq = refseq[0:minseqlen]
-        altseq = altseq[0:minseqlen]
-        reft = target_string_to_tensor(refseq)
-        altt = target_string_to_tensor(altseq)
+        reft = target_string_to_tensor(refseq[0:minseqlen])
+        altt = target_string_to_tensor(altseq[0:minseqlen])
         tgt = torch.stack((reft, altt))
         yield encoded, tgt, row.status
 
 
+def trim_pileuptensor(src, tgt, width):
+    if src.shape[0] >= width:
+        return src[0:width, :, :], tgt[:, 0:width]
+    elif src.shape[0] < width:
+        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
+        t = torch.zeros(tgt.shape[0], width - tgt.shape[1])
+        return torch.cat((src, z)), torch.cat((tgt, t))
+
+
+def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
+    allsrc = []
+    alltgt = []
+    count = 0
+    status_counter = defaultdict(int)
+    for enc, tgt, status in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln):
+        status_counter[status] += 1
+        src, tgt = trim_pileuptensor(enc, tgt, 150)
+        allsrc.append(src)
+        alltgt.append(tgt)
+        count += 1
+        if count % 100 == 0:
+            logger.info(f"Loaded {count} tensors from {csv}")
+        if count == max_to_load:
+            logger.info(f"Stopping tensor load after {max_to_load}")
+            break
+    logger.info(f"Loaded {count} tensors from {csv}")
+    return ReadLoader(torch.stack(allsrc), torch.stack(alltgt))
+
+
+
+def sort_by_ref(seq, reads):
+    """
+    Sort read tensors by how closely they match the sequence seq.
+    :param seq:
+    :param reads: Tensor of encoded reads, with dimension [batch, pos, read, feature]
+    :return: New tensor containing the same read tensors, but sorted
+    """
+    results = []
+    for batch in range(reads.shape[0]):
+        w = reads[batch, :, :, 0:4].sum(dim=-1)
+        t = reads[batch, :, :, 0:4].argmax(dim=-1)
+        matchsum = (t == (seq[batch, 0, :].repeat(reads.shape[2], 1).transpose(0,1)*w).long()).sum(dim=0)
+        results.append(reads[batch, :, torch.argsort(matchsum), :])
+    return torch.stack(results)
+
+
+def train_epoch(model, optimizer, criterion, loader, batch_size):
+    epoch_loss_sum = 0
+    for unsorted_src, tgt in loader.iter_once(batch_size):
+        src = sort_by_ref(tgt, unsorted_src)
+        optimizer.zero_grad()
+
+        tgt_seq1 = tgt[:, 0, :]
+        tgt_seq2 = tgt[:, 1, :]
+
+        seq1preds, seq2preds = model(src.flatten(start_dim=2))
+
+        loss = criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
+        loss += 2 * criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
+
+        with torch.no_grad():
+            matches1 = (torch.argmax(seq1preds.flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq1.flatten()).float().mean()
+            matches2 = (torch.argmax(seq2preds.flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq2.flatten()).float().mean()
+
+        loss.backward(retain_graph=True)
+        optimizer.step()
+        epoch_loss_sum += loss.detach().item()
+
+    return epoch_loss_sum, matches1.item(), matches2.item()
+
+
+def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning_rate=0.001, statedict=None):
+    in_dim = max_read_depth * feats_per_read
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    if statedict is not None:
+        logger.info(f"Initializing model with state dict {statedict}")
+        model.load_state_dict(torch.load(statedict))
+    model.train()
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
+    batch_size = 15
+    for epoch in range(epochs):
+        loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, dataloader, batch_size=batch_size)
+        logger.info(f"Epoch {epoch} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f}")
+        scheduler.step()
+
+
 def main():
-    # refgenome = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    # bam = pysam.AlignmentFile("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam")
-    # # reads = reads_spanning(bam, "2", 73613032, max_reads=10)
-    # encoded, refseq, altseq = encode_with_ref("1", 16475123, "C", "T", bam, refgenome)
-    # emit_tensor_aln(encoded)
-    # print(f"Tensor shape: {encoded.shape}")
-    # print(refseq)
-    # print(altseq)
-    for enc, tgt, status in load_from_csv("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam",
-                                          "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta",
-                                          "/Volumes/Share/genomics/onccn_15_car641/tp_fp_fn.csv"):
-        print(f"{status}, {enc.shape}, {tgt.shape}")
-
-
-
-
+    logger.info(f"Found torch device: {DEVICE}")
+    loader = make_loader("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam",
+                         "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta",
+                         "/Volumes/Share/genomics/onccn_15_car641/tp_fp_fn.csv",
+                         max_to_load=100,
+                         max_reads_per_aln=100)
+    train(5, loader, max_read_depth=100)
 
 
 if __name__ == "__main__":
