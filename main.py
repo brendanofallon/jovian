@@ -52,12 +52,18 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
 
 
 def trim_pileuptensor(src, tgt, width):
-    if src.shape[0] >= width:
-        return src[0:width, :, :], tgt[:, 0:width]
-    elif src.shape[0] < width:
+    if src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
+        src = torch.cat((src, z))
+    else:
+        src = src[0:width, :, :]
+    if tgt.shape[1] < width:
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1])
-        return torch.cat((src, z)), torch.cat((tgt, t))
+        tgt = torch.cat((tgt, t), dim=1)
+    else:
+        tgt = tgt[:, 0:width]
+
+    return src, tgt
 
 
 def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
