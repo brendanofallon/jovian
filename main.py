@@ -1,21 +1,19 @@
-import numpy as np
+
 import torch
 import torch.nn as nn
-from rich.logging import RichHandler
-from torch import optim
-import torch.nn.functional as F
-import math
-import copy
 import logging
 import pandas as pd
 from collections import defaultdict
 import pysam
+from datetime import datetime
+
+import yaml
 
 from bam import target_string_to_tensor, encode_with_ref
 from model import VarTransformer
 
 
-logging.basicConfig(format='%(message)s', level=logging.INFO, handlers=[RichHandler()])
+logging.basicConfig(format='%(message)s', level=logging.INFO) # handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
@@ -66,10 +64,13 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
     allsrc = []
     alltgt = []
     count = 0
+    seq_len = 150
     status_counter = defaultdict(int)
     for enc, tgt, status in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln):
         status_counter[status] += 1
-        src, tgt = trim_pileuptensor(enc, tgt, 150)
+        src, tgt = trim_pileuptensor(enc, tgt, seq_len)
+        assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
+        assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
         allsrc.append(src)
         alltgt.append(tgt)
         count += 1
@@ -100,6 +101,15 @@ def sort_by_ref(seq, reads):
 
 
 def train_epoch(model, optimizer, criterion, loader, batch_size):
+    """
+    Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
+    :param model: Model to train
+    :param optimizer: Optimizer to update params
+    :param criterion: Loss function
+    :param loader: Provides training data
+    :param batch_size:
+    :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
+    """
     epoch_loss_sum = 0
     for unsorted_src, tgt in loader.iter_once(batch_size):
         src = sort_by_ref(tgt, unsorted_src)
@@ -126,7 +136,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, matches1.item(), matches2.item()
 
 
-def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning_rate=0.001, statedict=None):
+def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = max_read_depth * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     if statedict is not None:
@@ -139,19 +149,33 @@ def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
     batch_size = 15
     for epoch in range(epochs):
+        starttime = datetime.now()
         loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, dataloader, batch_size=batch_size)
-        logger.info(f"Epoch {epoch} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f}")
+        elapsed = datetime.now() - starttime
+        logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
         scheduler.step()
 
+    logger.info(f"Training completed after {epoch} epochs")
+    if model_dest is not None:
+        logger.info(f"Saving model state dict to {model_dest}")
+        torch.save(model.to('cpu').state_dict(), model_dest)
 
-def main():
+def load_train_conf(confyaml):
+    conf = yaml.safe_load(open(confyaml).read())
+    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
+    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    return conf
+
+
+def main(confyaml="train.yaml"):
     logger.info(f"Found torch device: {DEVICE}")
-    loader = make_loader("/Volumes/Share/genomics/onccn_15_car641/bam/roi.bam",
-                         "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta",
-                         "/Volumes/Share/genomics/onccn_15_car641/tp_fp_fn.csv",
-                         max_to_load=100,
+    conf = load_train_conf(confyaml)
+    loader = make_loader(conf['data'][0]['bam'],
+                         conf['reference'],
+                         conf['data'][0]['labels'],
+                         max_to_load=1000,
                          max_reads_per_aln=100)
-    train(5, loader, max_read_depth=100)
+    train(50, loader, max_read_depth=100, model_dest="saved.model")
 
 
 if __name__ == "__main__":
