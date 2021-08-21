@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 
 import torch
 import torch.nn as nn
@@ -57,7 +58,7 @@ def trim_pileuptensor(src, tgt, width):
     elif src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1])
-        return torch.cat((src, z)), torch.cat((tgt, t))
+        return torch.cat((src, z)), torch.cat((tgt, t), dim=1)
 
 
 def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
