@@ -86,15 +86,19 @@ def mutate_seq(seq, error_rate):
     :param error_rate: Fraction of bases to alter
     :return: New, altered sequence
     """
-    output = []
-    for b in seq:
-        if np.random.rand() < error_rate:
+    if error_rate == 0:
+        return seq
+    n_muts = np.random.poisson(error_rate * seq)
+    if n_muts == 0:
+        return seq
+    output = list(seq)
+    for i in range(n_muts):
+        which = np.random.randint(0, len(seq))
+        c = random.choice('ACTG')
+        while c == output[which]:
             c = random.choice('ACTG')
-            while c == b:
-                c = random.choice('ACTG')
-        else:
-            c = b
-        output.append(c)
+        output[which] = c
+
     return "".join(output)
 
 
