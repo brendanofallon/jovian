@@ -88,7 +88,7 @@ def mutate_seq(seq, error_rate):
     """
     if error_rate == 0:
         return seq
-    n_muts = np.random.poisson(error_rate * seq)
+    n_muts = np.random.poisson(error_rate * len(seq))
     if n_muts == 0:
         return seq
     output = list(seq)
