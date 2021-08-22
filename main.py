@@ -184,6 +184,7 @@ def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning
 
 
 def load_train_conf(confyaml):
+    logger.info(f"Loading configuration from {confyaml}")
     conf = yaml.safe_load(open(confyaml).read())
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
     assert 'data' in conf, "Expected 'data' entry in training configuration"
