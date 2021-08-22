@@ -202,7 +202,7 @@ def make_het_del_batch(batchsize, seqlen, readsperbatch, readlength, error_rate,
     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
 
 
-def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_prob=clip_prob):
+def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_prob):
     snv_w = 9 # Bigger values here equal less variance among sizes
     del_w = 8
     ins_w = 8
