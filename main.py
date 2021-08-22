@@ -11,6 +11,7 @@ import yaml
 
 from bam import target_string_to_tensor, encode_with_ref
 from model import VarTransformer
+import sim
 
 
 logging.basicConfig(format='%(message)s', level=logging.INFO) # handlers=[RichHandler()])
@@ -33,6 +34,18 @@ class ReadLoader:
         while offset < self.src.shape[0]:
             yield self.src[offset:offset + batch_size, : :, :], self.tgt[offset:offset + batch_size, :, :]
             offset += batch_size
+
+
+class SimLoader:
+
+    def __init__(self):
+        self.batches_in_epoch = 10
+
+    def iter_once(self, batch_size):
+        for i in range(self.batches_in_epoch):
+            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02)
+            yield src.to(DEVICE), tgt.to(DEVICE)
+
 
 
 def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
@@ -166,6 +179,7 @@ def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning
         logger.info(f"Saving model state dict to {model_dest}")
         torch.save(model.to('cpu').state_dict(), model_dest)
 
+
 def load_train_conf(confyaml):
     conf = yaml.safe_load(open(confyaml).read())
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
@@ -176,11 +190,12 @@ def load_train_conf(confyaml):
 def main(confyaml="train.yaml"):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(confyaml)
-    loader = make_loader(conf['data'][0]['bam'],
-                         conf['reference'],
-                         conf['data'][0]['labels'],
-                         max_to_load=1000,
-                         max_reads_per_aln=100)
+    # loader = make_loader(conf['data'][0]['bam'],
+    #                      conf['reference'],
+    #                      conf['data'][0]['labels'],
+    #                      max_to_load=1000,
+    #                      max_reads_per_aln=100)
+    loader = SimLoader()
     train(50, loader, max_read_depth=100, model_dest="saved.model")
 
 
