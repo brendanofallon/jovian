@@ -7,7 +7,7 @@ INDEX_TO_BASE = [
 ]
 
 
-EMPTY_TENSOR = torch.zeros(6)
+EMPTY_TENSOR = torch.zeros(7)
 
 class MockRead:
 
@@ -70,11 +70,12 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, cigop):
-    ebc = torch.zeros(6)
+def encode_basecall(base, qual, cigop, clipped):
+    ebc = torch.zeros(7)
     ebc = update_from_base(base, ebc)
     ebc[4] = qual / 100 - 0.5
     ebc[5] = cigop
+    ebc[7] = 1 if clipped else 0
     return ebc
 
 
@@ -96,24 +97,24 @@ def encode_cigop(readpos, refpos):
     return 0
 
 
-def variantrec_to_tensor(rec):
-    seq = []
-    for readpos, refpos in rec.get_aligned_pairs():
-        if readpos is not None and refpos is not None:
-            seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
-                                       encode_cigop(readpos, refpos)))
-        elif readpos is None and refpos is not None:
-            seq.append(encode_basecall('-', 50, encode_cigop(readpos, refpos)))  # Deletion
-        elif readpos is not None and refpos is None:
-            seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
-                                       encode_cigop(readpos, refpos)))  # Insertion
-
-    return torch.vstack(seq)
+# def variantrec_to_tensor(rec):
+#     seq = []
+#     for readpos, refpos in rec.get_aligned_pairs():
+#         if readpos is not None and refpos is not None:
+#             seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
+#                                        encode_cigop(readpos, refpos)))
+#         elif readpos is None and refpos is not None:
+#             seq.append(encode_basecall('-', 50, encode_cigop(readpos, refpos)))  # Deletion
+#         elif readpos is not None and refpos is None:
+#             seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
+#                                        encode_cigop(readpos, refpos)))  # Insertion
+#
+#     return torch.vstack(seq)
 
 
 
 def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0) for b in bases])
+    return torch.vstack([encode_basecall(b, 50, 0, 0) for b in bases])
 
 
 def target_string_to_tensor(bases):
@@ -143,6 +144,7 @@ def iterate_cigar(rec):
     cigop = cigtups[cig_index][0]
     is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
     is_seq_consumed = cigop in {0, 1, 3, 4, 5, 7}  # 1 is insertion, 3 is 'ref skip'
+    is_clipped = cigop in {4, 5}
     base_index = 0
     refstart = rec.query_alignment_start - (n_bases_cigop if cigop in {4, 5} else 0)
     refpos = refstart
@@ -166,7 +168,7 @@ def iterate_cigar(rec):
             encoded_cig = -1
         else:
             encoded_cig = 1
-        yield encode_basecall(base, qual, encoded_cig), is_ref_consumed
+        yield encode_basecall(base, qual, encoded_cig, is_clipped), is_ref_consumed
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -176,6 +178,7 @@ def iterate_cigar(rec):
             cigop = cigtups[cig_index][0]
             is_ref_consumed = cigop in {0, 2, 4, 5, 7}
             is_seq_consumed = cigop in {0, 1, 3, 4, 5, 7}
+            is_clipped = cigop in {4, 5}
 
 
 def rec_tensor_it(read, minref):

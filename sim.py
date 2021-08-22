@@ -54,8 +54,22 @@ def pad_zeros(pre, data, post):
     return data
 
 
-def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0) for b in bases])
+def string_to_tensor(bases, clip_frac=0):
+    if np.random.rand() < clip_frac:
+        num_bases_clipped = np.random.randint(3, 50)
+        if np.random.rand() < 0.5:
+            # Clip left
+            clipped_bases = [encode_basecall(b, 50, 0, 1) for b in random_bases(num_bases_clipped)]
+            normal_bases = [encode_basecall(b, 50, 0, 0) for b in bases[num_bases_clipped:]]
+            return torch.vstack(clipped_bases + normal_bases)
+        else:
+            # Clip right
+            normal_bases = [encode_basecall(b, 50, 0, 0) for b in bases[0:len(bases) - num_bases_clipped]]
+            clipped_bases = [encode_basecall(b, 50, 0, 1) for b in random_bases(num_bases_clipped)]
+            return torch.vstack(normal_bases + clipped_bases)
+    else:
+        # No Clipping
+        return torch.vstack([encode_basecall(b, 50, 0, 0) for b in bases])
 
 
 def mutate_seq(seq, error_rate):
@@ -77,20 +91,24 @@ def mutate_seq(seq, error_rate):
     return "".join(output)
 
 
-def tensors_from_seq(refseq, numreads, readlen, error_rate=0.0, align_to_ref=True):
+def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, soft_clip_pct=0, align_to_ref=True):
+    """
+    Given a sequence of bases, seq, generate "reads" (encoded read tensors) that align to the sequence
+    :param seq: Base sequence, reads will match subsequences of this
+    :param numreads: Number of read tensors to generate
+    :param readlen: Length of each read
+    :param error_rate: Per-base error rate
+    :return:
+    """
     seqs = []
     for i in range(numreads):
-        startpos = random.randint(0, len(refseq) - readlen)
-        if align_to_ref:
-            seqs.append(
-                pad_zeros(startpos,
-                          string_to_tensor(mutate_seq(refseq[startpos:startpos + readlen], error_rate)),
-                          len(refseq) - startpos - readlen)
-            )
-        else:
-            seqs.append(
-                string_to_tensor(mutate_seq(refseq[startpos:startpos + readlen], error_rate)),
-            )
+        startpos = random.randint(0, len(seq) - readlen)
+        seqs.append(
+            pad_zeros(startpos,
+                      string_to_tensor(mutate_seq(seq[startpos:startpos + readlen], error_rate)),
+                      len(seq) - startpos - readlen)
+        )
+
     return torch.stack(seqs)
 
 
