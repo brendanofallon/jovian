@@ -44,7 +44,7 @@ class SimLoader:
 
     def iter_once(self, batch_size):
         for i in range(self.batches_in_epoch):
-            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02)
+            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02, clip_prob=0.05)
             yield src.to(DEVICE), tgt.to(DEVICE)
 
 
@@ -200,7 +200,7 @@ def main(confyaml="train.yaml"):
     #                      max_to_load=1000,
     #                      max_reads_per_aln=100)
     loader = SimLoader()
-    train(50, loader, max_read_depth=100, statedict="saved.model", model_dest="saved.model")
+    train(50, loader, max_read_depth=100, feats_per_read=7, statedict=None, model_dest="saved.model")
 
 
 if __name__ == "__main__":

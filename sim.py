@@ -193,7 +193,7 @@ def make_het_del_batch(batchsize, seqlen, readsperbatch, readlength, error_rate,
     tgt = []
     for i in range(batchsize):
         seq = [b for b in random_bases(seqlen)]
-        reads, altseq = make_het_del(seq, readlength, readsperbatch, vaf=0.5, clip_prob=clip_prob)
+        reads, altseq = make_het_del(seq, readlength, readsperbatch, vaf=0.5, error_rate=error_rate, clip_prob=clip_prob)
         src.append(reads)
         alt_t = target_string_to_tensor(altseq)
         seq_t = target_string_to_tensor(seq)

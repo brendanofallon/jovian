@@ -75,7 +75,7 @@ def encode_basecall(base, qual, cigop, clipped):
     ebc = update_from_base(base, ebc)
     ebc[4] = qual / 100 - 0.5
     ebc[5] = cigop
-    ebc[7] = 1 if clipped else 0
+    ebc[6] = 1 if clipped else 0
     return ebc
 
 
