@@ -146,10 +146,9 @@ def iterate_cigar(rec):
     is_seq_consumed = cigop in {0, 1, 3, 4, 5, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
     base_index = 0
-    refstart = rec.query_alignment_start - (n_bases_cigop if cigop in {4, 5} else 0)
+    refstart = alnstart(rec)
     refpos = refstart
     while True:
-        reftok = refpos if is_ref_consumed else "-"
         if is_seq_consumed:
             base = bases[base_index]
             qual = quals[base_index]
@@ -182,7 +181,7 @@ def iterate_cigar(rec):
 
 
 def rec_tensor_it(read, minref):
-    for i in range(read.reference_start - minref):
+    for i in range(alnstart(read) - minref):
         yield EMPTY_TENSOR, True
 
     try:
@@ -205,10 +204,25 @@ def emit_tensor_aln(t):
             print(b, end='')
         print()
 
+def alnstart(read):
+    """
+    If the first cigar element is hard or soft clip, return read.reference_start - size of first cigar element,
+    other return read.reference_start
+    """
+    if read.cigartuples[0][0] in {4, 5}:
+        return read.reference_start - read.cigartuples[0][1]
+    else:
+        return read.reference_start
 
 def encode_pileup(reads):
-    minref = min(r.reference_start for r in reads)
-    maxref = max(r.reference_start + r.query_length for r in reads)
+    """
+    Convert a list of reads (pysam VariantRecords) into a single tensor
+
+    :param reads: List of pysam VariantRecords
+    :return: Tensor with shape [position, read, features]
+    """
+    minref = min(alnstart(r) for r in reads)
+    maxref = max(alnstart(r) + r.query_length for r in reads)
     its = [rec_tensor_it(r, minref) for r in reads]
     refpos = minref
     pos_tensors = [next(it) for it in its]
