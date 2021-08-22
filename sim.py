@@ -38,11 +38,12 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, cigop):
-    ebc = torch.zeros(6)
+def encode_basecall(base, qual, cigop, clipped):
+    ebc = torch.zeros(7)
     ebc = update_from_base(base, ebc)
     ebc[4] = qual / 100 - 0.5
     ebc[5] = cigop
+    ebc[6] = 1 if clipped else 0
     return ebc
 
 
@@ -97,12 +98,13 @@ def mutate_seq(seq, error_rate):
     return "".join(output)
 
 
-def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, soft_clip_pct=0, align_to_ref=True):
+def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, clip_prob=0, align_to_ref=True):
     """
     Given a sequence of bases, seq, generate "reads" (encoded read tensors) that align to the sequence
     :param seq: Base sequence, reads will match subsequences of this
     :param numreads: Number of read tensors to generate
     :param readlen: Length of each read
+    :param clipprob: Probability that this read will contain some clipped bases
     :param error_rate: Per-base error rate
     :return:
     """
@@ -111,40 +113,40 @@ def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, soft_clip_pct=0, al
         startpos = random.randint(0, len(seq) - readlen)
         seqs.append(
             pad_zeros(startpos,
-                      string_to_tensor(mutate_seq(seq[startpos:startpos + readlen], error_rate)),
+                      string_to_tensor(mutate_seq(seq[startpos:startpos + readlen], error_rate), clip_prob),
                       len(seq) - startpos - readlen)
         )
 
     return torch.stack(seqs)
 
 
-def stack_refalt_tensrs(refseq, altseq, readlength, totreads, vaf=0.5, error_rate=0):
+def stack_refalt_tensrs(refseq, altseq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     assert len(refseq) == len(altseq), f"Sequences must be the same length (got {len(refseq)} and {len(altseq)})"
     num_altreads = stats.binom(totreads - 2, vaf).rvs(1)[0] + 1
-    reftensors = tensors_from_seq(refseq, totreads-num_altreads, readlength, error_rate)
-    alttensors = tensors_from_seq(altseq, num_altreads, readlength, error_rate)
+    reftensors = tensors_from_seq(refseq, totreads-num_altreads, readlength, error_rate, clip_prob)
+    alttensors = tensors_from_seq(altseq, num_altreads, readlength, error_rate, clip_prob)
     combined = torch.cat([reftensors, alttensors])
     idx = np.random.permutation(totreads)
     combined[range(totreads)] = combined[idx]
     return combined, altseq
 
 
-def make_het_snv(seq, readlength, totreads, vaf, error_rate):
+def make_het_snv(seq, readlength, totreads, vaf, error_rate, clip_prob):
     snvpos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq), len(seq) // 2 + 8)))
     altseq = list(seq)
     altseq[snvpos] = random.choice('ACTG')
     while altseq[snvpos] == seq[snvpos]:
         altseq[snvpos] = random.choice('ACTG')
     altseq = "".join(altseq)
-    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate)
+    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
 
 
-def make_het_snv_batch(batchsize, seqlen, readsperbatch, readlength, error_rate):
+def make_het_snv_batch(batchsize, seqlen, readsperbatch, readlength, error_rate, clip_prob):
     src = []
     tgt = []
     for i in range(batchsize):
         seq = random_bases(seqlen)
-        reads, altseq = make_het_snv(seq, readlength, readsperbatch, 0.5, error_rate)
+        reads, altseq = make_het_snv(seq, readlength, readsperbatch, 0.5, error_rate, clip_prob)
         src.append(reads)
 
         alt_t = target_string_to_tensor(altseq)
@@ -154,30 +156,30 @@ def make_het_snv_batch(batchsize, seqlen, readsperbatch, readlength, error_rate)
     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
 
 
-def make_het_del(seq, readlength, totreads, vaf=0.5, error_rate=0):
+def make_het_del(seq, readlength, totreads, vaf, error_rate, clip_prob):
     del_len = random.choice(range(10))
     delpos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - del_len, len(seq) // 2 + 8)))
     ls = list(seq)
     for i in range(del_len):
         del ls[delpos]
     altseq = "".join(ls + ["A"] * del_len)
-    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate)
+    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
 
 
-def make_het_ins(seq, readlength, totreads, vaf=0.5, error_rate=0):
+def make_het_ins(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     ins_len = random.choice(range(10)) + 1
     inspos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - ins_len, len(seq) // 2 + 8)))
     altseq = "".join(seq[0:inspos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(seq[inspos:-ins_len])
     altseq = altseq[0:len(seq)]
-    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate)
+    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
-def make_het_ins_batch(batchsize, seqlen, readsperbatch, readlength, error_rate):
+def make_het_ins_batch(batchsize, seqlen, readsperbatch, readlength, error_rate, clip_prob):
     src = []
     tgt = []
     for i in range(batchsize):
         seq = [b for b in random_bases(seqlen)]
-        reads, altseq = make_het_ins(seq, readlength, readsperbatch, vaf=0.5, error_rate=error_rate)
+        reads, altseq = make_het_ins(seq, readlength, readsperbatch, vaf=0.5, error_rate=error_rate, clip_prob=clip_prob)
         src.append(reads)
         alt_t = target_string_to_tensor(altseq)
         seq_t = target_string_to_tensor(seq)
@@ -186,12 +188,12 @@ def make_het_ins_batch(batchsize, seqlen, readsperbatch, readlength, error_rate)
     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
 
 
-def make_het_del_batch(batchsize, seqlen, readsperbatch, readlength, error_rate):
+def make_het_del_batch(batchsize, seqlen, readsperbatch, readlength, error_rate, clip_prob):
     src = []
     tgt = []
     for i in range(batchsize):
         seq = [b for b in random_bases(seqlen)]
-        reads, altseq = make_het_del(seq, readlength, readsperbatch, vaf=0.5)
+        reads, altseq = make_het_del(seq, readlength, readsperbatch, vaf=0.5, clip_prob=clip_prob)
         src.append(reads)
         alt_t = target_string_to_tensor(altseq)
         seq_t = target_string_to_tensor(seq)
@@ -200,14 +202,14 @@ def make_het_del_batch(batchsize, seqlen, readsperbatch, readlength, error_rate)
     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
 
 
-def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate):
+def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_prob=clip_prob):
     snv_w = 9 # Bigger values here equal less variance among sizes
     del_w = 8
     ins_w = 8
     mix = np.random.dirichlet((snv_w, del_w, ins_w)) * size
-    snv_src, snv_tgt = make_het_snv_batch(int(mix[0]), seqlen, readsperbatch, readlength, error_rate)
-    del_src, del_tgt = make_het_del_batch(int(mix[1]), seqlen, readsperbatch, readlength, error_rate)
-    ins_src, ins_tgt = make_het_ins_batch(int(mix[1]), seqlen, readsperbatch, readlength, error_rate)
+    snv_src, snv_tgt = make_het_snv_batch(int(mix[0]), seqlen, readsperbatch, readlength, error_rate, clip_prob)
+    del_src, del_tgt = make_het_del_batch(int(mix[1]), seqlen, readsperbatch, readlength, error_rate, clip_prob)
+    ins_src, ins_tgt = make_het_ins_batch(int(mix[1]), seqlen, readsperbatch, readlength, error_rate, clip_prob)
     return torch.cat((snv_src, del_src, ins_src)), torch.cat((snv_tgt, del_tgt, ins_tgt))
 
 
@@ -217,3 +219,4 @@ def target_string_to_tensor(bases):
     """
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
+
