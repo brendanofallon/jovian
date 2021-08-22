@@ -12,6 +12,7 @@ import yaml
 
 from bam import target_string_to_tensor, encode_with_ref
 from model import VarTransformer
+import sim
 
 
 logging.basicConfig(format='%(message)s', level=logging.INFO) # handlers=[RichHandler()])
@@ -34,6 +35,18 @@ class ReadLoader:
         while offset < self.src.shape[0]:
             yield self.src[offset:offset + batch_size, : :, :], self.tgt[offset:offset + batch_size, :, :]
             offset += batch_size
+
+
+class SimLoader:
+
+    def __init__(self):
+        self.batches_in_epoch = 10
+
+    def iter_once(self, batch_size):
+        for i in range(self.batches_in_epoch):
+            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02)
+            yield src.to(DEVICE), tgt.to(DEVICE)
+
 
 
 def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
@@ -155,17 +168,20 @@ def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
     batch_size = 15
-    for epoch in range(epochs):
-        starttime = datetime.now()
-        loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, dataloader, batch_size=batch_size)
-        elapsed = datetime.now() - starttime
-        logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
-        scheduler.step()
+    try:
+        for epoch in range(epochs):
+            starttime = datetime.now()
+            loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, dataloader, batch_size=batch_size)
+            elapsed = datetime.now() - starttime
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
+            scheduler.step()
 
-    logger.info(f"Training completed after {epoch} epochs")
-    if model_dest is not None:
-        logger.info(f"Saving model state dict to {model_dest}")
-        torch.save(model.to('cpu').state_dict(), model_dest)
+        logger.info(f"Training completed after {epoch} epochs")
+    except KeyboardInterrupt:
+        if model_dest is not None:
+            logger.info(f"Saving model state dict to {model_dest}")
+            torch.save(model.to('cpu').state_dict(), model_dest)
+
 
 def load_train_conf(confyaml):
     conf = yaml.safe_load(open(confyaml).read())
@@ -177,12 +193,13 @@ def load_train_conf(confyaml):
 def main(confyaml="train.yaml"):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(confyaml)
-    loader = make_loader(conf['data'][0]['bam'],
-                         conf['reference'],
-                         conf['data'][0]['labels'],
-                         max_to_load=1000,
-                         max_reads_per_aln=100)
-    train(500, loader, max_read_depth=100, model_dest="saved.model")
+    #loader = make_loader(conf['data'][0]['bam'],
+    #                      conf['reference'],
+    #                      conf['data'][0]['labels'],
+    #                      max_to_load=1000,
+    #                      max_reads_per_aln=100)
+    loader = SimLoader()
+    train(50, loader, max_read_depth=100, statedict="saved.model", model_dest="saved.model")
 
 
 if __name__ == "__main__":
