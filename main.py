@@ -7,7 +7,7 @@ import pandas as pd
 from collections import defaultdict
 import pysam
 from datetime import datetime
-
+import multiprocessing as mp
 import yaml
 
 from bam import target_string_to_tensor, encode_with_ref
@@ -16,7 +16,7 @@ import sim
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
-                    datefmt='%m-%d %H:%M',
+                    datefmt='%m-%d %H:%M:%S',
                     level=logging.INFO) # handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,22 @@ class ReadLoader:
     def iter_once(self, batch_size):
         offset = 0
         while offset < self.src.shape[0]:
-            yield self.src[offset:offset + batch_size, :, :, :], self.tgt[offset:offset + batch_size, :, :]
+            yield self.src[offset:offset + batch_size, :, :, :].to(DEVICE), self.tgt[offset:offset + batch_size, :, :].to(DEVICE)
             offset += batch_size
+
+
+class MultiLoader:
+    """
+    Combines multiple loaders into a single loader
+    """
+
+    def __init__(self, loaders):
+        self.loaders = loaders
+
+    def iter_once(self, batch_size):
+        for loader in self.loaders:
+            for src, tgt in loader.iter_once(batch_size):
+                yield src, tgt
 
 
 class SimLoader:
@@ -89,6 +103,7 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
     count = 0
     seq_len = 150
     status_counter = defaultdict(int)
+    logger.info(f"Creating new data loader from {bampath}")
     for enc, tgt, status in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln):
         status_counter[status] += 1
         src, tgt = trim_pileuptensor(enc, tgt, seq_len)
@@ -103,7 +118,25 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
             logger.info(f"Stopping tensor load after {max_to_load}")
             break
     logger.info(f"Loaded {count} tensors from {csv}")
-    return ReadLoader(torch.stack(allsrc).to(DEVICE), torch.stack(alltgt).long().to(DEVICE))
+    return ReadLoader(torch.stack(allsrc), torch.stack(alltgt).long())
+
+
+def make_multiloader(inputs, refpath, threads, max_reads_per_aln):
+    """
+    Create multiple ReadLoaders in parallel for each element in Inputs
+    :param inputs: List of (BAM path, labels csv) tuples
+    :param threads: Number of threads to use
+    :param max_reads_per_aln: Max number of reads for each pileup
+    :return: List of loaders
+    """
+    results = []
+    logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes")
+    with mp.Pool(processes=threads) as pool:
+        for bam, labels_csv in inputs:
+            result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_reads_per_aln))
+            results.append(result)
+        pool.close()
+        return MultiLoader([l.get(timeout=2*60*60) for l in results])
 
 
 
@@ -197,13 +230,13 @@ def load_train_conf(confyaml):
 def main(confyaml="train.yaml"):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(confyaml)
-    loader = make_loader(conf['data'][0]['bam'],
-                          conf['reference'],
-                          conf['data'][0]['labels'],
-                          max_to_load=1000,
-                          max_reads_per_aln=100)
+    
+    train_sets = [(c['bam'], c['labels']) for c in conf['data']]
+    loader = make_multiloader(train_sets, conf['reference'], 4, 100)
+    
     #loader = SimLoader()
-    train(150, loader, max_read_depth=100, feats_per_read=7, statedict="saved.model", model_dest="saved.model")
+    train(50, loader, max_read_depth=100, feats_per_read=7, statedict=None, model_dest="saved.model")
+
 
 
 if __name__ == "__main__":
