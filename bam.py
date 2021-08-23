@@ -75,7 +75,7 @@ def encode_basecall(base, qual, cigop, clipped):
     ebc = update_from_base(base, ebc)
     ebc[4] = qual / 100 - 0.5
     ebc[5] = cigop
-    ebc[7] = 1 if clipped else 0
+    ebc[6] = 1 if clipped else 0
     return ebc
 
 
@@ -285,22 +285,18 @@ def reads_spanning(bam, chrom, pos, max_reads):
 
 def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     """
-    Pull reads from the bam file that overlap the given position and convert them to a tensor,
-    then build 'ref' and 'alt' sequences matching the pulled region and return them
-    :param chrom:
-    :param pos:
-    :param ref:
-    :param alt:
-    :param bam:
-    :param fasta:
-    :param maxreads: Max reads to pull for a given position
-    :return: Tuple of encoded reads tensor, reference sequence, alt sequence
+    Fetch reads from the given BAM file, encode them into a single tensor, and also
+    fetch & create the corresponding ref sequence and alternate sequence based on the given chrom/pos/ref/alt coords
+    :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
     reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
-    minref = min(r.reference_start for r in reads)
-    maxref = max(r.reference_start + r.query_length for r in reads)
-    refseq = fasta.fetch(chrom, minref-1, maxref-1) # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
+    reads_encoded = encode_pileup(reads)
+    minref = min(alnstart(r) for r in reads)
+    pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
+    maxref = minref + reads_encoded.shape[0]
+    refseq = fasta.fetch(chrom, minref, maxref) 
     assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
     altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
-    reads_encoded = encode_pileup(reads)
+    assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
     return reads_encoded, refseq, altseq
+

@@ -145,19 +145,6 @@ def make_het_snv(seq, readlength, totreads, vaf, error_rate, clip_prob):
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
 
 
-# def make_het_snv_batch(batchsize, seqlen, readsperbatch, readlength, error_rate, clip_prob):
-#     src = []
-#     tgt = []
-#     for i in range(batchsize):
-#         seq = random_bases(seqlen)
-#         reads, altseq = make_het_snv(seq, readlength, readsperbatch, 0.5, error_rate, clip_prob)
-#         src.append(reads)
-#
-#         alt_t = target_string_to_tensor(altseq)
-#         seq_t = target_string_to_tensor(seq)
-#         x = torch.stack((seq_t, alt_t))
-#         tgt.append(x)
-#     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
 
 
 def make_het_del(seq, readlength, totreads, vaf, error_rate, clip_prob):
@@ -176,36 +163,6 @@ def make_het_ins(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     altseq = "".join(seq[0:inspos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(seq[inspos:-ins_len])
     altseq = altseq[0:len(seq)]
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
-
-
-# def make_het_ins_batch(batchsize, seqlen, readsperbatch, readlength, error_rate, clip_prob):
-#     src = []
-#     tgt = []
-#     for i in range(batchsize):
-#         seq = [b for b in random_bases(seqlen)]
-#         reads, altseq = make_het_ins(seq, readlength, readsperbatch, vaf=0.5, error_rate=error_rate, clip_prob=clip_prob)
-#         src.append(reads)
-#         alt_t = target_string_to_tensor(altseq)
-#         seq_t = target_string_to_tensor(seq)
-#         x = torch.stack((seq_t, alt_t))
-#         tgt.append(x)
-#     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
-
-
-# def make_het_del_batch(batchsize, seqlen, readsperbatch, readlength, error_rate, clip_prob):
-#     src = []
-#     tgt = []
-#     for i in range(batchsize):
-#         seq = [b for b in random_bases(seqlen)]
-#         reads, altseq = make_het_del(seq, readlength, readsperbatch, vaf=0.5, clip_prob=clip_prob)
-#         src.append(reads)
-#         alt_t = target_string_to_tensor(altseq)
-#         seq_t = target_string_to_tensor(seq)
-#         x = torch.stack((seq_t, alt_t))
-#         tgt.append(x)
-#     return torch.stack(src).transpose(1, 2), torch.stack(tgt)
-
-
 
 
 def make_mnv(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
@@ -271,3 +228,4 @@ def target_string_to_tensor(bases):
     """
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
+
