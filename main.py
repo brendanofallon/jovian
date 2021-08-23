@@ -232,8 +232,12 @@ def main(confyaml="train.yaml"):
     conf = load_train_conf(confyaml)
     
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    loader = make_multiloader(train_sets, conf['reference'], 4, 100)
-    
+    #loader = make_multiloader(train_sets, conf['reference'], 4, 100)
+    loader = make_loader(conf['data'][0]['bam'],
+                         conf['reference'],
+                         conf['data'][0]['labels'],
+                         max_to_load=1000,
+                         max_reads_per_aln=100)
     #loader = SimLoader()
     train(50, loader, max_read_depth=100, feats_per_read=7, statedict=None, model_dest="saved.model")
 
