@@ -178,7 +178,7 @@ def iterate_cigar(rec):
             n_bases_cigop = cigtups[cig_index][1]
             cigop = cigtups[cig_index][0]
             is_ref_consumed = cigop in {0, 2, 4, 5, 7}
-            is_seq_consumed = cigop in {0, 1, 3, 4, 5, 7}
+            is_seq_consumed = cigop in {0, 1, 3, 4, 7}
             is_clipped = cigop in {4, 5}
 
 
@@ -292,6 +292,8 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
     reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
+    if len(reads) < 5:
+        raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
     reads_encoded = encode_pileup(reads)
     minref = min(alnstart(r) for r in reads)
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?

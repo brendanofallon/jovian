@@ -7,7 +7,7 @@ import pandas as pd
 from collections import defaultdict
 import pysam
 from datetime import datetime
-import multiprocessing as mp
+import torch.multiprocessing as mp
 import yaml
 
 from bam import target_string_to_tensor, encode_with_ref
@@ -68,11 +68,20 @@ class SimLoader:
 def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
+    num_ok_errors = 10
     for i, row in pd.read_csv(csv).iterrows():
-        if row.status == 'FP':
-            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
-        else:
-            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
+        try:
+            if row.status == 'FP':
+                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
+            else:
+                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
+        except Exception as ex:
+            logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it")
+            num_ok_errors -= 1
+            if num_ok_errors < 0:
+                raise ValueError(f"Too many errors for {bampath}, quitting!")
+            else:
+                continue
 
         minseqlen = min(len(refseq), len(altseq))
         reft = target_string_to_tensor(refseq[0:minseqlen])
@@ -121,7 +130,7 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
     return ReadLoader(torch.stack(allsrc), torch.stack(alltgt).long())
 
 
-def make_multiloader(inputs, refpath, threads, max_reads_per_aln):
+def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
     """
     Create multiple ReadLoaders in parallel for each element in Inputs
     :param inputs: List of (BAM path, labels csv) tuples
@@ -133,7 +142,7 @@ def make_multiloader(inputs, refpath, threads, max_reads_per_aln):
     logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes")
     with mp.Pool(processes=threads) as pool:
         for bam, labels_csv in inputs:
-            result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_reads_per_aln))
+            result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
             results.append(result)
         pool.close()
         return MultiLoader([l.get(timeout=2*60*60) for l in results])
@@ -192,7 +201,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, matches1.item(), matches2.item()
 
 
-def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning_rate=0.001, statedict=None, model_dest=None):
+def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning_rate=0.002, statedict=None, model_dest=None):
     in_dim = max_read_depth * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     if statedict is not None:
@@ -232,14 +241,14 @@ def main(confyaml="train.yaml"):
     conf = load_train_conf(confyaml)
     
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    #loader = make_multiloader(train_sets, conf['reference'], 4, 100)
-    loader = make_loader(conf['data'][0]['bam'],
-                         conf['reference'],
-                         conf['data'][0]['labels'],
-                         max_to_load=1000,
-                         max_reads_per_aln=100)
+    loader = make_multiloader(train_sets, conf['reference'], threads=4, max_to_load=1200, max_reads_per_aln=200)
+    #loader = make_loader(conf['data'][1]['bam'],
+    #                     conf['reference'],
+    #                     conf['data'][1]['labels'],
+    #                     max_to_load=200,
+    #                     max_reads_per_aln=200)
     #loader = SimLoader()
-    train(50, loader, max_read_depth=100, feats_per_read=7, statedict=None, model_dest="saved.model")
+    train(500, loader, max_read_depth=200, feats_per_read=7, statedict=None, model_dest="saved.model")
 
 
 
