@@ -214,6 +214,7 @@ def alnstart(read):
     else:
         return read.reference_start
 
+
 def encode_pileup(reads):
     """
     Convert a list of reads (pysam VariantRecords) into a single tensor
@@ -268,13 +269,14 @@ def reads_spanning(bam, chrom, pos, max_reads):
     """
     Return a list of reads spanning the given position, generally attempting to take
     reads that include 'pos' approximately in the middle of the read
+
     """
     start = pos - 10
     bamit = bam.fetch(chrom, start)
     reads = []
     read = next(bamit)
     while read.reference_start < pos:
-        if read.reference_start < pos and read.reference_end > pos:
+        if read.reference_start < pos < read.reference_end:
             reads.append(read)
         read = next(bamit)
     mid = len(reads) // 2
@@ -282,6 +284,18 @@ def reads_spanning(bam, chrom, pos, max_reads):
 
 
 def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
+    """
+    Pull reads from the bam file that overlap the given position and convert them to a tensor,
+    then build 'ref' and 'alt' sequences matching the pulled region and return them
+    :param chrom:
+    :param pos:
+    :param ref:
+    :param alt:
+    :param bam:
+    :param fasta:
+    :param maxreads: Max reads to pull for a given position
+    :return: Tuple of encoded reads tensor, reference sequence, alt sequence
+    """
     reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
     minref = min(r.reference_start for r in reads)
     maxref = max(r.reference_start + r.query_length for r in reads)

@@ -15,7 +15,9 @@ from model import VarTransformer
 import sim
 
 
-logging.basicConfig(format='%(message)s', level=logging.INFO) # handlers=[RichHandler()])
+logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    level=logging.INFO) # handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
@@ -33,7 +35,7 @@ class ReadLoader:
     def iter_once(self, batch_size):
         offset = 0
         while offset < self.src.shape[0]:
-            yield self.src[offset:offset + batch_size, : :, :], self.tgt[offset:offset + batch_size, :, :]
+            yield self.src[offset:offset + batch_size, :, :, :], self.tgt[offset:offset + batch_size, :, :]
             offset += batch_size
 
 
@@ -44,7 +46,7 @@ class SimLoader:
 
     def iter_once(self, batch_size):
         for i in range(self.batches_in_epoch):
-            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02)
+            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02, clip_prob=0.01)
             yield src.to(DEVICE), tgt.to(DEVICE)
 
 

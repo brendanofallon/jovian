@@ -222,6 +222,10 @@ def make_mnv(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
+def make_novar(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
+    return stack_refalt_tensrs(seq, seq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
+
+
 def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error_rate, clip_prob):
     src = []
     tgt = []
@@ -237,16 +241,28 @@ def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error
 
 
 def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_prob):
+    """
+    Make a batch of training data that is a mixture of different variant types
+    :param size: Total size of batch
+    :param seqlen: Reference sequence length per data point
+    :param readsperbatch: Number of reads in each pileup
+    :param readlength: Length of each read in pileup
+    :param error_rate: Per-base error fraction
+    :param clip_prob: Per-read probability of having some soft-clipping
+    :return: source data tensor, target data tensor
+    """
     snv_w = 9 # Bigger values here equal less variance among sizes
     del_w = 8
     ins_w = 8
     mnv_w = 5
-    mix = np.random.dirichlet((snv_w, del_w, ins_w, mnv_w)) * size
+    novar_w = 10
+    mix = np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size
     snv_src, snv_tgt = make_batch(int(mix[0]), seqlen, readsperbatch, readlength, make_het_snv, error_rate, clip_prob)
     del_src, del_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_del, error_rate, clip_prob)
     ins_src, ins_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_ins, error_rate, clip_prob)
     mnv_src, mnv_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_mnv, error_rate, clip_prob)
-    return torch.cat((snv_src, del_src, ins_src, mnv_src)), torch.cat((snv_tgt, del_tgt, ins_tgt, mnv_tgt))
+    novar_src, novar_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_novar, error_rate, clip_prob)
+    return torch.cat((snv_src, del_src, ins_src, mnv_src, novar_src)), torch.cat((snv_tgt, del_tgt, ins_tgt, mnv_tgt, novar_tgt))
 
 
 def target_string_to_tensor(bases):
@@ -255,9 +271,3 @@ def target_string_to_tensor(bases):
     """
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
-
-
-import util
-src, tgt = make_mixed_batch(100, 150, 125, 85, 0.01, 0.01)
-
-print(util.to_pileup(src[0, :, :, :]))
