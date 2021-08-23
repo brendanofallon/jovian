@@ -282,13 +282,19 @@ def reads_spanning(bam, chrom, pos, max_reads):
 
 
 def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
+    """
+    Fetch reads from the given BAM file, encode them into a single tensor, and also
+    fetch & create the corresponding ref sequence and alternate sequence based on the given chrom/pos/ref/alt coords
+    :returns: Tuple of encoded reads, reference sequence, alt sequence
+    """
     reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
+    reads_encoded = encode_pileup(reads)
     minref = min(alnstart(r) for r in reads)
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
-    maxref = max(alnstart(r) + r.query_length for r in reads)
+    maxref = minref + reads_encoded.shape[0]
     refseq = fasta.fetch(chrom, minref, maxref) 
     assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
     altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
-    reads_encoded = encode_pileup(reads)
+    assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
     return reads_encoded, refseq, altseq
 

@@ -66,16 +66,17 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
 
 
 def trim_pileuptensor(src, tgt, width):
+    assert src.shape[0] == tgt.shape[1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[1]}), not sure how to deal with this :("
     if src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
         src = torch.cat((src, z))
-    else:
-        src = src[0:width, :, :]
-    if tgt.shape[1] < width:
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1])
         tgt = torch.cat((tgt, t), dim=1)
     else:
-        tgt = tgt[:, 0:width]
+        start = src.shape[0] // 2 - width // 2
+        src = src[start:start+width, :, :]
+        tgt = tgt[:, start:start+width]
+
 
     return src, tgt
 
