@@ -7,9 +7,11 @@ import pandas as pd
 from collections import defaultdict
 import pysam
 from datetime import datetime
+import argparse
 import multiprocessing as mp
 import yaml
 
+import util
 from bam import target_string_to_tensor, encode_with_ref
 from model import VarTransformer
 import sim
@@ -192,7 +194,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, matches1.item(), matches2.item()
 
 
-def train(epochs, dataloader, max_read_depth=25, feats_per_read=6, init_learning_rate=0.001, statedict=None, model_dest=None):
+def train(epochs, dataloader, max_read_depth=25, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = max_read_depth * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     if statedict is not None:
@@ -227,21 +229,62 @@ def load_train_conf(confyaml):
     return conf
 
 
-def main(confyaml="train.yaml"):
+def train(confyaml):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(confyaml)
-    
+
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    #loader = make_multiloader(train_sets, conf['reference'], 4, 100)
-    loader = make_loader(conf['data'][0]['bam'],
+    # loader = make_multiloader(train_sets, conf['reference'], 4, 100)
+    loader = make_loader(conf['data'][1]['bam'],
                          conf['reference'],
-                         conf['data'][0]['labels'],
+                         conf['data'][1]['labels'],
                          max_to_load=1000,
-                         max_reads_per_aln=100)
-    #loader = SimLoader()
+                         max_reads_per_aln=200)
+    # loader = SimLoader()
     train(50, loader, max_read_depth=100, feats_per_read=7, statedict=None, model_dest="saved.model")
 
 
+def call(statedict, bam, chrom, pos):
+    max_read_depth = 200
+    feats_per_read = 7
+    in_dim = max_read_depth * feats_per_read
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model.load_state_dict(torch.load(statedict))
+    model.eval()
+
+    bam = pysam.AlignmentFile(bam)
+    reads = bam.reads_spanning(bam, chrom, pos, max_reads=max_read_depth)
+    if len(reads) < 5:
+        raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
+    reads_encoded = bam.encode_pileup(reads)
+    print(util.to_pileup(reads_encoded))
+
+    seq1preds, seq2preds = model(reads_encoded.unsqueeze(0))
+    pred1str = util.readstr(seq1preds[0, :, :])
+    pred2str = util.readstr(seq2preds[0, :, :])
+    print("\n")
+    print(pred1str)
+    print(pred2str)
+
+def main(confyaml="train.yaml"):
+    parser = argparse.ArgumentParser()
+    subparser = parser.add_subparsers()
+    trainparser = subparser.add_parser("train", help="Train a model")
+    trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
+    trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
+    trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
+    trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
+    trainparser.set_defaults(func=train)
+
+    callparser = subparser.add_parser("call", help="Call variants")
+    callparser.add_argument("-m", "--statedict", help="Stored model", required=True)
+    callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
+    callparser.add_argument("--chrom", help="Chromosome", required=True)
+    callparser.add_argument("--pos", help="Position", required=True)
+    callparser.set_defaults(func=call)
+
+    args = parser.parse_args()
+    args.func(**vars(args))
 
 if __name__ == "__main__":
     main()
