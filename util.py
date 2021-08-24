@@ -12,7 +12,7 @@ def readstr(t):
             output.append(".")
         else:
             output.append(INDEX_TO_BASE[np.argmax(t[pos, :])])
-            if t[pos, -1] == 1: # Clip flag is set, which means emit lowercase
+            if t.shape[-1] > 4 and t[pos, -1] == 1: # Clip flag is set, which means emit lowercase
                 output[-1] = output[-1].lower()
 
     return "".join(output)
