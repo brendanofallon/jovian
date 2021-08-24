@@ -261,6 +261,34 @@ def encode_pileup(reads):
     return torch.stack(everything)
 
 
+def encode_pileup2(reads):
+    """
+    Convert a list of reads (pysam VariantRecords) into a single tensor
+
+    :param reads: List of pysam VariantRecords
+    :return: Tensor with shape [position, read, features]
+    """
+    minref = min(alnstart(r) for r in reads)
+    maxref = max(alnstart(r) + r.query_length for r in reads)
+    its = [rec_tensor_it(r, minref) for r in reads]
+    refpos = minref
+    pos_tensors = [next(it) for it in its]
+    everything = []
+    total_positions = 0
+    alldone = False
+    while not alldone:
+        total_positions += 1
+        thispos = []
+        refpos += 1
+        for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
+            thispos.append(pos_tensor[0])
+            pos_tensors[i] = next(it)
+        all_stacked = torch.stack(thispos)
+        everything.append(all_stacked)
+        alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
+    return torch.stack(everything)
+
+
 def format_cigar(cig):
     return cig.replace("M", "M ").replace("S", "S ").replace("I", "I ").replace("D", "D ")
 
@@ -290,7 +318,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
     reads = reads_spanning(bam, chrom, pos, max_reads=maxreads)
-    reads_encoded = encode_pileup(reads)
+    reads_encoded = encode_pileup2(reads)
     minref = min(alnstart(r) for r in reads)
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
     maxref = minref + reads_encoded.shape[0]

@@ -256,7 +256,7 @@ def call(statedict, bam, chrom, pos):
     reads = bam.reads_spanning(bam, chrom, pos, max_reads=max_read_depth)
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
-    reads_encoded = bam.encode_pileup(reads)
+    reads_encoded = bam.encode_pileup2(reads)
     print(util.to_pileup(reads_encoded))
 
     seq1preds, seq2preds = model(reads_encoded.unsqueeze(0))
