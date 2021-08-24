@@ -7,12 +7,12 @@ import pandas as pd
 from collections import defaultdict
 import pysam
 from datetime import datetime
+import torch.multiprocessing as mp
 import argparse
-import multiprocessing as mp
 import yaml
 
 import util
-from bam import target_string_to_tensor, encode_with_ref
+from bam import target_string_to_tensor, encode_with_ref, encode_pileup2, reads_spanning, alnstart
 from model import VarTransformer
 import sim
 
@@ -70,11 +70,20 @@ class SimLoader:
 def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
+    num_ok_errors = 10
     for i, row in pd.read_csv(csv).iterrows():
-        if row.status == 'FP':
-            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
-        else:
-            encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
+        try:
+            if row.status == 'FP':
+                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
+            else:
+                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
+        except Exception as ex:
+            logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it")
+            num_ok_errors -= 1
+            if num_ok_errors < 0:
+                raise ValueError(f"Too many errors for {bampath}, quitting!")
+            else:
+                continue
 
         minseqlen = min(len(refseq), len(altseq))
         reft = target_string_to_tensor(refseq[0:minseqlen])
@@ -123,7 +132,7 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
     return ReadLoader(torch.stack(allsrc), torch.stack(alltgt).long())
 
 
-def make_multiloader(inputs, refpath, threads, max_reads_per_aln):
+def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
     """
     Create multiple ReadLoaders in parallel for each element in Inputs
     :param inputs: List of (BAM path, labels csv) tuples
@@ -135,7 +144,7 @@ def make_multiloader(inputs, refpath, threads, max_reads_per_aln):
     logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes")
     with mp.Pool(processes=threads) as pool:
         for bam, labels_csv in inputs:
-            result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_reads_per_aln))
+            result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
             results.append(result)
         pool.close()
         return MultiLoader([l.get(timeout=2*60*60) for l in results])
@@ -194,7 +203,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, matches1.item(), matches2.item()
 
 
-def train(epochs, dataloader, max_read_depth=25, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
+def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = max_read_depth * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     if statedict is not None:
@@ -211,14 +220,16 @@ def train(epochs, dataloader, max_read_depth=25, feats_per_read=7, init_learning
             starttime = datetime.now()
             loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, dataloader, batch_size=batch_size)
             elapsed = datetime.now() - starttime
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
             scheduler.step()
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
-        if model_dest is not None:
-            logger.info(f"Saving model state dict to {model_dest}")
-            torch.save(model.to('cpu').state_dict(), model_dest)
+        pass
+
+    if model_dest is not None:
+        logger.info(f"Saving model state dict to {model_dest}")
+        torch.save(model.to('cpu').state_dict(), model_dest)
 
 
 def load_train_conf(confyaml):
@@ -229,22 +240,15 @@ def load_train_conf(confyaml):
     return conf
 
 
-def train(confyaml):
+def train(config, output_model, input_model, epochs, **kwargs):
     logger.info(f"Found torch device: {DEVICE}")
-    conf = load_train_conf(confyaml)
-
+    conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    # loader = make_multiloader(train_sets, conf['reference'], 4, 100)
-    loader = make_loader(conf['data'][1]['bam'],
-                         conf['reference'],
-                         conf['data'][1]['labels'],
-                         max_to_load=1000,
-                         max_reads_per_aln=200)
-    # loader = SimLoader()
-    train(50, loader, max_read_depth=100, feats_per_read=7, statedict=None, model_dest="saved.model")
+    loader = make_multiloader(train_sets, conf['reference'], threads=4, max_to_load=1200, max_reads_per_aln=200)
+    train_epochs(epochs, loader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
-def call(statedict, bam, chrom, pos):
+def call(statedict, bam, reference, chrom, pos, **kwargs):
     max_read_depth = 200
     feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
@@ -253,20 +257,29 @@ def call(statedict, bam, chrom, pos):
     model.eval()
 
     bam = pysam.AlignmentFile(bam)
-    reads = bam.reads_spanning(bam, chrom, pos, max_reads=max_read_depth)
+    reads = reads_spanning(bam, chrom, pos, max_reads=max_read_depth)
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
-    reads_encoded = bam.encode_pileup2(reads)
-    print(util.to_pileup(reads_encoded))
 
-    seq1preds, seq2preds = model(reads_encoded.unsqueeze(0))
+    reads_encoded = encode_pileup2(reads).to(DEVICE)
+    minref = min(alnstart(r) for r in reads)
+    refseq = pysam.FastaFile(reference).fetch(chrom, minref, minref + reads_encoded.shape[0])
+    reft = target_string_to_tensor(refseq).unsqueeze(0).unsqueeze(0).to(DEVICE)
+    src = sort_by_ref(reft, reads_encoded.unsqueeze(0))
+    
+    print(util.to_pileup(src[0, :, :, :]))
+    seq1preds, seq2preds = model(src.flatten(start_dim=2))
     pred1str = util.readstr(seq1preds[0, :, :])
     pred2str = util.readstr(seq2preds[0, :, :])
     print("\n")
     print(pred1str)
     print(pred2str)
+    print("".join('*' if a==b else 'x' for a,b in zip(refseq, pred2str)))
+    print(refseq)
 
-def main(confyaml="train.yaml"):
+
+
+def main():
     parser = argparse.ArgumentParser()
     subparser = parser.add_subparsers()
     trainparser = subparser.add_parser("train", help="Train a model")
@@ -278,9 +291,10 @@ def main(confyaml="train.yaml"):
 
     callparser = subparser.add_parser("call", help="Call variants")
     callparser.add_argument("-m", "--statedict", help="Stored model", required=True)
+    callparser.add_argument("-r", "--reference", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
     callparser.add_argument("--chrom", help="Chromosome", required=True)
-    callparser.add_argument("--pos", help="Position", required=True)
+    callparser.add_argument("--pos", help="Position", required=True, type=int)
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
