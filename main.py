@@ -191,16 +191,25 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         loss += 2 * criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
 
         with torch.no_grad():
-            matches1 = (torch.argmax(seq1preds.flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq1.flatten()).float().mean()
-            matches2 = (torch.argmax(seq2preds.flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq2.flatten()).float().mean()
+            width = 100
+            mid = seq1preds.shape[1] // 2
+            midmatch1 = (torch.argmax(seq1preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq1[:, mid-width//2:mid+width//2].flatten()
+                         ).float().mean()
+            midmatch2 = (
+                        torch.argmax(seq1preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq1[:, mid - width // 2:mid + width // 2].flatten()
+                        ).float().mean()
+            # matches1 = (torch.argmax(seq1preds.flatten(start_dim=0, end_dim=1),
+            #                          dim=1) == tgt_seq1.flatten()).float().mean()
+            # matches2 = (torch.argmax(seq2preds.flatten(start_dim=0, end_dim=1),
+            #                          dim=1) == tgt_seq2.flatten()).float().mean()
 
         loss.backward(retain_graph=True)
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
 
-    return epoch_loss_sum, matches1.item(), matches2.item()
+    return epoch_loss_sum, midmatch1.item(), midmatch2.item()
 
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
@@ -240,11 +249,11 @@ def load_train_conf(confyaml):
     return conf
 
 
-def train(config, output_model, input_model, epochs, **kwargs):
+def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    loader = make_multiloader(train_sets, conf['reference'], threads=4, max_to_load=1200, max_reads_per_aln=200)
+    loader = make_multiloader(train_sets, conf['reference'], threads=4, max_to_load=max_to_load, max_reads_per_aln=200)
     train_epochs(epochs, loader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
@@ -286,6 +295,7 @@ def main():
     trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
+    trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.set_defaults(func=train)
 
