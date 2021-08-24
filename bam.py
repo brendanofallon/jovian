@@ -145,8 +145,6 @@ def iterate_cigar(rec):
     is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
-    if cigop == 5:
-        print(f"Hey, read {rec.query_name} is hard-clipped, it starts at {rec.reference_start}")
     base_index = 0
     refstart = alnstart(rec)
     refpos = refstart
