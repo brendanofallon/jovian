@@ -142,6 +142,8 @@ def make_het_snv(seq, readlength, totreads, vaf, error_rate, clip_prob):
     while altseq[snvpos] == seq[snvpos]:
         altseq[snvpos] = random.choice('ACTG')
     altseq = "".join(altseq)
+    if vaf == 1.0:
+        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
 
 
@@ -154,6 +156,8 @@ def make_het_del(seq, readlength, totreads, vaf, error_rate, clip_prob):
     for i in range(del_len):
         del ls[delpos]
     altseq = "".join(ls + ["A"] * del_len)
+    if vaf == 1.0:
+        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
 
 
@@ -162,6 +166,8 @@ def make_het_ins(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     inspos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - ins_len, len(seq) // 2 + 8)))
     altseq = "".join(seq[0:inspos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(seq[inspos:-ins_len])
     altseq = altseq[0:len(seq)]
+    if vaf == 1.0:
+        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
@@ -176,6 +182,8 @@ def make_mnv(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     altseq = "".join(ls[0:delpos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(ls[delpos:-ins_len])
     altseq = altseq[0:len(seq)]
     altseq = altseq + "A" * (len(seq) - len(altseq))
+    if vaf == 1.0:
+        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
@@ -186,9 +194,14 @@ def make_novar(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
 def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error_rate, clip_prob):
     src = []
     tgt = []
+    vafdist = stats.beta(a=2.0, b=5.0)
     for i in range(batchsize):
+        if np.random.rand() < 0.10:
+            vaf = 1.0
+        else:
+            vaf = vafdist.rvs(1)
         seq = [b for b in random_bases(seqlen)]
-        reads, altseq = factory_func(seq, readlength, readsperbatch, vaf=0.5, error_rate=error_rate, clip_prob=clip_prob)
+        reads, altseq = factory_func(seq, readlength, readsperbatch, vaf=vaf, error_rate=error_rate, clip_prob=clip_prob)
         src.append(reads)
         alt_t = target_string_to_tensor(altseq)
         seq_t = target_string_to_tensor(seq)
