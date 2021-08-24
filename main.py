@@ -213,7 +213,7 @@ def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.99)
     batch_size = 15
     try:
         for epoch in range(epochs):
@@ -244,7 +244,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    loader = make_multiloader(train_sets, conf['reference'], threads=4, max_to_load=1200, max_reads_per_aln=200)
+    loader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=1200, max_reads_per_aln=200)
     train_epochs(epochs, loader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
