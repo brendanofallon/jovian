@@ -38,8 +38,8 @@ def align_seqs(query, target, offset=0):
                                      gap_extend_penalty=1,
                                      match_score=2,
                                      mismatch_score=-1)
-    print(aln.aligned_query_sequence)
-    print(aln.aligned_target_sequence)
+    # print(aln.aligned_query_sequence)
+    # print(aln.aligned_target_sequence)
     cigs = list(c for c in _cigtups(aln.cigar))
     if cigs[0].op == "M" and cigs[-1].op == "M":
         # Easy case, both start and end are matches, which means we dont have to deal with edge cases

@@ -13,6 +13,7 @@ import numpy as np
 import argparse
 import yaml
 
+import sim
 import util
 import vcf
 import loader
@@ -140,7 +141,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         loss += criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
 
         with torch.no_grad():
-            width = 100
+            width = 20
             mid = seq1preds.shape[1] // 2
             midmatch1 = (torch.argmax(seq1preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt_seq1[:, mid-width//2:mid+width//2].flatten()
@@ -242,6 +243,57 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
                             offset=minref + len(refseq)//2 - midwith//2 + 1):
         print(v)
 
+def eval_sim(statedict, **kwargs):
+    max_read_depth = 200
+    feats_per_read = 7
+    in_dim = max_read_depth * feats_per_read
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model.load_state_dict(torch.load(statedict))
+    model.eval()
+
+    # SNVs
+    batch_size = 10
+    snv_src, snv_tgt = sim.make_batch(batch_size, 200, 200, 150, sim.make_het_snv, 0.02, clip_prob=0.02, vafs=0.95 * np.ones(batch_size))
+    src = sort_by_ref(snv_tgt, snv_src)
+    seq1preds, seq2preds = model(src.flatten(start_dim=2))
+
+    midwidth = 100  # Only examine the 'middle' of the sequence with
+    midstart = snv_tgt.shape[-1] // 2 - midwidth // 2
+    midend = snv_tgt.shape[-1] // 2 + midwidth // 2
+
+    for b in range(src.shape[0]):
+        rseq1 = util.tgt_str(snv_tgt[b, 0, :])
+        rseq2 = util.tgt_str(snv_tgt[b, 1, :])
+
+        print(f"\n\n Batch {b}")
+
+        actual_vars = []
+        for v in vcf.align_seqs(rseq1[midstart:midend], rseq2[midstart:midend]):
+            actual_vars.append(v)
+
+        pred1_vars = []
+        for v in vcf.align_seqs(rseq1[midstart:midend], util.readstr(seq1preds[b, midstart:midend])):
+            pred1_vars.append(v)
+
+        pred2_vars = []
+        for v in vcf.align_seqs(rseq2[midstart:midend], util.readstr(seq2preds[b, midstart:midend])):
+            pred2_vars.append(v)
+
+
+        if pred1_vars:
+            print("Found variants on pred 1:")
+            for actual, predicted in zip(actual_vars, pred1_vars):
+                print(f"Actual: {actual} predicts: {predicted}")
+        else:
+            print("No variants on pred 1")
+
+        if pred2_vars:
+            for actual, predicted in zip(actual_vars, pred2_vars):
+                print(f"Actual: {actual} predicts: {predicted}")
+        else:
+            print(f"No variant detected on pred 2:(")
+
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -262,8 +314,13 @@ def main():
     callparser.add_argument("--pos", help="Position", required=True, type=int)
     callparser.set_defaults(func=call)
 
+    evalparser = subparser.add_parser("eval", help="Evaluate a model on some known or simulated data")
+    evalparser.add_argument("-m", "--statedict", help="Stored model", required=True)
+    evalparser.set_defaults(func=eval_sim)
+
     args = parser.parse_args()
     args.func(**vars(args))
+
 
 if __name__ == "__main__":
     main()
