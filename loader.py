@@ -97,7 +97,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
     """
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
-    num_ok_errors = 10
+    num_ok_errors = 20
 
     for i, row in pd.read_csv(csv).iterrows():
         try:

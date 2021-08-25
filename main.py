@@ -137,7 +137,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         seq1preds, seq2preds = model(src.flatten(start_dim=2))
 
         loss = criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
-        loss += 2 * criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
+        loss += criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
 
         with torch.no_grad():
             width = 100
@@ -202,9 +202,9 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    loader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    #loader = SimLoader(seqlen=150, readsperbatch=200, readlength=100)
-    train_epochs(epochs, loader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
+    #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
+    dataloader = loader.SimLoader(seqlen=150, readsperbatch=200, readlength=100)
+    train_epochs(epochs, dataloader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
@@ -231,12 +231,15 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
     pred1str = util.readstr(seq1preds[0, :, :])
     pred2str = util.readstr(seq2preds[0, :, :])
     print("\n")
+    print(refseq)
     print(pred1str)
     print(pred2str)
     print("".join('*' if a==b else 'x' for a,b in zip(refseq, pred2str)))
     print(refseq)
     midwith = 100
-    for v in vcf.align_seqs(refseq[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2], pred2str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2]):
+    for v in vcf.align_seqs(refseq[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2], 
+                            pred2str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2],
+                            offset=minref + len(refseq)//2 - midwith//2 + 1):
         print(v)
 
 
