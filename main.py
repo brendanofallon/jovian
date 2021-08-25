@@ -204,7 +204,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    dataloader = loader.SimLoader(seqlen=150, readsperbatch=200, readlength=100)
+    dataloader = loader.SimLoader(DEVICE, seqlen=150, readsperbatch=200, readlength=100, error_rate=0.02, clip_prob=0.01)
     train_epochs(epochs, dataloader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
