@@ -8,10 +8,10 @@ def readstr(t):
     assert len(t.shape) == 2, "Need two dimensional input"
     output = []
     for pos in range(t.shape[0]):
-        if t[pos, :].sum() == 0:
+        if t[pos, 0:4].sum() == 0:
             output.append(".")
         else:
-            output.append(INDEX_TO_BASE[np.argmax(t[pos, :])])
+            output.append(INDEX_TO_BASE[np.argmax(t[pos, 0:4])])
             if t.shape[-1] > 4 and t[pos, -1] == 1: # Clip flag is set, which means emit lowercase
                 output[-1] = output[-1].lower()
 
