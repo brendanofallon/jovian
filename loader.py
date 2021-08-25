@@ -74,13 +74,23 @@ class MultiLoader:
 
 class SimLoader:
 
-    def __init__(self, device):
+    def __init__(self, device, seqlen, readsperbatch, readlength, error_rate, clip_prob):
         self.batches_in_epoch = 10
         self.device = device
+        self.seqlen = seqlen
+        self.readsperbatch = readsperbatch
+        self.readlength = readlength
+        self.error_rate = error_rate
+        self.clip_prob = clip_prob
 
     def iter_once(self, batch_size):
         for i in range(self.batches_in_epoch):
-            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02, clip_prob=0.01)
+            src, tgt = sim.make_mixed_batch(batch_size,
+                                            seqlen=self.seqlen,
+                                            readsperbatch=self.readsperbatch,
+                                            readlength=self.readlength,
+                                            error_rate=self.error_rate,
+                                            clip_prob=self.clip_prob)
             yield src.to(self.device), tgt.to(self.device)
 
 
