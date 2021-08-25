@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class ReadLoader:
     """
     The simplest loader, this one just has a src and tgt tensor and iterates over them
-    Assumes first index in each the batch index
+    Assumes first index in each is the batch index
     """
 
     def __init__(self, src, tgt, device):
@@ -35,6 +35,10 @@ class ReadLoader:
 
 
 class WeightedLoader:
+    """
+    A fancier loader that has a sampling weight associated with each element
+    Elements with higher weights get sampled more frequently
+    """
 
     def __init__(self, src, tgt, weights, device):
         assert len(weights) == src.shape[0]
