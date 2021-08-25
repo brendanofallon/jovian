@@ -17,9 +17,9 @@ class Cigar:
 
 def _cigtups(cigstr):
     """
-    Convert a cigar string into objects with len, tup fields
+    Generator for Cigar objects from a cigar string
     :param cig: cigar string
-    :return: List of Cigar objects
+    :return: Generator of Cigar objects
     """
     digits = []
     for c in cigstr:
@@ -29,6 +29,7 @@ def _cigtups(cigstr):
             cig = Cigar(op=c, len=int("".join(digits)))
             digits = []
             yield cig
+
 
 def align_seqs(query, target, offset=0):
     aln = ssw_aligner.local_pairwise_align_ssw(query,
@@ -66,5 +67,3 @@ def align_seqs(query, target, offset=0):
                           pos=mismatchstart)
 
 
-#for v in align_seqs("AAAAACCCCCTTTTT", "AAAAACGCTTTTT"):
-#    print(v)
