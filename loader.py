@@ -100,24 +100,23 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
     num_ok_errors = 10
 
     for i, row in pd.read_csv(csv).iterrows():
-        class_label = "-".join((row.vtype, row.status))
         try:
             if row.status == 'FP':
                 encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
             else:
                 encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
+
+            minseqlen = min(len(refseq), len(altseq))
+            reft = target_string_to_tensor(refseq[0:minseqlen])
+            altt = target_string_to_tensor(altseq[0:minseqlen])
         except Exception as ex:
-            logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it")
+            logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
             num_ok_errors -= 1
             if num_ok_errors < 0:
                 raise ValueError(f"Too many errors for {bampath}, quitting!")
             else:
                 continue
 
-
-        minseqlen = min(len(refseq), len(altseq))
-        reft = target_string_to_tensor(refseq[0:minseqlen])
-        altt = target_string_to_tensor(altseq[0:minseqlen])
         if minseqlen != encoded.shape[0]:
             encoded = encoded[0:minseqlen, :, :]
         tgt = torch.stack((reft, altt))

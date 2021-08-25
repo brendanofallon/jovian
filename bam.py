@@ -43,6 +43,7 @@ class MockRead:
 
 
 def base_index(base):
+    base = base.upper()
     if base == 'A':
         return 0
     elif base == 'C':
@@ -51,7 +52,7 @@ def base_index(base):
         return 2
     elif base == 'T':
         return 3
-    raise ValueError("Expected [ACTG]")
+    raise ValueError(f"Expected [ACTG], got {base}")
 
 
 def update_from_base(base, tensor):
