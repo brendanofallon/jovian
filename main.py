@@ -12,6 +12,7 @@ import argparse
 import yaml
 
 import util
+import vcf
 from bam import target_string_to_tensor, encode_with_ref, encode_pileup2, reads_spanning, alnstart
 from model import VarTransformer
 import sim
@@ -289,7 +290,9 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
     print(pred2str)
     print("".join('*' if a==b else 'x' for a,b in zip(refseq, pred2str)))
     print(refseq)
-
+    midwith = 100
+    for v in vcf.align_seqs(refseq[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2], pred2str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2]):
+        print(v)
 
 
 def main():
