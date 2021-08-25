@@ -57,12 +57,15 @@ class MultiLoader:
 
 class SimLoader:
 
-    def __init__(self):
+    def __init__(self, seqlen, readsperbatch, readlength):
         self.batches_in_epoch = 10
+        self.seqlen = seqlen
+        self.readsperbatch = readsperbatch
+        self.readlength = readlength
 
     def iter_once(self, batch_size):
         for i in range(self.batches_in_epoch):
-            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02, clip_prob=0.01)
+            src, tgt = sim.make_mixed_batch(batch_size, seqlen=self.seqlen, readsperbatch=self.readsperbatch, readlength=self.readlength, error_rate=0.02, clip_prob=0.01)
             yield src.to(DEVICE), tgt.to(DEVICE)
 
 
@@ -254,6 +257,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     loader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
+    #loader = SimLoader(seqlen=150, readsperbatch=200, readlength=100)
     train_epochs(epochs, loader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
