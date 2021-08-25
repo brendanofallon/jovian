@@ -66,5 +66,5 @@ def align_seqs(query, target, offset=0):
                           pos=mismatchstart)
 
 
-for v in align_seqs("AAAAACCCCCTTTTT", "AAAAACGCTTTTT"):
-    print(v)
+# for v in align_seqs("AAAAACCCCCTTTTT", "AAAAACGCTTTTT"):
+#     print(v)

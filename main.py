@@ -1,21 +1,23 @@
 #!/usr/bin/env python
 
-import torch
-import torch.nn as nn
+
 import logging
-import pandas as pd
-from collections import defaultdict
-import pysam
 from datetime import datetime
+from collections import defaultdict
+
+import pysam
+import torch
+from torch import nn
 import torch.multiprocessing as mp
+import numpy as np
 import argparse
 import yaml
 
 import util
 import vcf
-from bam import target_string_to_tensor, encode_with_ref, encode_pileup2, reads_spanning, alnstart
+import loader
+from bam import target_string_to_tensor, encode_pileup2, reads_spanning, alnstart
 from model import VarTransformer
-import sim
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -26,74 +28,16 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
-class ReadLoader:
-
-    def __init__(self, src, tgt):
-        self.src = src
-        self.tgt = tgt
-
-    def __len__(self):
-        return self.src.shape[0]
-
-    def iter_once(self, batch_size):
-        offset = 0
-        while offset < self.src.shape[0]:
-            yield self.src[offset:offset + batch_size, :, :, :].to(DEVICE), self.tgt[offset:offset + batch_size, :, :].to(DEVICE)
-            offset += batch_size
-
-
-class MultiLoader:
-    """
-    Combines multiple loaders into a single loader
-    """
-
-    def __init__(self, loaders):
-        self.loaders = loaders
-
-    def iter_once(self, batch_size):
-        for loader in self.loaders:
-            for src, tgt in loader.iter_once(batch_size):
-                yield src, tgt
-
-
-class SimLoader:
-
-    def __init__(self):
-        self.batches_in_epoch = 10
-
-    def iter_once(self, batch_size):
-        for i in range(self.batches_in_epoch):
-            src, tgt = sim.make_mixed_batch(batch_size, seqlen=100, readsperbatch=100, readlength=70, error_rate=0.02, clip_prob=0.01)
-            yield src.to(DEVICE), tgt.to(DEVICE)
-
-
-
-def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
-    refgenome = pysam.FastaFile(refpath)
-    bam = pysam.AlignmentFile(bampath)
-    num_ok_errors = 10
-    for i, row in pd.read_csv(csv).iterrows():
-        try:
-            if row.status == 'FP':
-                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
-            else:
-                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
-        except Exception as ex:
-            logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it")
-            num_ok_errors -= 1
-            if num_ok_errors < 0:
-                raise ValueError(f"Too many errors for {bampath}, quitting!")
-            else:
-                continue
-
-        minseqlen = min(len(refseq), len(altseq))
-        reft = target_string_to_tensor(refseq[0:minseqlen])
-        altt = target_string_to_tensor(altseq[0:minseqlen])
-        tgt = torch.stack((reft, altt))
-        yield encoded, tgt, row.status
 
 
 def trim_pileuptensor(src, tgt, width):
+    """
+    Trim or zero-pad the sequence dimension of src and target (first dimension of src, second of target)
+    so they're equal to width
+    :param src: Data tensor of shape [sequence, read, features]
+    :param tgt: Target tensor of shape [haplotype, sequence]
+    :param width: Size to trim to
+    """
     assert src.shape[0] == tgt.shape[1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[1]}), not sure how to deal with this :("
     if src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
@@ -105,7 +49,6 @@ def trim_pileuptensor(src, tgt, width):
         src = src[start:start+width, :, :]
         tgt = tgt[:, start:start+width]
 
-
     return src, tgt
 
 
@@ -114,10 +57,13 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
     alltgt = []
     count = 0
     seq_len = 150
-    status_counter = defaultdict(int)
     logger.info(f"Creating new data loader from {bampath}")
-    for enc, tgt, status in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln):
-        status_counter[status] += 1
+    counter = defaultdict(int)
+    classes = []
+    for enc, tgt, status, vtype in loader.load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln):
+        label_class = "-".join((status, vtype))
+        classes.append(label_class)
+        counter[label_class] += 1
         src, tgt = trim_pileuptensor(enc, tgt, seq_len)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
@@ -130,7 +76,9 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
             logger.info(f"Stopping tensor load after {max_to_load}")
             break
     logger.info(f"Loaded {count} tensors from {csv}")
-    return ReadLoader(torch.stack(allsrc), torch.stack(alltgt).long())
+    logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
+    weights = np.array([1.0 / counter[c] for c in classes])
+    return loader.WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
 
 
 def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
@@ -142,13 +90,13 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
     :return: List of loaders
     """
     results = []
-    logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes")
+    logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes (max to load = {max_to_load})")
     with mp.Pool(processes=threads) as pool:
         for bam, labels_csv in inputs:
             result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
             results.append(result)
         pool.close()
-        return MultiLoader([l.get(timeout=2*60*60) for l in results])
+        return loader.MultiLoader([l.get(timeout=2*60*60) for l in results])
 
 
 
@@ -224,7 +172,7 @@ def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
-    batch_size = 15
+    batch_size = 64
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
