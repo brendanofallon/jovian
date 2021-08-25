@@ -191,15 +191,20 @@ def make_novar(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     return stack_refalt_tensrs(seq, seq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
-def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error_rate, clip_prob):
+def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error_rate, clip_prob, vafs=None):
     src = []
     tgt = []
-    vafdist = stats.beta(a=2.0, b=5.0)
+    if vafs is not None:
+        assert len(vafs) == batchsize, f"When vafs are provided, there must be exactly one VAF per batch item"
+    vafdist = stats.beta(a=2.0, b=5.0) # Only used if vafs is not supplied
     for i in range(batchsize):
-        if np.random.rand() < 0.10:
-            vaf = 1.0
+        if vafs is not None:
+            vaf = vafs[i]
         else:
-            vaf = vafdist.rvs(1)
+            if np.random.rand() < 0.10:
+                vaf = 1.0
+            else:
+                vaf = vafdist.rvs(1)
         seq = [b for b in random_bases(seqlen)]
         reads, altseq = factory_func(seq, readlength, readsperbatch, vaf=vaf, error_rate=error_rate, clip_prob=clip_prob)
         src.append(reads)
