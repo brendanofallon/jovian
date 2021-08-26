@@ -89,13 +89,13 @@ class SimLoader:
 
     def iter_once(self, batch_size):
         for i in range(self.batches_in_epoch):
-            src, tgt = sim.make_mixed_batch(batch_size,
+            src, tgt, vaftgt = sim.make_mixed_batch(batch_size,
                                             seqlen=self.seqlen,
                                             readsperbatch=self.readsperbatch,
                                             readlength=self.readlength,
                                             error_rate=self.error_rate,
                                             clip_prob=self.clip_prob)
-            yield src.to(self.device), tgt.to(self.device)
+            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device)
 
 
 

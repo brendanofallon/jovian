@@ -101,7 +101,7 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
 
 
 
-def sort_by_ref(seq, reads):
+def sort_by_ref(reads):
     """
     Sort read tensors by how closely they match the sequence seq.
     :param seq:
@@ -110,14 +110,15 @@ def sort_by_ref(seq, reads):
     """
     results = []
     for batch in range(reads.shape[0]):
+        seq = reads[batch, :,0,:].argmax(dim=-1)
         w = reads[batch, :, :, 0:4].sum(dim=-1)
         t = reads[batch, :, :, 0:4].argmax(dim=-1)
-        matchsum = (t == (seq[batch, 0, :].repeat(reads.shape[2], 1).transpose(0,1)*w).long()).sum(dim=0)
+        matchsum = (t == (seq.repeat(reads.shape[2], 1).transpose(0,1)*w).long()).sum(dim=0)
         results.append(reads[batch, :, torch.argsort(matchsum), :])
     return torch.stack(results)
 
 
-def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
+def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
     :param model: Model to train
@@ -128,35 +129,25 @@ def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
     :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
     """
     epoch_loss_sum = 0
-    for unsorted_src, tgt in loader.iter_once(batch_size):
-        src = sort_by_ref(tgt, unsorted_src)
+    for unsorted_src, tgt_seq, tgtvaf in loader.iter_once(batch_size):
+        src = sort_by_ref(unsorted_src)
         optimizer.zero_grad()
 
-        tgt_seq1 = tgt[:, 0, :]
-        tgt_seq2 = tgt[:, 1, :]
+        seq_preds, vaf_preds = model(src.flatten(start_dim=2))
 
-        seq1preds, seq2preds = model(src.flatten(start_dim=2))
-
-        loss = criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
-        loss += criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
-
+        loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        vafloss = vaf_criterion(vaf_preds, tgtvaf)
         with torch.no_grad():
             width = 20
-            mid = seq1preds.shape[1] // 2
-            midmatch1 = (torch.argmax(seq1preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq1[:, mid-width//2:mid+width//2].flatten()
+            mid = seq_preds.shape[1] // 2
+            midmatch1 = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
-            midmatch2 = (
-                        torch.argmax(seq2preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq2[:, mid - width // 2:mid + width // 2].flatten()
-                        ).float().mean()
-            # matches1 = (torch.argmax(seq1preds.flatten(start_dim=0, end_dim=1),
-            #                          dim=1) == tgt_seq1.flatten()).float().mean()
-            # matches2 = (torch.argmax(seq2preds.flatten(start_dim=0, end_dim=1),
-            #                          dim=1) == tgt_seq2.flatten()).float().mean()
+
+
 
         loss.backward(retain_graph=True)
-        # klloss.backward()
+        vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
 
@@ -164,7 +155,7 @@ def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
 
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
-    in_dim = max_read_depth * feats_per_read
+    in_dim = (max_read_depth + 1) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -173,13 +164,13 @@ def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_
     batch_size = 64
 
     criterion = nn.CrossEntropyLoss()
-    kldivloss = nn.KLDivLoss(log_target=True)
+    vaf_crit = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.99)
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, kldivloss, dataloader, batch_size=batch_size)
+            loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size)
             elapsed = datetime.now() - starttime
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
             scheduler.step()

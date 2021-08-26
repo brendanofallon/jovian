@@ -128,12 +128,13 @@ def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, clip_prob=0, align_
 def stack_refalt_tensrs(refseq, altseq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     assert len(refseq) == len(altseq), f"Sequences must be the same length (got {len(refseq)} and {len(altseq)})"
     num_altreads = stats.binom(totreads - 2, vaf).rvs(1)[0] + 1
+    fullref = string_to_tensor(refseq, 0)
     reftensors = tensors_from_seq(refseq, totreads-num_altreads, readlength, error_rate, clip_prob)
     alttensors = tensors_from_seq(altseq, num_altreads, readlength, error_rate, clip_prob)
     combined = torch.cat([reftensors, alttensors])
     idx = np.random.permutation(totreads)
     combined[range(totreads)] = combined[idx]
-    return combined, altseq
+    return torch.cat((fullref.unsqueeze(0), combined)), altseq, vaf
 
 
 def make_het_snv(seq, readlength, totreads, vaf, error_rate, clip_prob):
@@ -143,8 +144,6 @@ def make_het_snv(seq, readlength, totreads, vaf, error_rate, clip_prob):
     while altseq[snvpos] == seq[snvpos]:
         altseq[snvpos] = random.choice('ACTG')
     altseq = "".join(altseq)
-    if vaf == 1.0:
-        seq = altseq
     result = stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
     return result
 
@@ -158,8 +157,6 @@ def make_het_del(seq, readlength, totreads, vaf, error_rate, clip_prob):
     for i in range(del_len):
         del ls[delpos]
     altseq = "".join(ls + ["A"] * del_len)
-    if vaf == 1.0:
-        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
 
 
@@ -168,8 +165,6 @@ def make_het_ins(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     inspos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - ins_len, len(seq) // 2 + 8)))
     altseq = "".join(seq[0:inspos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(seq[inspos:-ins_len])
     altseq = altseq[0:len(seq)]
-    if vaf == 1.0:
-        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
@@ -184,18 +179,17 @@ def make_mnv(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     altseq = "".join(ls[0:delpos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(ls[delpos:-ins_len])
     altseq = altseq[0:len(seq)]
     altseq = altseq + "A" * (len(seq) - len(altseq))
-    if vaf == 1.0:
-        seq = altseq
     return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
 
 
 def make_novar(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
-    return stack_refalt_tensrs(seq, seq, readlength, totreads, vaf, error_rate=error_rate, clip_prob=clip_prob)
+    return stack_refalt_tensrs(seq, seq, readlength, totreads, 0, error_rate=error_rate, clip_prob=clip_prob)
 
 
 def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error_rate, clip_prob, vafs=None):
     src = []
     tgt = []
+    tgt_vafs = []
     if vafs is not None:
         assert len(vafs) == batchsize, f"When vafs are provided, there must be exactly one VAF per batch item"
     vafdist = stats.beta(a=2.0, b=5.0) # Only used if vafs is not supplied
@@ -206,15 +200,16 @@ def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error
             if np.random.rand() < 0.10:
                 vaf = 1.0
             else:
-                vaf = vafdist.rvs(1)
+                vaf = vafdist.rvs(1)[0]
         seq = [b for b in random_bases(seqlen)]
-        reads, altseq = factory_func(seq, readlength, readsperbatch, vaf=vaf, error_rate=error_rate, clip_prob=clip_prob)
+        reads, altseq, tvaf = factory_func(seq, readlength, readsperbatch, vaf=vaf, error_rate=error_rate, clip_prob=clip_prob)
         src.append(reads)
+        tgt_vafs.append(tvaf)
         alt_t = target_string_to_tensor(altseq)
-        seq_t = target_string_to_tensor(seq)
-        x = torch.stack((seq_t, alt_t))
-        tgt.append(x)
-    return torch.stack(src).transpose(1, 2), torch.stack(tgt)
+        # seq_t = target_string_to_tensor(seq)
+        # x = torch.stack((seq_t, alt_t))
+        tgt.append(alt_t)
+    return torch.stack(src).transpose(1, 2), torch.stack(tgt), torch.tensor(tgt_vafs)
 
 
 def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_prob):
@@ -228,22 +223,20 @@ def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_p
     :param clip_prob: Per-read probability of having some soft-clipping
     :return: source data tensor, target data tensor
     """
-    print("And we're in")
     snv_w = 9 # Bigger values here equal less variance among sizes
     del_w = 8
     ins_w = 8
     mnv_w = 5
     novar_w = 10
-    print("Computing dirichlet")
     mix = np.ceil(np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size) # Ceil because zero sizes break things
-    print(f"making batches...{mix}")
-    snv_src, snv_tgt = make_batch(int(mix[0]), seqlen, readsperbatch, readlength, make_het_snv, error_rate, clip_prob)
-    del_src, del_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_del, error_rate, clip_prob)
-    ins_src, ins_tgt = make_batch(int(mix[2]), seqlen, readsperbatch, readlength, make_het_ins, error_rate, clip_prob)
-    mnv_src, mnv_tgt = make_batch(int(mix[3]), seqlen, readsperbatch, readlength, make_mnv, error_rate, clip_prob)
-    novar_src, novar_tgt = make_batch(int(mix[4]), seqlen, readsperbatch, readlength, make_novar, error_rate, clip_prob)
-    print("Done generating tensors...")
-    return torch.cat((snv_src, del_src, ins_src, mnv_src, novar_src)), torch.cat((snv_tgt, del_tgt, ins_tgt, mnv_tgt, novar_tgt))
+    snv_src, snv_tgt, snv_vaf_tgt = make_batch(int(mix[0]), seqlen, readsperbatch, readlength, make_het_snv, error_rate, clip_prob)
+    del_src, del_tgt, del_vaf_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_del, error_rate, clip_prob)
+    ins_src, ins_tgt, ins_vaf_tgt = make_batch(int(mix[2]), seqlen, readsperbatch, readlength, make_het_ins, error_rate, clip_prob)
+    mnv_src, mnv_tgt, mnv_vaf_tgt = make_batch(int(mix[3]), seqlen, readsperbatch, readlength, make_mnv, error_rate, clip_prob)
+    novar_src, novar_tgt, novar_vaf_tgt = make_batch(int(mix[4]), seqlen, readsperbatch, readlength, make_novar, error_rate, clip_prob)
+    return (torch.cat((snv_src, del_src, ins_src, mnv_src, novar_src)),
+           torch.cat((snv_tgt, del_tgt, ins_tgt, mnv_tgt, novar_tgt)),
+           torch.cat((snv_vaf_tgt, del_vaf_tgt, ins_vaf_tgt, mnv_vaf_tgt, novar_vaf_tgt)))
 
 
 def target_string_to_tensor(bases):
@@ -277,3 +270,6 @@ def make_batch_multi(size, seqlen, readsperbatch, readlength, error_rate, clip_p
         allsrc = torch.cat([d[0] for d in data])
         alltgt = torch.cat([d[1] for d in data])
         return allsrc, alltgt
+
+
+# make_batch(12, 30, 10, 18, make_het_snv, 0, clip_prob=0)
