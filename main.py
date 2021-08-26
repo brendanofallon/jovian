@@ -240,7 +240,7 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
         print(v)
 
 
-def eval_prediction(tgt, prediction1, prediction2, midwidth=100):
+def eval_prediction(refseq, tgt, predictions, midwidth=100):
     """
     Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
     detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
@@ -251,30 +251,23 @@ def eval_prediction(tgt, prediction1, prediction2, midwidth=100):
     :param midwidth:
     :return:
     """
-    rseq1 = util.tgt_str(tgt[0, :])
-    rseq2 = util.tgt_str(tgt[1, :])
+    rseq1 = util.tgt_str(tgt)
     midstart = tgt.shape[-1] // 2 - midwidth // 2
     midend = tgt.shape[-1] // 2 + midwidth // 2
+    refseqstr = util.readstr(refseq)
     known_vars = []
-    for v in vcf.align_seqs(rseq1[midstart:midend], rseq2[midstart:midend]):
+    for v in vcf.align_seqs(refseqstr[midstart:midend], rseq1[midstart:midend]):
         known_vars.append(v)
 
-    pred1_vars = []
-    for v in vcf.align_seqs(rseq1[midstart:midend], util.readstr(prediction1[midstart:midend, :])):
-        pred1_vars.append(v)
-
-    pred2_vars = []
-    for v in vcf.align_seqs(rseq2[midstart:midend], util.readstr(prediction2[midstart:midend, :])):
-        pred2_vars.append(v)
+    pred_vars = []
+    for v in vcf.align_seqs(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :])):
+        pred_vars.append(v)
 
     hits = 0
     for true_var in known_vars:
-        if true_var in pred1_vars:
+        if true_var in pred_vars:
             hits += 1
             print(f"Detected {true_var} on hap 1")
-        elif true_var in pred2_vars:
-            hits += 2
-            print(f"Detected {true_var} on hap 2")
 
     if len(known_vars) == 0:
         return 1.0
@@ -284,28 +277,29 @@ def eval_prediction(tgt, prediction1, prediction2, midwidth=100):
 
 
 def eval_sim(statedict, **kwargs):
-    max_read_depth = 200
+    max_read_depth = 200 + 1
     feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
     # SNVs
     batch_size = 10
-    raw_src, tgt = sim.make_batch(batch_size,
+    raw_src, tgt, tgtvaf = sim.make_batch(batch_size,
                                       seqlen=200,
                                       readsperbatch=200,
                                       readlength=150,
-                                      factory_func=sim.make_mnv,
+                                      factory_func=sim.make_het_snv,
                                       error_rate=0.02,
                                       clip_prob=0.02,
-                                      vafs=0.5 * np.ones(batch_size))
-    src = sort_by_ref(tgt, raw_src)
-    seq1preds, seq2preds = model(src.flatten(start_dim=2))
+                                      vafs=0.25 * np.ones(batch_size))
+    src = sort_by_ref(raw_src)
+    seq_preds, vaf_preds = model(src.flatten(start_dim=2))
 
+    print(util.to_pileup(src[0, :,:,:]))
     for b in range(src.shape[0]):
-        hitpct = eval_prediction(tgt[b, :, :], seq1preds[b,:, :], seq2preds[b, :, :])
+        hitpct = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])
         print(f"Item {b} vars detected: {hitpct} ")
 
 
