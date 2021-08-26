@@ -39,7 +39,9 @@ class TwoHapDecoder(nn.Module):
     def forward(self, x):
         x = self.elu(self.fc1(x))
         x1 = self.softmax(self.fc2(x))
-        x_vaf = torch.sigmoid(self.fc_vaf(x))
+        # VAF stuff is VERY experimental - x has shape [batch, seqlen (in general this is variable), 4] - no linear
+        # layer can be operate over the seq_dim since it can change from run to run, so instead we just sum it??
+        x_vaf = torch.sigmoid(self.fc_vaf(x).sum(dim=1))
         return x1, x_vaf
 
 

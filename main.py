@@ -138,9 +138,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
-        print(f"vaf_preds: {vaf_preds.shape}")
-        print(f"tgt vaf: {tgtvaf.shape}")
-        vafloss = vaf_criterion(vaf_preds.double(), tgtvaf)
+        vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf)
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
