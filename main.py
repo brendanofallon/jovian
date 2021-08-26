@@ -137,7 +137,19 @@ def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
 
         seq1preds, seq2preds = model(src.flatten(start_dim=2))
 
-        loss = criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
+        focal_width = 20
+        mid = seq1preds.shape[1] // 2
+        midstart = mid-focal_width//2
+        midend = mid + focal_width // 2
+        seq1_focal = seq1preds[:, midstart:midend, :].flatten(start_dim=0, end_dim=1)
+        tgt1_focal = tgt_seq1[:, midstart:midend].flatten()
+        seq2_focal = seq2preds[:, midstart:midend, :].flatten(start_dim=0, end_dim=1)
+        tgt2_focal = tgt_seq2[:, midstart:midend].flatten()
+
+        loss = 5*criterion(seq1_focal, tgt1_focal)
+        loss += 5*criterion(seq2_focal, tgt2_focal)
+
+        loss += criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
         loss += criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
         klloss = 0.1 * kldivloss(seq1preds.log(), seq2preds.log())
         with torch.no_grad():
@@ -306,7 +318,7 @@ def eval_sim(statedict, **kwargs):
                                       factory_func=sim.make_mnv,
                                       error_rate=0.02,
                                       clip_prob=0.02,
-                                      vafs=0.95 * np.ones(batch_size))
+                                      vafs=0.8 * np.ones(batch_size))
     src = sort_by_ref(tgt, raw_src)
     seq1preds, seq2preds = model(src.flatten(start_dim=2))
 
