@@ -129,6 +129,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
     """
     epoch_loss_sum = 0
+    vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf in loader.iter_once(batch_size):
         src = sort_by_ref(unsorted_src)
         optimizer.zero_grad()
@@ -136,11 +137,14 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
         seq_preds, vaf_preds = model(src.flatten(start_dim=2))
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
-        vafloss = vaf_criterion(vaf_preds, tgtvaf)
+
+        print(f"vaf_preds: {vaf_preds.shape}")
+        print(f"tgt vaf: {tgtvaf.shape}")
+        vafloss = vaf_criterion(vaf_preds.double(), tgtvaf)
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
-            midmatch1 = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+            midmatch = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
@@ -150,8 +154,9 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
         vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
+        vafloss_sum += vafloss.detach().item()
 
-    return epoch_loss_sum, midmatch1.item(), midmatch2.item()
+    return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
@@ -170,9 +175,9 @@ def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size)
+            loss, refmatch, vafloss = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size)
             elapsed = datetime.now() - starttime
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
             scheduler.step()
 
         logger.info(f"Training completed after {epoch} epochs")
