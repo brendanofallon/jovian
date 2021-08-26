@@ -145,7 +145,8 @@ def make_het_snv(seq, readlength, totreads, vaf, error_rate, clip_prob):
     altseq = "".join(altseq)
     if vaf == 1.0:
         seq = altseq
-    return stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
+    result = stack_refalt_tensrs(seq, altseq, readlength, totreads, vaf, error_rate, clip_prob)
+    return result
 
 
 
@@ -227,17 +228,21 @@ def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_p
     :param clip_prob: Per-read probability of having some soft-clipping
     :return: source data tensor, target data tensor
     """
+    print("And we're in")
     snv_w = 9 # Bigger values here equal less variance among sizes
     del_w = 8
     ins_w = 8
     mnv_w = 5
     novar_w = 10
+    print("Computing dirichlet")
     mix = np.ceil(np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size) # Ceil because zero sizes break things
+    print(f"making batches...{mix}")
     snv_src, snv_tgt = make_batch(int(mix[0]), seqlen, readsperbatch, readlength, make_het_snv, error_rate, clip_prob)
     del_src, del_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_del, error_rate, clip_prob)
     ins_src, ins_tgt = make_batch(int(mix[2]), seqlen, readsperbatch, readlength, make_het_ins, error_rate, clip_prob)
     mnv_src, mnv_tgt = make_batch(int(mix[3]), seqlen, readsperbatch, readlength, make_mnv, error_rate, clip_prob)
     novar_src, novar_tgt = make_batch(int(mix[4]), seqlen, readsperbatch, readlength, make_novar, error_rate, clip_prob)
+    print("Done generating tensors...")
     return torch.cat((snv_src, del_src, ins_src, mnv_src, novar_src)), torch.cat((snv_tgt, del_tgt, ins_tgt, mnv_tgt, novar_tgt))
 
 
@@ -248,6 +253,9 @@ def target_string_to_tensor(bases):
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
 
+def somefunc(*args, **kwargs):
+    print("Hiya!")
+    return torch.rand(1,2,3, 1), torch.rand(3,4,5)
 
 def make_batch_multi(size, seqlen, readsperbatch, readlength, error_rate, clip_prob, threads):
     """
