@@ -18,8 +18,7 @@ import util
 import vcf
 import loader
 from bam import target_string_to_tensor, encode_pileup2, reads_spanning, alnstart
-from model import VarTransformer
-
+from model import VarTransformer, VarTransformerRE
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
@@ -134,7 +133,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
         src = sort_by_ref(unsorted_src)
         optimizer.zero_grad()
 
-        seq_preds, vaf_preds = model(src.flatten(start_dim=2))
+        seq_preds, vaf_preds = model(src)
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
@@ -159,7 +158,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = (max_read_depth + 1) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -281,7 +280,7 @@ def eval_sim(statedict, **kwargs):
     max_read_depth = 200 + 1
     feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 

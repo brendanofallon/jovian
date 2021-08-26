@@ -64,3 +64,44 @@ class VarTransformer(nn.Module):
         output = self.decoder(output)
         return output
 
+
+class ReadEncoder(nn.Module):
+
+    def __init__(self, embed_dim, nhead=1, d_hid=100, p_dropout=0.1, n_encoder_layers=1):
+        super().__init__()
+        encoder_layers = nn.TransformerEncoderLayer(embed_dim, nhead, d_hid, p_dropout)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
+        self.fc = nn.Linear(embed_dim, 1)
+
+    def forward(self, x):
+        x = self.transformer_encoder(x)
+        x = torch.sigmoid(self.fc(x)).squeeze(-1)
+        return x
+
+
+class VarTransformerRE(nn.Module):
+
+    def __init__(self, seqlen, readcount, feats, out_dim, nhead=4, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
+        super().__init__()
+        self.embed_dim = nhead * 24
+        self.fc1 = nn.Linear(readcount * feats, self.embed_dim)
+        self.read_encoder = ReadEncoder(seqlen * feats)
+        self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
+        self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
+        self.elu = torch.nn.ELU()
+
+    def forward(self, src):
+        feats = src.shape[-1]
+        mask = self.read_encoder(src.transpose(1, 2).flatten(start_dim=2))
+        src_flat = src.flatten(start_dim=2)
+
+        maskrep = mask.repeat(1, feats).unsqueeze(1)
+        src_flat = src_flat * maskrep
+
+        src_flat = self.elu(self.fc1(src_flat))
+        src_flat = self.pos_encoder(src_flat)
+        output = self.transformer_encoder(src_flat)
+        seqpreds, vafpreds = self.decoder(output)
+        return seqpreds, vafpreds
