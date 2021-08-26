@@ -32,15 +32,15 @@ class TwoHapDecoder(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(in_dim, 128)
         self.fc2 = nn.Linear(128, out_dim)
-        self.fc3 = nn.Linear(128, out_dim)
+        self.fc_vaf = nn.Linear(128, 1)
         self.elu = nn.ELU()
         self.softmax = nn.Softmax(dim=2)
 
     def forward(self, x):
         x = self.elu(self.fc1(x))
         x1 = self.softmax(self.fc2(x))
-        x2 = self.softmax(self.fc3(x))
-        return x1, x2
+        x_vaf = torch.sigmoid(self.fc_vaf(x))
+        return x1, x_vaf
 
 
 class VarTransformer(nn.Module):
