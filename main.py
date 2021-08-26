@@ -159,7 +159,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = (max_read_depth + 1) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))

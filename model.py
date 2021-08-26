@@ -30,9 +30,9 @@ class TwoHapDecoder(nn.Module):
 
     def __init__(self, in_dim, out_dim):
         super().__init__()
-        self.fc1 = nn.Linear(in_dim, 128)
-        self.fc2 = nn.Linear(128, out_dim)
-        self.fc_vaf = nn.Linear(128, 1)
+        self.fc1 = nn.Linear(in_dim, 256)
+        self.fc2 = nn.Linear(256, out_dim)
+        self.fc_vaf = nn.Linear(256, 1)
         self.elu = nn.ELU()
         self.softmax = nn.Softmax(dim=2)
 
@@ -40,8 +40,8 @@ class TwoHapDecoder(nn.Module):
         x = self.elu(self.fc1(x))
         x1 = self.softmax(self.fc2(x))
         # VAF stuff is VERY experimental - x has shape [batch, seqlen (in general this is variable), 4] - no linear
-        # layer can be operate over the seq_dim since it can change from run to run, so instead we just sum it??
-        x_vaf = torch.sigmoid(self.fc_vaf(x).sum(dim=1))
+        # layer can be operate over the seq_dim since it can change from run to run, so instead we just sum it?? (Mean works better than sum)
+        x_vaf = torch.sigmoid(self.fc_vaf(x).mean(dim=1))
         return x1, x_vaf
 
 
@@ -49,7 +49,7 @@ class VarTransformer(nn.Module):
 
     def __init__(self, in_dim, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
         super().__init__()
-        self.embed_dim = nhead * 24
+        self.embed_dim = nhead * 12
         self.fc1 = nn.Linear(in_dim, self.embed_dim)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
@@ -63,3 +63,4 @@ class VarTransformer(nn.Module):
         output = self.transformer_encoder(src)
         output = self.decoder(output)
         return output
+

@@ -192,7 +192,7 @@ def make_batch(batchsize, seqlen, readsperbatch, readlength, factory_func, error
     tgt_vafs = []
     if vafs is not None:
         assert len(vafs) == batchsize, f"When vafs are provided, there must be exactly one VAF per batch item"
-    vafdist = stats.beta(a=2.0, b=5.0) # Only used if vafs is not supplied
+    vafdist = stats.beta(a=1.0, b=5.0) # Only used if vafs is not supplied
     for i in range(batchsize):
         if vafs is not None:
             vaf = vafs[i]
