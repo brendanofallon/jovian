@@ -86,15 +86,25 @@ class SimLoader:
         self.readlength = readlength
         self.error_rate = error_rate
         self.clip_prob = clip_prob
+        self.sim_data = []
+        self.min_buf_len = 5
+        self.max_buf_len = 10
+
 
     def iter_once(self, batch_size):
+        if len(self.sim_data):
+            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
+
         for i in range(self.batches_in_epoch):
-            src, tgt, vaftgt = sim.make_mixed_batch(batch_size,
+            if len(self.sim_data) <= i:
+                src, tgt, vaftgt = sim.make_mixed_batch(batch_size,
                                             seqlen=self.seqlen,
                                             readsperbatch=self.readsperbatch,
                                             readlength=self.readlength,
                                             error_rate=self.error_rate,
                                             clip_prob=self.clip_prob)
+                self.sim_data.append((src, tgt, vaftgt))
+            src, tgt, vaftgt = self.sim_data[-1]
             yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device)
 
 
