@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import torch
+import torch.multiprocessing as mp
 import scipy.stats as stats
 
 
@@ -172,13 +173,13 @@ def make_het_ins(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
 
 
 def make_mnv(seq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
-    del_len = random.choice(range(10)) + 1
+    del_len = random.choice(range(15)) + 1
     delpos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - del_len, len(seq) // 2 + 8)))
     ls = list(seq)
     for i in range(del_len):
         del ls[delpos]
 
-    ins_len = random.choice(range(10)) + 1
+    ins_len = random.choice(range(15)) + 1
     altseq = "".join(ls[0:delpos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(ls[delpos:-ins_len])
     altseq = altseq[0:len(seq)]
     altseq = altseq + "A" * (len(seq) - len(altseq))
@@ -247,3 +248,24 @@ def target_string_to_tensor(bases):
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
 
+
+def make_batch_multi(size, seqlen, readsperbatch, readlength, error_rate, clip_prob, threads):
+    """
+    Create multiple ReadLoaders in parallel for each element in Inputs
+    :param inputs: List of (BAM path, labels csv) tuples
+    :param threads: Number of threads to use
+    :param max_reads_per_aln: Max number of reads for each pileup
+    :return: List of loaders
+    """
+    results = []
+    subsize = size // threads + 1
+    with mp.Pool(processes=threads) as pool:
+        for i in range(threads):
+            result = pool.apply_async(make_mixed_batch, (subsize, seqlen, readsperbatch, readlength, error_rate, clip_prob))
+            results.append(result)
+        pool.close()
+
+        data = [d.get(timeout=60 * 60) for d in results]
+        allsrc = torch.cat([d[0] for d in data])
+        alltgt = torch.cat([d[1] for d in data])
+        return allsrc, alltgt

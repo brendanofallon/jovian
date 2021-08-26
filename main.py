@@ -117,7 +117,7 @@ def sort_by_ref(seq, reads):
     return torch.stack(results)
 
 
-def train_epoch(model, optimizer, criterion, loader, batch_size):
+def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
     :param model: Model to train
@@ -139,7 +139,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
 
         loss = criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
         loss += criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
-
+        klloss = 0.1 * kldivloss(seq1preds.log(), seq2preds.log())
         with torch.no_grad():
             width = 20
             mid = seq1preds.shape[1] // 2
@@ -156,6 +156,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
             #                          dim=1) == tgt_seq2.flatten()).float().mean()
 
         loss.backward(retain_graph=True)
+        klloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
 
@@ -164,20 +165,21 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = max_read_depth * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 64
+    batch_size = 32
 
     criterion = nn.CrossEntropyLoss()
+    kldivloss = nn.KLDivLoss(log_target=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.99)
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, dataloader, batch_size=batch_size)
+            loss, refmatch, altmatch = train_epoch(model, optimizer, criterion, kldivloss, dataloader, batch_size=batch_size)
             elapsed = datetime.now() - starttime
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  altmatch: {altmatch:.4f} ")
             scheduler.step()
@@ -204,7 +206,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    dataloader = loader.SimLoader(DEVICE, seqlen=150, readsperbatch=200, readlength=100, error_rate=0.02, clip_prob=0.01)
+    dataloader = loader.SimLoader(DEVICE, seqlen=150, readsperbatch=200, readlength=100, error_rate=0.02, clip_prob=0.02)
     train_epochs(epochs, dataloader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
@@ -243,6 +245,50 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
                             offset=minref + len(refseq)//2 - midwith//2 + 1):
         print(v)
 
+
+def eval_prediction(tgt, prediction1, prediction2, midwidth=100):
+    """
+    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
+    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
+    objects, then compares variant objects
+    :param tgt:
+    :param prediction1:
+    :param prediction2:
+    :param midwidth:
+    :return:
+    """
+    rseq1 = util.tgt_str(tgt[0, :])
+    rseq2 = util.tgt_str(tgt[1, :])
+    midstart = tgt.shape[-1] // 2 - midwidth // 2
+    midend = tgt.shape[-1] // 2 + midwidth // 2
+    known_vars = []
+    for v in vcf.align_seqs(rseq1[midstart:midend], rseq2[midstart:midend]):
+        known_vars.append(v)
+
+    pred1_vars = []
+    for v in vcf.align_seqs(rseq1[midstart:midend], util.readstr(prediction1[midstart:midend, :])):
+        pred1_vars.append(v)
+
+    pred2_vars = []
+    for v in vcf.align_seqs(rseq2[midstart:midend], util.readstr(prediction2[midstart:midend, :])):
+        pred2_vars.append(v)
+
+    hits = 0
+    for true_var in known_vars:
+        if true_var in pred1_vars:
+            hits += 1
+            print(f"Detected {true_var} on hap 1")
+        elif true_var in pred2_vars:
+            hits += 2
+            print(f"Detected {true_var} on hap 2")
+
+    if len(known_vars) == 0:
+        return 1.0
+    else:
+        print(f"Found {hits} of {len(known_vars)}")
+        return hits / len(known_vars)
+
+
 def eval_sim(statedict, **kwargs):
     max_read_depth = 200
     feats_per_read = 7
@@ -253,45 +299,20 @@ def eval_sim(statedict, **kwargs):
 
     # SNVs
     batch_size = 10
-    snv_src, snv_tgt = sim.make_batch(batch_size, 200, 200, 150, sim.make_het_snv, 0.02, clip_prob=0.02, vafs=0.95 * np.ones(batch_size))
-    src = sort_by_ref(snv_tgt, snv_src)
+    raw_src, tgt = sim.make_batch(batch_size,
+                                      seqlen=200,
+                                      readsperbatch=200,
+                                      readlength=150,
+                                      factory_func=sim.make_mnv,
+                                      error_rate=0.02,
+                                      clip_prob=0.02,
+                                      vafs=0.95 * np.ones(batch_size))
+    src = sort_by_ref(tgt, raw_src)
     seq1preds, seq2preds = model(src.flatten(start_dim=2))
 
-    midwidth = 100  # Only examine the 'middle' of the sequence with
-    midstart = snv_tgt.shape[-1] // 2 - midwidth // 2
-    midend = snv_tgt.shape[-1] // 2 + midwidth // 2
-
     for b in range(src.shape[0]):
-        rseq1 = util.tgt_str(snv_tgt[b, 0, :])
-        rseq2 = util.tgt_str(snv_tgt[b, 1, :])
-
-        print(f"\n\n Batch {b}")
-
-        actual_vars = []
-        for v in vcf.align_seqs(rseq1[midstart:midend], rseq2[midstart:midend]):
-            actual_vars.append(v)
-
-        pred1_vars = []
-        for v in vcf.align_seqs(rseq1[midstart:midend], util.readstr(seq1preds[b, midstart:midend])):
-            pred1_vars.append(v)
-
-        pred2_vars = []
-        for v in vcf.align_seqs(rseq2[midstart:midend], util.readstr(seq2preds[b, midstart:midend])):
-            pred2_vars.append(v)
-
-
-        if pred1_vars:
-            print("Found variants on pred 1:")
-            for actual, predicted in zip(actual_vars, pred1_vars):
-                print(f"Actual: {actual} predicts: {predicted}")
-        else:
-            print("No variants on pred 1")
-
-        if pred2_vars:
-            for actual, predicted in zip(actual_vars, pred2_vars):
-                print(f"Actual: {actual} predicts: {predicted}")
-        else:
-            print(f"No variant detected on pred 2:(")
+        hitpct = eval_prediction(tgt[b, :, :], seq1preds[b,:, :], seq2preds[b, :, :])
+        print(f"Item {b} vars detected: {hitpct} ")
 
 
 
