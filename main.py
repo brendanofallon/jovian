@@ -146,12 +146,10 @@ def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
         seq2_focal = seq2preds[:, midstart:midend, :].flatten(start_dim=0, end_dim=1)
         tgt2_focal = tgt_seq2[:, midstart:midend].flatten()
 
-        loss = 5*criterion(seq1_focal, tgt1_focal)
-        loss += 5*criterion(seq2_focal, tgt2_focal)
 
-        loss += criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
-        loss += criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
-        klloss = 0.1 * kldivloss(seq1preds.log(), seq2preds.log())
+        loss = criterion(seq1preds.flatten(start_dim=0, end_dim=1), tgt_seq1.flatten())
+        loss += 10*criterion(seq2preds.flatten(start_dim=0, end_dim=1), tgt_seq2.flatten())
+        # klloss = 0.01 * kldivloss(seq1preds.log(), seq2preds.log())
         with torch.no_grad():
             width = 20
             mid = seq1preds.shape[1] // 2
@@ -159,8 +157,8 @@ def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
                                      dim=1) == tgt_seq1[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
             midmatch2 = (
-                        torch.argmax(seq1preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq1[:, mid - width // 2:mid + width // 2].flatten()
+                        torch.argmax(seq2preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq2[:, mid - width // 2:mid + width // 2].flatten()
                         ).float().mean()
             # matches1 = (torch.argmax(seq1preds.flatten(start_dim=0, end_dim=1),
             #                          dim=1) == tgt_seq1.flatten()).float().mean()
@@ -168,7 +166,7 @@ def train_epoch(model, optimizer, criterion, kldivloss, loader, batch_size):
             #                          dim=1) == tgt_seq2.flatten()).float().mean()
 
         loss.backward(retain_graph=True)
-        klloss.backward()
+        # klloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
 
@@ -305,7 +303,7 @@ def eval_sim(statedict, **kwargs):
     max_read_depth = 200
     feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
