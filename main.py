@@ -280,22 +280,24 @@ def eval_sim(statedict, **kwargs):
     max_read_depth = 200 + 1
     feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformerRE(seqlen=150, readcount=max_read_depth, feats=feats_per_read, out_dim=4, nhead=4,
+                             d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
     # SNVs
     batch_size = 10
     raw_src, tgt, tgtvaf = sim.make_batch(batch_size,
-                                      seqlen=200,
+                                      seqlen=150,
                                       readsperbatch=200,
-                                      readlength=150,
+                                      readlength=100,
                                       factory_func=sim.make_het_snv,
                                       error_rate=0.02,
                                       clip_prob=0.02,
                                       vafs=0.25 * np.ones(batch_size))
     src = sort_by_ref(raw_src)
-    seq_preds, vaf_preds = model(src.flatten(start_dim=2))
+    seq_preds, vaf_preds = model(src)
 
     print(util.to_pileup(src[0, :,:,:]))
     for b in range(src.shape[0]):

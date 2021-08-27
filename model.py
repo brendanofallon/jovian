@@ -67,15 +67,14 @@ class VarTransformer(nn.Module):
 
 class ReadEncoder(nn.Module):
 
-    def __init__(self, embed_dim, nhead=1, d_hid=100, p_dropout=0.1, n_encoder_layers=1):
+    def __init__(self, seqlen, feats):
         super().__init__()
-        encoder_layers = nn.TransformerEncoderLayer(embed_dim, nhead, d_hid, p_dropout)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
-        self.fc = nn.Linear(embed_dim, 1)
+        self.fc = nn.Linear(seqlen * feats, 1)
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
-        x = self.transformer_encoder(x)
-        x = torch.sigmoid(self.fc(x)).squeeze(-1)
+        x = x.transpose(1, 2).flatten(start_dim=2)
+        x = self.softmax(self.fc(x)).squeeze(-1)
         return x
 
 
@@ -85,7 +84,7 @@ class VarTransformerRE(nn.Module):
         super().__init__()
         self.embed_dim = nhead * 24
         self.fc1 = nn.Linear(readcount * feats, self.embed_dim)
-        self.read_encoder = ReadEncoder(seqlen * feats)
+        self.read_encoder = ReadEncoder(seqlen, feats)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
@@ -94,7 +93,7 @@ class VarTransformerRE(nn.Module):
 
     def forward(self, src):
         feats = src.shape[-1]
-        mask = self.read_encoder(src.transpose(1, 2).flatten(start_dim=2))
+        mask = self.read_encoder(src)
         src_flat = src.flatten(start_dim=2)
 
         maskrep = mask.repeat(1, feats).unsqueeze(1)
