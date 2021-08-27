@@ -158,7 +158,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
 
 def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = (max_read_depth + 1) * feats_per_read
-    model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -200,8 +201,8 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    dataloader = loader.SimLoader(DEVICE, seqlen=150, readsperbatch=200, readlength=100, error_rate=0.02, clip_prob=0.02)
-    train_epochs(epochs, dataloader, max_read_depth=200, feats_per_read=7, statedict=input_model, model_dest=output_model)
+    dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.02, clip_prob=0.02)
+    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
@@ -280,9 +281,9 @@ def eval_sim(statedict, **kwargs):
     max_read_depth = 200 + 1
     feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
-    # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
-    model = VarTransformerRE(seqlen=150, readcount=max_read_depth, feats=feats_per_read, out_dim=4, nhead=4,
-                             d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    # model = VarTransformerRE(seqlen=150, readcount=max_read_depth, feats=feats_per_read, out_dim=4, nhead=4,
+    #                          d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
@@ -295,7 +296,7 @@ def eval_sim(statedict, **kwargs):
                                       factory_func=sim.make_het_snv,
                                       error_rate=0.02,
                                       clip_prob=0.02,
-                                      vafs=0.25 * np.ones(batch_size))
+                                      vafs=0.95 * np.ones(batch_size))
     src = sort_by_ref(raw_src)
     seq_preds, vaf_preds = model(src)
 
