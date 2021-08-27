@@ -74,7 +74,7 @@ class ReadEncoder(nn.Module):
 
     def forward(self, x):
         x = x.transpose(1, 2).flatten(start_dim=2)
-        x = self.softmax(self.fc(x)).squeeze(-1)
+        x = torch.sigmoid(self.fc(x)).squeeze(-1)
         return x
 
 
