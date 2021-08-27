@@ -67,15 +67,16 @@ class VarTransformer(nn.Module):
 
 class ReadEncoder(nn.Module):
 
-    def __init__(self, embed_dim, nhead=1, d_hid=100, p_dropout=0.1, n_encoder_layers=1):
+    def __init__(self, embed_dim, nhead=2, d_hid=100, p_dropout=0.1, n_encoder_layers=1):
         super().__init__()
         encoder_layers = nn.TransformerEncoderLayer(embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
         self.fc = nn.Linear(embed_dim, 1)
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
         x = self.transformer_encoder(x)
-        x = torch.sigmoid(self.fc(x)).squeeze(-1)
+        x = self.softmax(self.fc(x)).squeeze(-1)
         return x
 
 
