@@ -156,7 +156,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
-def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=7, init_learning_rate=0.001, statedict=None, model_dest=None):
+def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = (max_read_depth + 1) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
@@ -202,12 +202,12 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.02, clip_prob=0.02)
-    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=7, statedict=input_model, model_dest=output_model)
+    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=8, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
     max_read_depth = 200
-    feats_per_read = 7
+    feats_per_read = 8
     in_dim = max_read_depth * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
@@ -278,9 +278,9 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
 
 
 def eval_sim(statedict, **kwargs):
-    max_read_depth = 200 + 1
+    max_read_depth = 100
     feats_per_read = 7
-    in_dim = max_read_depth * feats_per_read
+    in_dim = (max_read_depth + 1) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth, feats=feats_per_read, out_dim=4, nhead=4,
     #                          d_hid=200, n_encoder_layers=2).to(DEVICE)
@@ -289,19 +289,22 @@ def eval_sim(statedict, **kwargs):
 
     # SNVs
     batch_size = 10
+    vafs = 0.5 * np.ones(batch_size)
     raw_src, tgt, tgtvaf = sim.make_batch(batch_size,
                                       seqlen=150,
-                                      readsperbatch=200,
+                                      readsperbatch=max_read_depth,
                                       readlength=100,
-                                      factory_func=sim.make_het_snv,
+                                      factory_func=sim.make_mnv,
                                       error_rate=0.02,
                                       clip_prob=0.02,
-                                      vafs=0.95 * np.ones(batch_size))
+                                      vafs=vafs)
     src = sort_by_ref(raw_src)
     seq_preds, vaf_preds = model(src)
 
     print(util.to_pileup(src[0, :,:,:]))
     for b in range(src.shape[0]):
+        print(util.to_pileup(raw_src[b, :, :, :]))
+        print(f"Actual VAF: {vafs[b]} predicted VAF: {vaf_preds[b].item():.4f}")
         hitpct = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])
         print(f"Item {b} vars detected: {hitpct} ")
 
