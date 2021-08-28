@@ -131,6 +131,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf in loader.iter_once(batch_size):
         src = sort_by_ref(unsorted_src)
+        src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
@@ -156,8 +157,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
-def train_epochs(epochs, dataloader, max_read_depth=250, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
-    in_dim = (max_read_depth + 1) * feats_per_read
+def train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
+    in_dim = (max_read_depth +1) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
@@ -202,7 +203,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.02, clip_prob=0.02)
-    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=8, statedict=input_model, model_dest=output_model)
+    train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
