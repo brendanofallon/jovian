@@ -33,18 +33,19 @@ def update_from_base(base, tensor):
     elif base == 'T':
         tensor[3] = 1
     elif base == 'N':
-        tensor[0:3] = 0.25
+        tensor[0:4] = 0.25
     elif base == '-':
-        tensor[0:3] = 0.0
+        tensor[0:4] = 0.0
     return tensor
 
 
-def encode_basecall(base, qual, cigop, clipped):
-    ebc = torch.zeros(7)
+def encode_basecall(base, qual, cigop, clipped, refmatch):
+    ebc = torch.zeros(8)
     ebc = update_from_base(base, ebc)
     ebc[4] = qual / 100 - 0.5
     ebc[5] = cigop
-    ebc[6] = 1 if clipped else 0
+    ebc[6] = 1 if refmatch else 0
+    ebc[7] = 1 if clipped else 0
     return ebc
 
 
@@ -62,22 +63,22 @@ def pad_zeros(pre, data, post):
     return data
 
 
-def string_to_tensor(bases, clip_frac=0):
+def string_to_tensor(bases, refseq, clip_frac=0):
     if np.random.rand() < clip_frac:
         num_bases_clipped = np.random.randint(3, 50)
         if np.random.rand() < 0.5:
             # Clip left
-            clipped_bases = [encode_basecall(b, 50, 0, 1) for b in random_bases(num_bases_clipped)]
-            normal_bases = [encode_basecall(b, 50, 0, 0) for b in bases[num_bases_clipped:]]
+            clipped_bases = [encode_basecall(b, 50, 0, 1, refmatch=False) for b in random_bases(num_bases_clipped)]
+            normal_bases = [encode_basecall(b, 50, 0, 0, refmatch=(b==r)) for b,r  in zip(bases[num_bases_clipped:], refseq[num_bases_clipped:])]
             return torch.vstack(clipped_bases + normal_bases)
         else:
             # Clip right
-            normal_bases = [encode_basecall(b, 50, 0, 0) for b in bases[0:len(bases) - num_bases_clipped]]
-            clipped_bases = [encode_basecall(b, 50, 0, 1) for b in random_bases(num_bases_clipped)]
+            normal_bases = [encode_basecall(b, 50, 0, 0, refmatch=(b==r)) for b,r in zip(bases[0:len(bases) - num_bases_clipped], refseq[0:len(bases) - num_bases_clipped])]
+            clipped_bases = [encode_basecall(b, 50, 0, 1, refmatch=False) for b in random_bases(num_bases_clipped)]
             return torch.vstack(normal_bases + clipped_bases)
     else:
         # No Clipping
-        return torch.vstack([encode_basecall(b, 50, 0, 0) for b in bases])
+        return torch.vstack([encode_basecall(b, 50, 0, 0, refmatch=(b==r)) for b,r in zip(bases, refseq)])
 
 
 def mutate_seq(seq, error_rate):
@@ -103,7 +104,7 @@ def mutate_seq(seq, error_rate):
     return "".join(output)
 
 
-def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, clip_prob=0, align_to_ref=True):
+def tensors_from_seq(seq, numreads, readlen, refseq, error_rate=0.0, clip_prob=0):
     """
     Given a sequence of bases, seq, generate "reads" (encoded read tensors) that align to the sequence
     :param seq: Base sequence, reads will match subsequences of this
@@ -118,7 +119,7 @@ def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, clip_prob=0, align_
         startpos = random.randint(0, len(seq) - readlen)
         seqs.append(
             pad_zeros(startpos,
-                      string_to_tensor(mutate_seq(seq[startpos:startpos + readlen], error_rate), clip_prob),
+                      string_to_tensor(mutate_seq(seq[startpos:startpos + readlen], error_rate), refseq[startpos:startpos + readlen], clip_prob),
                       len(seq) - startpos - readlen)
         )
 
@@ -128,9 +129,9 @@ def tensors_from_seq(seq, numreads, readlen, error_rate=0.0, clip_prob=0, align_
 def stack_refalt_tensrs(refseq, altseq, readlength, totreads, vaf=0.5, error_rate=0, clip_prob=0):
     assert len(refseq) == len(altseq), f"Sequences must be the same length (got {len(refseq)} and {len(altseq)})"
     num_altreads = stats.binom(totreads - 2, vaf).rvs(1)[0] + 1
-    fullref = string_to_tensor(refseq, 0)
-    reftensors = tensors_from_seq(refseq, totreads-num_altreads, readlength, error_rate, clip_prob)
-    alttensors = tensors_from_seq(altseq, num_altreads, readlength, error_rate, clip_prob)
+    fullref = string_to_tensor(refseq, refseq, 0)
+    reftensors = tensors_from_seq(refseq, totreads-num_altreads, readlength, refseq, error_rate, clip_prob)
+    alttensors = tensors_from_seq(altseq, num_altreads, readlength, refseq, error_rate, clip_prob)
     combined = torch.cat([reftensors, alttensors])
     idx = np.random.permutation(totreads)
     combined[range(totreads)] = combined[idx]
