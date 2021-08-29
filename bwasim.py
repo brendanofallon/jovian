@@ -1,5 +1,6 @@
 
 import numpy as np
+import logging
 import scipy.stats as stats
 import torch
 
@@ -9,9 +10,13 @@ import pysam
 import subprocess
 
 
+logger = logging.getLogger(__name__)
+
 def run_bwa(fastq1, fastq2, refgenome, dest):
-    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools --threads 4 sort - | samtools view -b - -o {dest}"
+    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools sort - | samtools view -b - -o {dest}"
+    logger.info(f"Executing {cmd}")
     subprocess.run(cmd, shell=True)
+    subprocess.run(f"samtools index {dest}", shell=True)
 
 
 def revcomp(seq):
@@ -149,8 +154,8 @@ def load_regions(regionsbed):
 
 
 def main():
-    # refpath = "/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
-    refpath = "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
+    refpath = "/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
+    #refpath = "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
     # ref = pysam.FastaFile(refpath)
     # seq = ref.fetch("2", 73612900, 73613200)
     # fq1, fq2, altseq, vaf = make_het_snv(seq, 150, 100, 0.5, prefix="myhetsnv")
