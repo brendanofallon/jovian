@@ -37,6 +37,7 @@ def to_fastq(read, idx):
 
 def fq_from_seq(seq, numreads, readlength, fragsize):
     for i, (r1, r2) in enumerate(generate_reads(seq, numreads, readlength, fragsize)):
+        r2 = revcomp(r2)
         yield to_fastq(r1, i), to_fastq(r2, i)
 
 
@@ -75,7 +76,8 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, error_rate=0, clip_prob
 
 
 def main():
-    ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    #ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    ref = pysam.FastaFile("/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
     seq = ref.fetch("2", 73612900, 73613200)
     fq1, fq2, altseq, vaf = make_het_snv(seq, 150, 100, 0.5, prefix="myhetsnv")
     fq1 = bgzip(fq1)

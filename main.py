@@ -158,11 +158,11 @@ def remove_ref_reads(reads, maxreads=50, altmask=None):
             if nonrefs.shape[1] >= maxreads:
                 nonrefs = nonrefs[:, 0:maxreads, :]
             else:
-                pad = torch.zeros(reads.shape[1], maxreads - nonrefs.shape[1], reads.shape[3])
+                pad = torch.zeros(reads.shape[1], maxreads - nonrefs.shape[1], reads.shape[3]).to(DEVICE)
                 nonrefs = torch.cat((nonrefs, pad), dim=1)
             results.append(nonrefs)
 
-    return torch.stack(results)
+    return torch.stack(results).to(DEVICE)
 
 
 def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads):
