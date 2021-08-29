@@ -290,6 +290,27 @@ def encode_pileup2(reads):
     return torch.stack(everything)
 
 
+def ensure_dim(readtensor, seqdim, readdim):
+    """
+    Trim or zero-pad the readtensor to make sure it has exactly 'seqdim' size for the sequence length
+    and 'readdim' size for the read dimension
+    Assumes readtensor has dimension [seq, read, features]
+    :return:
+    """
+    if readtensor.shape[0] >= seqdim:
+        readtensor = readtensor[0:seqdim, :, :]
+    else:
+        pad = torch.zeros(seqdim - readtensor.shape[0], readtensor.shape[1], readtensor.shape[2])
+        readtensor = torch.cat((readtensor, pad))
+
+    if readtensor.shape[1] >= readdim:
+        readtensor = readtensor[:, 0:readdim, :]
+    else:
+        pad = torch.zeros(readtensor.shape[0], readdim - readtensor.shape[1], readtensor.shape[2])
+        readtensor = torch.cat((readtensor, pad))
+    return readtensor
+
+
 def format_cigar(cig):
     return cig.replace("M", "M ").replace("S", "S ").replace("I", "I ").replace("D", "D ")
 

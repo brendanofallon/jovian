@@ -104,7 +104,7 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, error_rate=0, clip_prob
 def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, clip_prob):
     prefix = "fqbatch_32"
     refgenome = pysam.FastaFile(refpath)
-    region_size = 300
+    region_size = 200
     var_info = [] # Stores region, altseq, and vaf for each variant created
     for region in random.sample(regions, k=batch_size):
         pos = np.random.randint(region[1], region[2])
@@ -127,9 +127,11 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
         if len(reads) < numreads // 10:
             raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
         reads_encoded = encode_pileup2(reads)
-        src.append(reads_encoded)
+        reads = bam.ensure_dim(reads_encoded, region_size, numreads)
+        src.append(reads)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)
+        print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape}")
 
     return torch.stack(src), torch.stack(tgt), torch.tensor(vafs)
 
