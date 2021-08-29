@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 import pysam
 
+import bwasim
 from bam import target_string_to_tensor, encode_with_ref
 import sim
 
@@ -74,6 +75,36 @@ class MultiLoader:
         for loader in self.loaders:
             for src, tgt in loader.iter_once(batch_size):
                 yield src, tgt
+
+
+class BWASimLoader:
+
+    def __init__(self, device, seqlen, readsperpileup, readlength, error_rate, clip_prob):
+        self.batches_in_epoch = 10
+        self.device = device
+        self.seqlen = seqlen
+        self.readsperbatch = readsperpileup
+        self.readlength = readlength
+        self.error_rate = error_rate
+        self.clip_prob = clip_prob
+        self.sim_data = []
+
+
+    def iter_once(self, batch_size):
+        if len(self.sim_data):
+            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
+
+        for i in range(self.batches_in_epoch):
+            if len(self.sim_data) <= i:
+                src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
+                                            seqlen=self.seqlen,
+                                            readsperbatch=self.readsperbatch,
+                                            readlength=self.readlength,
+                                            error_rate=self.error_rate,
+                                            clip_prob=self.clip_prob)
+                self.sim_data.append((src, tgt, vaftgt, altmask))
+            src, tgt, vaftgt, altmask = self.sim_data[-1]
+            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
 
 
 class SimLoader:

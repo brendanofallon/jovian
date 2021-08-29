@@ -2,6 +2,7 @@
 import numpy as np
 import logging
 import scipy.stats as stats
+import string
 import torch
 
 from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim
@@ -42,21 +43,21 @@ def generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob):
         yield read1, read2
 
 
-def to_fastq(read, idx):
-    return f"@read{idx}\n{read}\n+\n" +'F' * len(read) + "\n"
+def to_fastq(read, label, idx):
+    return f"@read_{label}{idx}\n{read}\n+\n" +'F' * len(read) + "\n"
 
 
-def fq_from_seq(seq, numreads, readlength, fragsize, error_rate, clip_prob):
+def fq_from_seq(seq, numreads, readlength, fragsize, read_label, error_rate, clip_prob):
     for i, (r1, r2) in enumerate(generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob)):
         r2 = revcomp(r2)
-        yield to_fastq(r1, i), to_fastq(r2, i)
+        yield to_fastq(r1, read_label, i), to_fastq(r2, read_label, i)
 
 
-def fq_to_file(seq, numreads, readlength, fragsize, prefix, error_rate, clip_prob):
+def fq_to_file(seq, numreads, readlength, fragsize, prefix, read_label, error_rate, clip_prob):
     fq1path = f"{prefix}_R1.fq"
     fq2path = f"{prefix}_R2.fq"
     with open(fq1path, "a") as fq1, open(fq2path, "a") as fq2:
-        for r1, r2 in fq_from_seq(seq, numreads, readlength, fragsize,  error_rate, clip_prob):
+        for r1, r2 in fq_from_seq(seq, numreads, readlength, fragsize, read_label, error_rate, clip_prob):
             fq1.write(r1)
             fq2.write(r2)
     return fq1path, fq2path
@@ -69,9 +70,10 @@ def bgzip(path):
 
 def var2fastq(seq, altseq, readlength, totreads, prefix, vaf=0.5, fragsize=200, error_rate=0, clip_prob=0):
     num_altreads = stats.binom(totreads - 1, vaf).rvs(1)[0] + 1
-    fq_to_file(seq, totreads - num_altreads, readlength, fragsize, prefix, error_rate, clip_prob)
-    fq1, fq2 = fq_to_file(altseq, num_altreads, readlength, fragsize, prefix, error_rate, clip_prob)
+    fq_to_file(seq, totreads - num_altreads, readlength, fragsize, prefix, "ref", error_rate, clip_prob)
+    fq1, fq2 = fq_to_file(altseq, num_altreads, readlength, fragsize, prefix, "hetalt", error_rate, clip_prob)
     return fq1, fq2
+
 
 def mutate_seq(seq, error_rate):
     """
@@ -108,7 +110,8 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
 
 
 def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, clip_prob):
-    prefix = "fqbatch_32"
+    suf = "".join(random.choices(string.ascii_lowercase + string.ascii_uppercase, k=6))
+    prefix = "fqbatch_" + suf
     refgenome = pysam.FastaFile(refpath)
     region_size = 200
     fragment_size = 150
