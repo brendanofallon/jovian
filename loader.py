@@ -79,11 +79,13 @@ class MultiLoader:
 
 class BWASimLoader:
 
-    def __init__(self, device, seqlen, readsperpileup, readlength, error_rate, clip_prob):
+    def __init__(self, device, regions, refpath, seqlen, readsperpileup, readlength, error_rate, clip_prob):
         self.batches_in_epoch = 10
+        self.regions = bwasim.load_regions(regions)
+        self.refpath = refpath
         self.device = device
         self.seqlen = seqlen
-        self.readsperbatch = readsperpileup
+        self.readsperpileup = readsperpileup
         self.readlength = readlength
         self.error_rate = error_rate
         self.clip_prob = clip_prob
@@ -97,11 +99,13 @@ class BWASimLoader:
         for i in range(self.batches_in_epoch):
             if len(self.sim_data) <= i:
                 src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
-                                            seqlen=self.seqlen,
-                                            readsperbatch=self.readsperbatch,
-                                            readlength=self.readlength,
-                                            error_rate=self.error_rate,
-                                            clip_prob=self.clip_prob)
+                                                              self.regions,
+                                                                self.refpath,
+                                                              self.readsperpileup,
+                                                              self.readlength,
+                                                              self.error_rate,
+                                                              self.clip_prob)
+
                 self.sim_data.append((src, tgt, vaftgt, altmask))
             src, tgt, vaftgt, altmask = self.sim_data[-1]
             yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)

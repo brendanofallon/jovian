@@ -271,6 +271,7 @@ def encode_pileup2(reads):
     """
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
+    isalt = ["alt" in r.query_name for r in reads]
     its = [rec_tensor_it(r, minref) for r in reads]
     refpos = minref
     pos_tensors = [next(it) for it in its]
@@ -287,7 +288,7 @@ def encode_pileup2(reads):
         all_stacked = torch.stack(thispos)
         everything.append(all_stacked)
         alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
-    return torch.stack(everything)
+    return torch.stack(everything), torch.tensor(isalt)
 
 
 def ensure_dim(readtensor, seqdim, readdim):

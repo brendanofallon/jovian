@@ -124,7 +124,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
-    bamdest = "batch32.bam"
+    bamdest = "batch78.bam"
     run_bwa(fq1, fq2, refpath, bamdest)
     bam = pysam.AlignmentFile(bamdest)
     max_reads = 2*numreads
@@ -132,20 +132,21 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
     src = []
     tgt = []
     vafs = []
+    altmasks = []
     for chrom, pos, altseq, vaf in var_info:
         print(f"Encoding tensors around {chrom}:{pos}")
         reads = reads_spanning(bam, chrom, pos, max_reads=max_reads)
         if len(reads) < numreads // 10:
             raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
-        reads_encoded = encode_pileup2(reads)
+        reads_encoded, altmask = encode_pileup2(reads)
         reads = ensure_dim(reads_encoded, region_size, numreads)
         src.append(reads)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)
+        altmasks.append(altmask)
         print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape}")
 
-    return torch.stack(src), torch.stack(tgt), torch.tensor(vafs)
-
+    return torch.stack(src), torch.stack(tgt), torch.tensor(vafs), torch.stack(altmasks)
 
 
 def load_regions(regionsbed):
