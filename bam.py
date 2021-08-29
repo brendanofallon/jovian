@@ -266,7 +266,7 @@ def encode_pileup2(reads):
     """
     Convert a list of reads (pysam VariantRecords) into a single tensor
 
-    :param reads: List of pysam VariantRecords
+    :param reads: List of pysam reads
     :return: Tensor with shape [position, read, features]
     """
     minref = min(alnstart(r) for r in reads)
@@ -297,8 +297,8 @@ def format_cigar(cig):
 def reads_spanning(bam, chrom, pos, max_reads):
     """
     Return a list of reads spanning the given position, generally attempting to take
-    reads that include 'pos' approximately in the middle of the read
-
+    reads in which 'pos' is approximately in the middle of the read
+    :return : list of reads spanning the given position
     """
     start = pos - 10
     bamit = bam.fetch(chrom, start)
