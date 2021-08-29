@@ -101,8 +101,8 @@ class SimLoader:
                                             readlength=self.readlength,
                                             error_rate=self.error_rate,
                                             clip_prob=self.clip_prob)
-                self.sim_data.append((src, tgt, vaftgt))
-            src, tgt, vaftgt = self.sim_data[-1]
+                self.sim_data.append((src, tgt, vaftgt, altmask))
+            src, tgt, vaftgt, altmask = self.sim_data[-1]
             yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
 
 

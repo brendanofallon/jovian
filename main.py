@@ -123,7 +123,43 @@ def sort_by_ref(reads, altmask=None):
         return torch.stack(results)
 
 
-def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
+def _is_ref_match(read):
+    assert len(read.shape) == 2, "expected 2-dim input"
+    bases = read[:, 0:4].sum().item()
+    indel = read[:, 5].sum().item()
+    refmatches = read[:, 6].sum().item()
+    clipped = read[:, 7].sum().item()
+    return indel == 0 and clipped == 0 and refmatches == bases
+
+
+def remove_ref_reads(reads, maxreads=50, altmask=None):
+    """
+    Zero out any read that is a perfect ref match (no indels / each base matches ref)
+    :param reads:
+    :param altmask:
+    :return:
+    """
+    results = []
+    altmask_results = []
+    with torch.no_grad():
+        for batch in range(reads.shape[0]):
+            indel = reads[batch, :, :, 5].sum(dim=0)
+            refmatches = reads[batch, :, :, 6].sum(dim=0)
+            clipped = reads[batch, :, :, 7].sum(dim=0)
+            is_refmatch = (indel == 0) * (clipped == 0) * (reads[batch, :, :, 0:4].sum(dim=2).sum(dim=0) == refmatches)
+            is_refmatch[0] = False # Important - read[0] is the reference sequence - we don't want to remove it!
+            nonrefs = reads[batch, :, ~is_refmatch, :]
+            if nonrefs.shape[1] >= maxreads:
+                nonrefs = nonrefs[:, 0:maxreads, :]
+            else:
+                pad = torch.zeros(reads.shape[1], maxreads - nonrefs.shape[1], reads.shape[3])
+                nonrefs = torch.cat((nonrefs, pad), dim=1)
+            results.append(nonrefs)
+
+    return torch.stack(results)
+
+
+def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
     :param model: Model to train
@@ -136,16 +172,16 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     epoch_loss_sum = 0
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
-        src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
+        # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
+        src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads)
+        # src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 
-        print(altmask[0])
         seq_preds, vaf_preds = model(src)
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
-        vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
+        # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
@@ -156,16 +192,16 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
 
 
         loss.backward(retain_graph=True)
-        vafloss.backward()
+        # vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
-        vafloss_sum += vafloss.detach().item()
+        # vafloss_sum += vafloss.detach().item()
 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
-def train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
-    in_dim = (max_read_depth +1) * feats_per_read
+def train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
+    in_dim = (max_read_depth) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
@@ -182,7 +218,7 @@ def train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, init_l
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, refmatch, vafloss = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size)
+            loss, refmatch, vafloss = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size, max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
             scheduler.step()
@@ -209,8 +245,8 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.02, clip_prob=0.02)
-    train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, statedict=input_model, model_dest=output_model)
+    dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
+    train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
