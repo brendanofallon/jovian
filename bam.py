@@ -303,11 +303,14 @@ def reads_spanning(bam, chrom, pos, max_reads):
     start = pos - 10
     bamit = bam.fetch(chrom, start)
     reads = []
-    read = next(bamit)
-    while read.reference_start < pos:
-        if read.reference_start < pos < read.reference_end:
-            reads.append(read)
+    try:
         read = next(bamit)
+        while read.reference_start < pos:
+            if read.reference_start < pos < read.reference_end:
+                reads.append(read)
+            read = next(bamit)
+    except StopIteration:
+        pass
     mid = len(reads) // 2
     return reads[max(0, mid-max_reads//2):min(len(reads), mid+max_reads//2)]
 
