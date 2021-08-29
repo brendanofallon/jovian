@@ -7,7 +7,7 @@ import subprocess
 
 
 def run_bwa(fastq1, fastq2, refgenome, dest):
-    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools --threads 4 sort - | samtools view -b - -o {dest}"
+    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools sort - | samtools view -b - -o {dest}"
     subprocess.run(cmd, shell=True)
 
 
@@ -76,13 +76,15 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, error_rate=0, clip_prob
 
 
 def main():
+    refpath = "/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
     #ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    ref = pysam.FastaFile("/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    ref = pysam.FastaFile(refpath)
     seq = ref.fetch("2", 73612900, 73613200)
     fq1, fq2, altseq, vaf = make_het_snv(seq, 150, 100, 0.5, prefix="myhetsnv")
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
     print(f"Saved results to {fq1}, {fq2}")
+    run_bwa(fq1, fq2, refpath, "testoutput.bam")
 
 
 main()
