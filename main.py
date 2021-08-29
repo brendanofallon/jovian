@@ -131,14 +131,14 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf in loader.iter_once(batch_size):
         src = sort_by_ref(unsorted_src)
-        src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
+        #src = torch.cat((src[:, :, 0:10, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
-        vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf)
+        vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
@@ -203,7 +203,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.02, clip_prob=0.02)
-    train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, statedict=input_model, model_dest=output_model)
+    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=8, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):

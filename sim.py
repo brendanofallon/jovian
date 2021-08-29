@@ -1,9 +1,11 @@
 import random
 import numpy as np
 import torch
+import logging
 import torch.multiprocessing as mp
 import scipy.stats as stats
 
+logger = logging.getLogger(__name__)
 
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
@@ -130,6 +132,7 @@ def stack_refalt_tensrs(refseq, altseq, readlength, totreads, vaf=0.5, error_rat
     assert len(refseq) == len(altseq), f"Sequences must be the same length (got {len(refseq)} and {len(altseq)})"
     num_altreads = stats.binom(totreads - 2, vaf).rvs(1)[0] + 1
     fullref = string_to_tensor(refseq, refseq, 0)
+    #logger.info(f"Vaf: {vaf:.3f} tot reads: {totreads} num alt reads: {num_altreads}")
     reftensors = tensors_from_seq(refseq, totreads-num_altreads, readlength, refseq, error_rate, clip_prob)
     alttensors = tensors_from_seq(altseq, num_altreads, readlength, refseq, error_rate, clip_prob)
     combined = torch.cat([reftensors, alttensors])
@@ -229,7 +232,7 @@ def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_p
     ins_w = 8
     mnv_w = 5
     novar_w = 10
-    mix = np.ceil(np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size) # Ceil because zero sizes break things
+    mix = [int(m) for m in np.ceil(np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size)] # Ceil because zero sizes break things
     snv_src, snv_tgt, snv_vaf_tgt = make_batch(int(mix[0]), seqlen, readsperbatch, readlength, make_het_snv, error_rate, clip_prob)
     del_src, del_tgt, del_vaf_tgt = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_del, error_rate, clip_prob)
     ins_src, ins_tgt, ins_vaf_tgt = make_batch(int(mix[2]), seqlen, readsperbatch, readlength, make_het_ins, error_rate, clip_prob)
@@ -247,9 +250,6 @@ def target_string_to_tensor(bases):
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
 
-def somefunc(*args, **kwargs):
-    print("Hiya!")
-    return torch.rand(1,2,3, 1), torch.rand(3,4,5)
 
 def make_batch_multi(size, seqlen, readsperbatch, readlength, error_rate, clip_prob, threads):
     """

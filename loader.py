@@ -87,8 +87,6 @@ class SimLoader:
         self.error_rate = error_rate
         self.clip_prob = clip_prob
         self.sim_data = []
-        self.min_buf_len = 5
-        self.max_buf_len = 10
 
 
     def iter_once(self, batch_size):
