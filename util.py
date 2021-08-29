@@ -1,3 +1,4 @@
+import torch
 
 from bam import INDEX_TO_BASE
 import numpy as np
@@ -44,3 +45,22 @@ def correctstr(seq, predseq):
     seq = "".join(INDEX_TO_BASE[b] for b in seq)
     output = "".join('*' if a==b else 'x' for a,b in zip(seq, predseq))
     return output
+
+
+def writeseqtensor(t):
+    assert len(t.shape) == 2, f"Expected 2-dimensional input"
+    for pos in range(t.shape[0]):
+        clip = 1 if t[pos, 7] else 0
+        print(clip, end="")
+    print()
+    for pos in range(t.shape[0]):
+        refmatch = 1 if t[pos, 6] else 0
+        print(refmatch, end="")
+    print()
+    for pos in range(t.shape[0]):
+        if torch.sum(t[pos, 0:4]) == 0:
+            base = '.'
+        else:
+            base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
+        print(f"{base}", end="")
+    print()
