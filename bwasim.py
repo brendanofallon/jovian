@@ -133,6 +133,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
     tgt = []
     vafs = []
     for chrom, pos, altseq, vaf in var_info:
+        print(f"Encoding tensors around {chrom}:{pos}")
         reads = reads_spanning(bam, chrom, pos, max_reads=max_reads)
         if len(reads) < numreads // 10:
             raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
