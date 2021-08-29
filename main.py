@@ -100,7 +100,7 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
 
 
 
-def sort_by_ref(reads):
+def sort_by_ref(reads, altmask=None):
     """
     Sort read tensors by how closely they match the sequence seq.
     :param seq:
@@ -108,13 +108,19 @@ def sort_by_ref(reads):
     :return: New tensor containing the same read tensors, but sorted
     """
     results = []
+    altmask_results = []
     for batch in range(reads.shape[0]):
         seq = reads[batch, :,0,:].argmax(dim=-1)
         w = reads[batch, :, :, 0:4].sum(dim=-1)
         t = reads[batch, :, :, 0:4].argmax(dim=-1)
         matchsum = (t == (seq.repeat(reads.shape[2], 1).transpose(0,1)*w).long()).sum(dim=0)
         results.append(reads[batch, :, torch.argsort(matchsum), :])
-    return torch.stack(results)
+        if altmask is not None:
+            altmask_results.append(altmask[batch, torch.argsort(matchsum)])
+    if altmask is not None:
+        return torch.stack(results), altmask_results
+    else:
+        return torch.stack(results)
 
 
 def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
@@ -129,11 +135,12 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     """
     epoch_loss_sum = 0
     vafloss_sum = 0
-    for unsorted_src, tgt_seq, tgtvaf in loader.iter_once(batch_size):
-        src = sort_by_ref(unsorted_src)
-        #src = torch.cat((src[:, :, 0:10, :], src[:, :, -1:, :]), dim=2)
+    for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
+        src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
+        src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 
+        print(altmask[0])
         seq_preds, vaf_preds = model(src)
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
@@ -203,7 +210,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.02, clip_prob=0.02)
-    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=8, statedict=input_model, model_dest=output_model)
+    train_epochs(epochs, dataloader, max_read_depth=20, feats_per_read=8, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):

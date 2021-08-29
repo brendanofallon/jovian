@@ -95,7 +95,7 @@ class SimLoader:
 
         for i in range(self.batches_in_epoch):
             if len(self.sim_data) <= i:
-                src, tgt, vaftgt = sim.make_mixed_batch(batch_size,
+                src, tgt, vaftgt, altmask = sim.make_mixed_batch(batch_size,
                                             seqlen=self.seqlen,
                                             readsperbatch=self.readsperbatch,
                                             readlength=self.readlength,
@@ -103,7 +103,7 @@ class SimLoader:
                                             clip_prob=self.clip_prob)
                 self.sim_data.append((src, tgt, vaftgt))
             src, tgt, vaftgt = self.sim_data[-1]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device)
+            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
 
 
 
