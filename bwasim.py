@@ -34,6 +34,7 @@ def to_fastq(read, idx):
 
 def fq_from_seq(seq, numreads, readlength, fragsize):
     for i, (r1, r2) in enumerate(generate_reads(seq, numreads, readlength, fragsize)):
+        r2 = revcomp(r2)
         yield to_fastq(r1, i), to_fastq(r2, i)
 
 
@@ -51,7 +52,8 @@ def bgzip(path):
     return str(path) + ".gz"
 
 def main():
-    ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    #ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    ref = pysam.FastaFile("/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
     seq = ref.fetch("2", 73612900, 73613200)
     fq1, fq2 = fq_to_file(seq, numreads=100, readlength=100, fragsize=200, prefix="testALMS1")
     fq1 = bgzip(fq1)
