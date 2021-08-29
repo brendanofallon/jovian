@@ -143,12 +143,18 @@ def remove_ref_reads(reads, maxreads=50, altmask=None):
     altmask_results = []
     with torch.no_grad():
         for batch in range(reads.shape[0]):
+            amb = altmask[batch, :]
+            logger.info(f"Batch {batch}, tot alt reads: {amb.sum().item()}")
             indel = reads[batch, :, :, 5].sum(dim=0)
             refmatches = reads[batch, :, :, 6].sum(dim=0)
             clipped = reads[batch, :, :, 7].sum(dim=0)
             is_refmatch = (indel == 0) * (clipped == 0) * (reads[batch, :, :, 0:4].sum(dim=2).sum(dim=0) == refmatches)
             is_refmatch[0] = False # Important - read[0] is the reference sequence - we don't want to remove it!
             nonrefs = reads[batch, :, ~is_refmatch, :]
+            if is_refmatch[torch.where(amb)[0]].sum().item() > 0:
+                logger.error("Yikes, is_refmatch was true for at least one alt read!")
+
+            # assert is_refmatch[torch.where(amb)[0]].sum().item() == 0,
             if nonrefs.shape[1] >= maxreads:
                 nonrefs = nonrefs[:, 0:maxreads, :]
             else:
@@ -173,7 +179,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
-        src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads)
+        src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads, altmask=altmask)
         # src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 

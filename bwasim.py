@@ -1,12 +1,15 @@
 
 import numpy as np
+import scipy.stats as stats
+import random
 import pysam
 import subprocess
 
 
 def run_bwa(fastq1, fastq2, refgenome, dest):
-    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools --threads 4 sort - | samtools view -bh - -o {dest}"
+    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools --threads 4 sort - | samtools view -b - -o {dest}"
     subprocess.run(cmd, shell=True)
+
 
 def revcomp(seq):
     d = {
@@ -40,27 +43,44 @@ def fq_from_seq(seq, numreads, readlength, fragsize):
 def fq_to_file(seq, numreads, readlength, fragsize, prefix):
     fq1path = f"{prefix}_R1.fq"
     fq2path = f"{prefix}_R2.fq"
-    with open(fq1path, "w") as fq1, open(fq2path, "w") as fq2:
+    with open(fq1path, "a") as fq1, open(fq2path, "a") as fq2:
         for r1, r2 in fq_from_seq(seq, numreads, readlength, fragsize):
             fq1.write(r1)
             fq2.write(r2)
     return fq1path, fq2path
 
+
 def bgzip(path):
     subprocess.run(f"bgzip {path}", shell=True)
     return str(path) + ".gz"
 
+
+def var2fastq(seq, altseq, readlength, totreads, prefix, vaf=0.5, fragsize=250, error_rate=0, clip_prob=0):
+    num_altreads = stats.binom(totreads - 1, vaf).rvs(1)[0] + 1
+    fq_to_file(seq, totreads - num_altreads, readlength, fragsize, prefix)
+    fq1, fq2 = fq_to_file(altseq, num_altreads, readlength, fragsize, prefix)
+    return fq1, fq2
+
+
+
+def make_het_snv(seq, readlength, totreads, vaf, prefix, error_rate=0, clip_prob=0):
+    snvpos = random.choice(range(max(0, len(seq) // 2 - 25), min(len(seq), len(seq) // 2 + 25)))
+    altseq = list(seq)
+    altseq[snvpos] = random.choice('ACTG')
+    while altseq[snvpos] == seq[snvpos]:
+        altseq[snvpos] = random.choice('ACTG')
+    altseq = "".join(altseq)
+    fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf)
+    return fq1, fq2, altseq, vaf
+
+
 def main():
     ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
     seq = ref.fetch("2", 73612900, 73613200)
-    fq1, fq2 = fq_to_file(seq, numreads=100, readlength=100, fragsize=200, prefix="testALMS1")
+    fq1, fq2, altseq, vaf = make_het_snv(seq, 150, 100, 0.5, prefix="myhetsnv")
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
     print(f"Saved results to {fq1}, {fq2}")
 
 
 main()
-
-# seq = 'A' * 10 + 'C' * 10 + 'G' * 10 + 'T' * 10
-#
-# fq_to_file(seq, 10, 10, 20, "testfq")
