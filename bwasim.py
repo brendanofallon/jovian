@@ -4,7 +4,7 @@ import logging
 import scipy.stats as stats
 import torch
 
-from bam import reads_spanning, encode_pileup2, target_string_to_tensor
+from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim
 import random
 import pysam
 import subprocess
@@ -95,14 +95,15 @@ def mutate_seq(seq, error_rate):
 
     return "".join(output)
 
-def make_het_snv(seq, readlength, totreads, vaf, prefix, error_rate=0, clip_prob=0):
+
+def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
     snvpos = random.choice(range(max(0, len(seq) // 2 - 25), min(len(seq), len(seq) // 2 + 25)))
     altseq = list(seq)
     altseq[snvpos] = random.choice('ACTG')
     while altseq[snvpos] == seq[snvpos]:
         altseq[snvpos] = random.choice('ACTG')
     altseq = "".join(altseq)
-    fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf)
+    fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
     return fq1, fq2, altseq, vaf
 
 
@@ -110,11 +111,12 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
     prefix = "fqbatch_32"
     refgenome = pysam.FastaFile(refpath)
     region_size = 200
+    fragment_size = 150
     var_info = [] # Stores region, altseq, and vaf for each variant created
     for region in random.sample(regions, k=batch_size):
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
-        fq1, fq2, altseq, vaf = make_het_snv(seq, readlength, numreads, vaf=0.5, prefix=prefix, error_rate=error_rate, clip_prob=clip_prob)
+        fq1, fq2, altseq, vaf = make_het_snv(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         var_info.append((region[0], pos, altseq, vaf))
 
     fq1 = bgzip(fq1)
@@ -132,7 +134,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
         if len(reads) < numreads // 10:
             raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
         reads_encoded = encode_pileup2(reads)
-        reads = bam.ensure_dim(reads_encoded, region_size, numreads)
+        reads = ensure_dim(reads_encoded, region_size, numreads)
         src.append(reads)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)

@@ -301,13 +301,13 @@ def ensure_dim(readtensor, seqdim, readdim):
         readtensor = readtensor[0:seqdim, :, :]
     else:
         pad = torch.zeros(seqdim - readtensor.shape[0], readtensor.shape[1], readtensor.shape[2])
-        readtensor = torch.cat((readtensor, pad))
+        readtensor = torch.cat((readtensor, pad), dim=0)
 
     if readtensor.shape[1] >= readdim:
         readtensor = readtensor[:, 0:readdim, :]
     else:
         pad = torch.zeros(readtensor.shape[0], readdim - readtensor.shape[1], readtensor.shape[2])
-        readtensor = torch.cat((readtensor, pad))
+        readtensor = torch.cat((readtensor, pad), dim=1)
     return readtensor
 
 
