@@ -178,8 +178,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
-        src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads, altmask=altmask)
+        src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
+        #src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads, altmask=altmask)
         # src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 
@@ -215,7 +215,7 @@ def train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, init_l
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 32
+    batch_size = 16
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
@@ -260,7 +260,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
                                      readlength=100,
                                      error_rate=0.01,
                                      clip_prob=0)
-    train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, statedict=input_model, model_dest=output_model)
+    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=7, statedict=input_model, model_dest=output_model)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):

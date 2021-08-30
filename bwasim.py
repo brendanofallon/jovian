@@ -4,8 +4,9 @@ import logging
 import scipy.stats as stats
 import string
 import torch
+import torch.nn.functional as F
 
-from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim
+from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim, string_to_tensor
 import random
 import pysam
 import subprocess
@@ -64,7 +65,7 @@ def fq_to_file(seq, numreads, readlength, fragsize, prefix, read_label, error_ra
 
 
 def bgzip(path):
-    subprocess.run(f"bgzip {path}", shell=True)
+    subprocess.run(f"bgzip -f {path}", shell=True)
     return str(path) + ".gz"
 
 
@@ -111,16 +112,17 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
 
 def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, clip_prob):
     suf = "".join(random.choices(string.ascii_lowercase + string.ascii_uppercase, k=6))
-    prefix = "fqbatch_" + suf
+    prefix = "simfqs" # + suf
     refgenome = pysam.FastaFile(refpath)
     region_size = 200
     fragment_size = 150
     var_info = [] # Stores region, altseq, and vaf for each variant created
-    for region in random.sample(regions, k=batch_size):
+    for i, region in enumerate(random.sample(regions, k=batch_size)):
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
         fq1, fq2, altseq, vaf = make_het_snv(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
-        var_info.append((region[0], pos, altseq, vaf))
+        var_info.append((region[0], pos, seq, altseq, vaf))
+        logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
@@ -133,17 +135,21 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
     tgt = []
     vafs = []
     altmasks = []
-    for chrom, pos, altseq, vaf in var_info:
+    for chrom, pos, refseq, altseq, vaf in var_info:
+        #print(f"Encoding tensors around {chrom}:{pos}")
+        reftensor = string_to_tensor(refseq)
         reads = reads_spanning(bam, chrom, pos, max_reads=max_reads)
-        if len(reads) < numreads // 10:
+        if len(reads) < 3:
             raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
         reads_encoded, altmask = encode_pileup2(reads)
-        reads = ensure_dim(reads_encoded, region_size, numreads)
-        src.append(reads)
+
+        padded_reads = ensure_dim(reads_encoded, region_size, numreads)
+        reads_w_ref = torch.cat((reftensor.unsqueeze(1), padded_reads), dim=1)[:, 0:numreads, :]
+        src.append(reads_w_ref)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)
-        altmasks.append(altmask)
-        print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape}")
+        altmasks.append(F.pad(altmask, (0,numreads-altmask.shape[0])))
+        #print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape} vafs: {vafs[-1]} altmask: {altmasks[-1].shape}")
 
     return torch.stack(src), torch.stack(tgt), torch.tensor(vafs), torch.stack(altmasks)
 
@@ -173,3 +179,4 @@ def main():
     src, tgt, vafs = make_batch(10, regions, refpath, numreads=100, readlength=150, error_rate=0.005, clip_prob=0)
     print(f"src: {src.shape}")
     print(f"tgt: {tgt.shape}")
+
