@@ -101,10 +101,11 @@ class BWASimLoader:
                 src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                               self.regions,
                                                                 self.refpath,
-                                                              self.readsperpileup,
-                                                              self.readlength,
-                                                              self.error_rate,
-                                                              self.clip_prob)
+                                                              numreads=self.readsperpileup,
+                                                              readlength=self.readlength,
+                                                              var_funcs=None,
+                                                              error_rate=self.error_rate,
+                                                              clip_prob=self.clip_prob)
 
                 self.sim_data.append((src, tgt, vaftgt, altmask))
             src, tgt, vaftgt, altmask = self.sim_data[-1]

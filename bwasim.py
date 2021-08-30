@@ -15,9 +15,9 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 def run_bwa(fastq1, fastq2, refgenome, dest):
-    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools sort - | samtools view -b - -o {dest}"
+    cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} 2> /dev/null | samtools sort - | samtools view -b - -o {dest}"
     #logger.info(f"Executing {cmd}")
-    subprocess.run(cmd, shell=True)
+    subprocess.run(cmd, shell=True, stderr=None)
     subprocess.run(f"samtools index {dest}", shell=True)
 
 
@@ -111,17 +111,71 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
     return fq1, fq2, altseq, vaf
 
 
-def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, clip_prob):
-    suf = "".join(random.choices(string.ascii_lowercase + string.ascii_uppercase, k=6))
-    prefix = "simfqs" # + suf
+def make_het_del(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
+    del_len = random.choice(range(min(len(seq)-1, 10)))
+    delpos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - del_len, len(seq) // 2 + 8)))
+    ls = list(seq)
+    for i in range(del_len):
+        del ls[delpos]
+    altseq = "".join(ls + ["A"] * del_len)
+    fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+    return fq1, fq2, altseq, vaf
+
+
+def make_het_ins(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
+    ins_len = random.choice(range(min(len(seq)-1, 10))) + 1
+    inspos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - ins_len, len(seq) // 2 + 8)))
+    altseq = "".join(seq[0:inspos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(seq[inspos:-ins_len])
+    altseq = altseq[0:len(seq)]
+    fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size,
+                         error_rate=error_rate, clip_prob=clip_prob)
+    return fq1, fq2, altseq, vaf
+
+
+def make_mnv(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
+    del_len = random.choice(range(min(len(seq)-1, 15))) + 1
+    delpos = random.choice(range(max(0, len(seq) // 2 - 8), min(len(seq) - del_len, len(seq) // 2 + 8)))
+    ls = list(seq)
+    for i in range(del_len):
+        del ls[delpos]
+
+    ins_len = random.choice(range(15)) + 1
+    altseq = "".join(ls[0:delpos]) + "".join(random.choices("ACTG", k=ins_len)) + "".join(ls[delpos:-ins_len])
+    altseq = altseq[0:len(seq)]
+    altseq = altseq + "A" * (len(seq) - len(altseq))
+    fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size,
+                         error_rate=error_rate, clip_prob=clip_prob)
+    return fq1, fq2, altseq, vaf
+
+
+def make_novar(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
+    fq1, fq2 = var2fastq(seq, seq, readlength, totreads, prefix=prefix, vaf=0.000001, fragsize=fragment_size,
+                         error_rate=error_rate, clip_prob=clip_prob)
+    return fq1, fq2, seq, vaf
+
+
+def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, weights=None, error_rate=0.01, clip_prob=0):
+    prefix = "simfqs"
     refgenome = pysam.FastaFile(refpath)
     region_size = 200
     fragment_size = 150
+    if var_funcs is None:
+        var_funcs = [
+            make_novar,
+            make_het_del,
+            make_het_snv,
+            make_het_ins,
+            make_mnv
+        ]
+    if weights is None:
+        weights = np.ones(len(var_funcs))
+
     var_info = [] # Stores region, altseq, and vaf for each variant created
     for i, region in enumerate(random.sample(regions, k=batch_size)):
+        var_func = random.choices(var_funcs, weights=weights)[0]
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
-        fq1, fq2, altseq, vaf = make_het_snv(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+        fq1, fq2, altseq, vaf = var_func(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         var_info.append((region[0], pos, seq, altseq, vaf))
         #logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
@@ -131,7 +185,6 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
     run_bwa(fq1, fq2, refpath, bamdest)
     bam = pysam.AlignmentFile(bamdest)
     max_reads = 2*numreads
-
     src = []
     tgt = []
     vafs = []
@@ -163,6 +216,34 @@ def load_regions(regionsbed):
             toks = line.split('\t')
             regions.append((toks[0], int(toks[1]), int(toks[2])))
     return regions
+
+
+def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_prob):
+    """
+    Make a batch of training data that is a mixture of different variant types
+    :param size: Total size of batch
+    :param seqlen: Reference sequence length per data point
+    :param readsperbatch: Number of reads in each pileup
+    :param readlength: Length of each read in pileup
+    :param error_rate: Per-base error fraction
+    :param clip_prob: Per-read probability of having some soft-clipping
+    :return: source data tensor, target data tensor
+    """
+    snv_w = 9 # Bigger values here equal less variance among sizes
+    del_w = 8
+    ins_w = 8
+    mnv_w = 5
+    novar_w = 10
+    mix = np.ceil(np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size) # Ceil because zero sizes break things
+    snv_src, snv_tgt, snv_vaf_tgt, snv_altmask = make_batch(int(mix[0]), seqlen, readsperbatch, readlength, make_het_snv, error_rate, clip_prob)
+    del_src, del_tgt, del_vaf_tgt, del_altmask = make_batch(int(mix[1]), seqlen, readsperbatch, readlength, make_het_del, error_rate, clip_prob)
+    ins_src, ins_tgt, ins_vaf_tgt, ins_altmask = make_batch(int(mix[2]), seqlen, readsperbatch, readlength, make_het_ins, error_rate, clip_prob)
+    mnv_src, mnv_tgt, mnv_vaf_tgt, mnv_altmask = make_batch(int(mix[3]), seqlen, readsperbatch, readlength, make_mnv, error_rate, clip_prob)
+    novar_src, novar_tgt, novar_vaf_tgt, novar_altmask = make_batch(int(mix[4]), seqlen, readsperbatch, readlength, make_novar, error_rate, clip_prob)
+    return (torch.cat((snv_src, del_src, ins_src, mnv_src, novar_src)),
+           torch.cat((snv_tgt, del_tgt, ins_tgt, mnv_tgt, novar_tgt)),
+           torch.cat((snv_vaf_tgt, del_vaf_tgt, ins_vaf_tgt, mnv_vaf_tgt, novar_vaf_tgt)),
+           torch.cat((snv_altmask, del_altmask, ins_altmask, mnv_altmask, novar_altmask)))
 
 
 
