@@ -1,6 +1,9 @@
 import torch
+import logging
 import pysam
 
+
+logger = logging.getLogger(__name__)
 
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
@@ -290,6 +293,30 @@ def encode_pileup2(reads):
         alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
     return torch.stack(everything), torch.tensor(isalt)
 
+def _consume_n(it, n):
+    for i in range(n):
+        yield next(it)
+
+def encode_pileup3(reads):
+    """
+    Convert a list of reads (pysam VariantRecords) into a single tensor
+
+    :param reads: List of pysam reads
+    :return: Tensor with shape [position, read, features]
+    """
+    minref = min(alnstart(r) for r in reads)
+    maxref = max(alnstart(r) + r.query_length for r in reads)
+    isalt = ["alt" in r.query_name for r in reads]
+    everything = []
+    for read in reads:
+        try:
+            readencoded = [enc for enc, refconsumed in _consume_n(rec_tensor_it(read, minref), maxref-minref)]
+            everything.append(torch.stack(readencoded))
+        except Exception as ex:
+            logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")
+            continue
+
+    return torch.stack(everything), torch.tensor(isalt)
 
 def ensure_dim(readtensor, seqdim, readdim):
     """

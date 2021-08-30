@@ -6,7 +6,7 @@ import string
 import torch
 import torch.nn.functional as F
 
-from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim, string_to_tensor
+from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim, string_to_tensor, encode_pileup3
 import random
 import pysam
 import subprocess
@@ -143,7 +143,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
         if len(reads) < 3:
             logger.warning(f"Not enough reads spanning {chrom} {pos}, skipping")
             continue
-        reads_encoded, altmask = encode_pileup2(reads)
+        reads_encoded, altmask = encode_pileup3(reads)
 
         padded_reads = ensure_dim(reads_encoded, region_size, numreads)
         reads_w_ref = torch.cat((reftensor.unsqueeze(1), padded_reads), dim=1)[:, 0:numreads, :]
