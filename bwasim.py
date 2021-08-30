@@ -4,6 +4,7 @@ import logging
 import scipy.stats as stats
 import string
 import torch
+import torch.nn.functional as F
 
 from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim
 import random
@@ -111,7 +112,7 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
 
 def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, clip_prob):
     suf = "".join(random.choices(string.ascii_lowercase + string.ascii_uppercase, k=6))
-    prefix = "fqbatch_" + suf
+    prefix = "simfqs" # + suf
     refgenome = pysam.FastaFile(refpath)
     region_size = 200
     fragment_size = 150
@@ -134,7 +135,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
     vafs = []
     altmasks = []
     for chrom, pos, altseq, vaf in var_info:
-        print(f"Encoding tensors around {chrom}:{pos}")
+        #print(f"Encoding tensors around {chrom}:{pos}")
         reads = reads_spanning(bam, chrom, pos, max_reads=max_reads)
         if len(reads) < numreads // 10:
             raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
@@ -143,8 +144,8 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
         src.append(reads)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)
-        altmasks.append(altmask)
-        print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape}")
+        altmasks.append(F.pad(altmask, (0,numreads-altmask.shape[0])))
+        #print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape} vafs: {vafs[-1]} altmask: {altmasks[-1].shape}")
 
     return torch.stack(src), torch.stack(tgt), torch.tensor(vafs), torch.stack(altmasks)
 
@@ -176,4 +177,3 @@ def main():
     print(f"tgt: {tgt.shape}")
 
 
-main()
