@@ -173,6 +173,3 @@ def main():
     src, tgt, vafs = make_batch(10, regions, refpath, numreads=100, readlength=150, error_rate=0.005, clip_prob=0)
     print(f"src: {src.shape}")
     print(f"tgt: {tgt.shape}")
-
-
-main()
