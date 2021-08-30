@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def run_bwa(fastq1, fastq2, refgenome, dest):
     cmd = f"bwa mem -t 2 {refgenome} {fastq1} {fastq2} | samtools sort - | samtools view -b - -o {dest}"
-    logger.info(f"Executing {cmd}")
+    #logger.info(f"Executing {cmd}")
     subprocess.run(cmd, shell=True)
     subprocess.run(f"samtools index {dest}", shell=True)
 
@@ -27,6 +27,7 @@ def revcomp(seq):
         'T': 'A',
         'C': 'G',
         'G': 'C',
+        'N': 'N',
     }
     return "".join(d[b] for b in reversed(seq))
 
@@ -122,7 +123,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
         fq1, fq2, altseq, vaf = make_het_snv(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         var_info.append((region[0], pos, seq, altseq, vaf))
-        logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
+        #logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
@@ -140,7 +141,8 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, error_rate, c
         reftensor = string_to_tensor(refseq)
         reads = reads_spanning(bam, chrom, pos, max_reads=max_reads)
         if len(reads) < 3:
-            raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
+            logger.warning(f"Not enough reads spanning {chrom} {pos}, skipping")
+            continue
         reads_encoded, altmask = encode_pileup2(reads)
 
         padded_reads = ensure_dim(reads_encoded, region_size, numreads)

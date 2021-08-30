@@ -215,7 +215,7 @@ def train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, init_l
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 16
+    batch_size = 64
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
