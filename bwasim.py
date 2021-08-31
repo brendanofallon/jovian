@@ -157,8 +157,8 @@ def make_novar(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate
 def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, weights=None, error_rate=0.01, clip_prob=0):
     prefix = "simfqs"
     refgenome = pysam.FastaFile(refpath)
-    region_size = 200
-    fragment_size = 150
+    region_size = 2 * readlength
+    fragment_size = int(1.5 * readlength)
     if var_funcs is None:
         var_funcs = [
             make_novar,
@@ -177,7 +177,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
         fq1, fq2, altseq, vaf = var_func(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         var_info.append((region[0], pos, seq, altseq, vaf))
-        #logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
+        logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)

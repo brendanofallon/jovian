@@ -13,6 +13,7 @@ import numpy as np
 import argparse
 import yaml
 
+import bwasim
 import sim
 import util
 import vcf
@@ -335,11 +336,14 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
         return hits / len(known_vars)
 
 
-def eval_sim(statedict, **kwargs):
+def eval_sim(statedict, config, **kwargs):
     max_read_depth = 100
     feats_per_read = 7
-    in_dim = (max_read_depth + 1) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    logger.info(f"Found torch device: {DEVICE}")
+    conf = load_train_conf(config)
+    regions = bwasim.load_regions(conf['regions'])
+    in_dim = (max_read_depth ) * feats_per_read
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=3).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth, feats=feats_per_read, out_dim=4, nhead=4,
     #                          d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
@@ -348,14 +352,15 @@ def eval_sim(statedict, **kwargs):
     # SNVs
     batch_size = 10
     vafs = 0.5 * np.ones(batch_size)
-    raw_src, tgt, tgtvaf = sim.make_batch(batch_size,
-                                      seqlen=150,
-                                      readsperbatch=max_read_depth,
-                                      readlength=100,
-                                      factory_func=sim.make_mnv,
-                                      error_rate=0.02,
-                                      clip_prob=0.02,
-                                      vafs=vafs)
+    raw_src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
+                                                  regions,
+                                                  conf['reference'],
+                                                  numreads=100,
+                                                  readlength=98,
+                                                  var_funcs=[bwasim.make_het_snv],
+                                                  error_rate=0.01,
+                                                  clip_prob=0)
+
     src = sort_by_ref(raw_src)
     seq_preds, vaf_preds = model(src)
 
@@ -389,6 +394,7 @@ def main():
 
     evalparser = subparser.add_parser("eval", help="Evaluate a model on some known or simulated data")
     evalparser.add_argument("-m", "--statedict", help="Stored model", required=True)
+    evalparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     evalparser.set_defaults(func=eval_sim)
 
     args = parser.parse_args()

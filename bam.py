@@ -316,7 +316,7 @@ def encode_pileup3(reads):
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")
             continue
 
-    return torch.stack(everything), torch.tensor(isalt)
+    return torch.stack(everything).transpose(0,1), torch.tensor(isalt)
 
 def ensure_dim(readtensor, seqdim, readdim):
     """
