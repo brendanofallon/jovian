@@ -208,7 +208,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
 def train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
     in_dim = (max_read_depth) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=3).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -257,7 +257,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
                                      refpath=conf['reference'],
                                      seqlen=250,
                                      readsperpileup=100,
-                                     readlength=100,
+                                     readlength=98,
                                      error_rate=0.01,
                                      clip_prob=0)
     train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=7, statedict=input_model, model_dest=output_model)
