@@ -111,10 +111,10 @@ def sort_by_ref(reads, altmask=None):
     results = []
     altmask_results = []
     for batch in range(reads.shape[0]):
-        seq = reads[batch, :,0,:].argmax(dim=-1)
+        seq = reads[batch, :, 0, 0:4].argmax(dim=-1)
         w = reads[batch, :, :, 0:4].sum(dim=-1)
         t = reads[batch, :, :, 0:4].argmax(dim=-1)
-        matchsum = (t == (seq.repeat(reads.shape[2], 1).transpose(0,1)*w).long()).sum(dim=0)
+        matchsum = ((t == seq.repeat(reads.shape[2], 1).transpose(0,1)) * w).long().sum(dim=0)
         results.append(reads[batch, :, torch.argsort(matchsum), :])
         if altmask is not None:
             altmask_results.append(altmask[batch, torch.argsort(matchsum)])
@@ -365,7 +365,8 @@ def eval_sim(statedict, config, **kwargs):
 
     print(util.to_pileup(src[0, :,:,:]))
     for b in range(src.shape[0]):
-        print(util.to_pileup(raw_src[b, :, :, :]))
+        print(util.to_pileup(src[b, :, :, :]))
+        print(util.readstr(seq_preds[b, :, :]))
         print(f"Actual VAF: {vafs[b]} predicted VAF: {vaf_preds[b].item():.4f}")
         hitpct = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])
         print(f"Item {b} vars detected: {hitpct} ")
