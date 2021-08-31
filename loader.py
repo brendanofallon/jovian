@@ -79,12 +79,11 @@ class MultiLoader:
 
 class BWASimLoader:
 
-    def __init__(self, device, regions, refpath, seqlen, readsperpileup, readlength, error_rate, clip_prob):
+    def __init__(self, device, regions, refpath, readsperpileup, readlength, error_rate, clip_prob):
         self.batches_in_epoch = 10
         self.regions = bwasim.load_regions(regions)
         self.refpath = refpath
         self.device = device
-        self.seqlen = seqlen
         self.readsperpileup = readsperpileup
         self.readlength = readlength
         self.error_rate = error_rate
