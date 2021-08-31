@@ -297,20 +297,22 @@ def _consume_n(it, n):
     for i in range(n):
         yield next(it)
 
-def encode_pileup3(reads):
+def encode_pileup3(reads, start, end):
     """
     Convert a list of reads (pysam VariantRecords) into a single tensor
 
     :param reads: List of pysam reads
+    :param start: Genomic start coordinate
+    :param end: Genomic end coordinate
     :return: Tensor with shape [position, read, features]
     """
-    minref = min(alnstart(r) for r in reads)
-    maxref = max(alnstart(r) + r.query_length for r in reads)
+    # minref = min(alnstart(r) for r in reads)
+    # maxref = max(alnstart(r) + r.query_length for r in reads)
     isalt = ["alt" in r.query_name for r in reads]
     everything = []
     for read in reads:
         try:
-            readencoded = [enc for enc, refconsumed in _consume_n(rec_tensor_it(read, minref), maxref-minref)]
+            readencoded = [enc for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))
         except Exception as ex:
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")

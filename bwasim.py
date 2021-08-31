@@ -183,8 +183,8 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         elif ns >= 10:
             logger.warning(f"Skipping {regions[0]}:{pos}, too many Ns ({ns})")
             continue
-        var_info.append((region[0], pos, seq, altseq, vaf))
-        #logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
+        var_info.append((region[0], pos-region_size//2, pos+region_size//2, seq, altseq, vaf))
+        #logger.info(f"Item #{i}: {region[0]}:{pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
@@ -196,18 +196,18 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
     tgt = []
     vafs = []
     altmasks = []
-    for chrom, pos, refseq, altseq, vaf in var_info:
+    for chrom, region_start, region_end, refseq, altseq, vaf in var_info:
         #print(f"Encoding tensors around {chrom}:{pos}")
         reftensor = string_to_tensor(refseq)
-        reads = reads_spanning(bam, chrom, pos, max_reads=max_reads)
+        reads = reads_spanning(bam, chrom, (region_start+region_end)//2, max_reads=max_reads)
         if len(reads) < 3:
-            logger.warning(f"Not enough reads spanning {chrom} {pos}, skipping")
+            logger.warning(f"Not enough reads spanning {chrom}:{(region_start+region_end)//2}, skipping")
             continue
-        reads_encoded, altmask = encode_pileup3(reads)
+        reads_encoded, altmask = encode_pileup3(reads, region_start, region_end)
+        reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)[:, 0:numreads, :]
+        padded_reads = ensure_dim(reads_w_ref, region_size, numreads)
 
-        padded_reads = ensure_dim(reads_encoded, region_size, numreads)
-        reads_w_ref = torch.cat((reftensor.unsqueeze(1), padded_reads), dim=1)[:, 0:numreads, :]
-        src.append(reads_w_ref)
+        src.append(padded_reads)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)
         altmasks.append(F.pad(altmask, (0,numreads-altmask.shape[0])))

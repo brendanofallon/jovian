@@ -355,7 +355,7 @@ def eval_sim(statedict, config, **kwargs):
                                                   regions,
                                                   conf['reference'],
                                                   numreads=100,
-                                                  readlength=98,
+                                                  readlength=123,
                                                   var_funcs=[bwasim.make_het_snv],
                                                   error_rate=0.01,
                                                   clip_prob=0)
