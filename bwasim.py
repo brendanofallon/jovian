@@ -184,7 +184,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
             logger.warning(f"Skipping {regions[0]}:{pos}, too many Ns ({ns})")
             continue
         var_info.append((region[0], pos, seq, altseq, vaf))
-        logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
+        #logger.info(f"Item #{i}: {region[0]}:{pos} ({pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)

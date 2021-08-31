@@ -256,9 +256,8 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
-                                     seqlen=250,
                                      readsperpileup=100,
-                                     readlength=98,
+                                     readlength=90,
                                      error_rate=0.01,
                                      clip_prob=0)
     train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=7, statedict=input_model, model_dest=output_model)
