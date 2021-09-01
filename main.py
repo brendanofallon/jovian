@@ -119,7 +119,7 @@ def sort_by_ref(reads, altmask=None):
         if altmask is not None:
             altmask_results.append(altmask[batch, torch.argsort(matchsum)])
     if altmask is not None:
-        return torch.stack(results), altmask_results
+        return torch.stack(results), torch.stack(altmask_results)
     else:
         return torch.stack(results)
 
@@ -355,17 +355,24 @@ def eval_sim(statedict, config, **kwargs):
                                                   regions,
                                                   conf['reference'],
                                                   numreads=100,
+<<<<<<< HEAD
                                                   readlength=123,
                                                   var_funcs=[bwasim.make_het_snv],
+=======
+                                                  readlength=53,
+                                                  var_funcs=[bwasim.make_het_del],
+>>>>>>> 660efa58754ab2456dc9332bb93a4f148530ef3d
                                                   error_rate=0.01,
                                                   clip_prob=0)
 
-    src = sort_by_ref(raw_src)
+    print(util.to_pileup(raw_src[0, :,:,:], altmask[0, :]))
+
+    src, altmask = sort_by_ref(raw_src, altmask)
     seq_preds, vaf_preds = model(src)
 
-    print(util.to_pileup(src[0, :,:,:]))
+
     for b in range(src.shape[0]):
-        print(util.to_pileup(src[b, :, :, :]))
+        print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
         print(util.readstr(seq_preds[b, :, :]))
         print(f"Actual VAF: {vafs[b]} predicted VAF: {vaf_preds[b].item():.4f}")
         hitpct = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])

@@ -205,12 +205,13 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
             continue
         reads_encoded, altmask = encode_pileup3(reads, region_start, region_end)
         reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)[:, 0:numreads, :]
+        altmask = torch.cat((torch.Tensor([False]), altmask)) # Extra False entry for Ref seq
         padded_reads = ensure_dim(reads_w_ref, region_size, numreads)
 
         src.append(padded_reads)
         tgt.append(target_string_to_tensor(altseq))
         vafs.append(vaf)
-        altmasks.append(F.pad(altmask, (0,numreads-altmask.shape[0])))
+        altmasks.append(F.pad(altmask, (0, numreads-altmask.shape[0])))
         #print(f"reads: {src[-1].shape}, alt: {tgt[-1].shape} vafs: {vafs[-1]} altmask: {altmasks[-1].shape}")
 
     return torch.stack(src), torch.stack(tgt), torch.tensor(vafs), torch.stack(altmasks)

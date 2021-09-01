@@ -19,10 +19,11 @@ def readstr(t):
     return "".join(output)
 
 
-def to_pileup(data):
+def to_pileup(data, altmask=None):
     pileup = []
     for i in range(data.shape[1]):
-        pileup.append(readstr(data[:, i, :]))
+        alt = "" if altmask is None else altmask[i].item()
+        pileup.append(readstr(data[:, i, :]) + f"\t{alt}")
     return "\n".join(pileup)
 
 
