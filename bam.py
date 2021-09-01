@@ -357,7 +357,7 @@ def reads_spanning(bam, chrom, pos, max_reads):
     try:
         read = next(bamit)
         while read.reference_start < pos:
-            if read.reference_start < pos < read.reference_end:
+            if read.reference_end is not None and read.reference_start < pos < read.reference_end:
                 reads.append(read)
             read = next(bamit)
     except StopIteration:
