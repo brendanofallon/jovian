@@ -179,7 +179,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
+        # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
+        aex = altmask.unsqueeze(-1).unsqueeze(-1)
+        fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
+        src = unsorted_src * fullmask
         #src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads, altmask=altmask)
         # src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
@@ -256,7 +259,6 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
-                                     seqlen=250,
                                      readsperpileup=100,
                                      readlength=100,
                                      error_rate=0.01,
