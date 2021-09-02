@@ -210,7 +210,14 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
-def train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, init_learning_rate=0.001, statedict=None, model_dest=None):
+def train_epochs(epochs,
+                 dataloader,
+                 max_read_depth=50,
+                 feats_per_read=8,
+                 init_learning_rate=0.001,
+                 statedict=None,
+                 model_dest=None,
+                 eval_batches=None):
     in_dim = (max_read_depth) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=3).to(DEVICE)
     # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
@@ -232,6 +239,17 @@ def train_epochs(epochs, dataloader, max_read_depth=50, feats_per_read=8, init_l
             elapsed = datetime.now() - starttime
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
             scheduler.step()
+
+            if eval_batches is not None:
+                for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
+                    # Transform source somehow?
+                    aex = altmask.unsqueeze(-1).unsqueeze(-1)
+                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                                          src.shape[3]).transpose(1, 2)
+                    masked_src = src * fullmask
+                    predictions, vafpreds = model(masked_src)
+                    tps, fps, fns = eval_batch(src, tgt, predictions)
+                    logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
@@ -256,6 +274,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
+    eval_batches = create_eval_batches(25, conf)
     dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
@@ -263,7 +282,13 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
                                      readlength=90,
                                      error_rate=0.01,
                                      clip_prob=0)
-    train_epochs(epochs, dataloader, max_read_depth=100, feats_per_read=7, statedict=input_model, model_dest=output_model)
+    train_epochs(epochs,
+                 dataloader,
+                 max_read_depth=100,
+                 feats_per_read=7,
+                 statedict=input_model,
+                 model_dest=output_model,
+                 eval_batches=eval_batches)
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
@@ -308,10 +333,9 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
     objects, then compares variant objects
     :param tgt:
-    :param prediction1:
-    :param prediction2:
+    :param predictions:
     :param midwidth:
-    :return:
+    :return: Sets of TP, FP, and FN vars
     """
     rseq1 = util.tgt_str(tgt)
     midstart = tgt.shape[-1] // 2 - midwidth // 2
@@ -325,18 +349,94 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     for v in vcf.align_seqs(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :])):
         pred_vars.append(v)
 
-    hits = 0
+    tps = [] # True postive - real and detected variant
+    fns = [] # False negatives - real variant but not detected
+    fps = [] # False positives - detected but not a real variant
     for true_var in known_vars:
         if true_var in pred_vars:
-            hits += 1
-            print(f"Detected {true_var} on hap 1")
+            tps.add(true_var)
+        else:
+            fns.add(true_var)
 
-    if len(known_vars) == 0:
-        return 1.0
+    for detected_var in pred_vars:
+        if detected_var not in known_vars:
+            fps.add(detected_var)
+
+    return tps, fps, fns
+
+
+def eval_batch(src, tgt, predictions):
+    """
+    Run evaluation on a single batch
+    :param src: Model input (with batch dimension)
+    :param tgt: Model targets / true alt sequence
+    :param predictions: Model prediction
+    :return: Total number of TP, FP, and FN variants
+    """
+    tp_total = 0
+    fp_total = 0
+    fn_total = 0
+    for b in range(src.shape[0]):
+        refseq = src[b, :, 0, :]
+        assert refseq[:, 0:4].sum() == refseq.shape[0], f"Probable incorrect refseq index, sum did not match sequence length!"
+        tps, fps, fns = eval_prediction(refseq, tgt[b, :], predictions[b, :, :])
+        tp_total += len(tps)
+        fp_total += len(fps)
+        fn_total += len(fns)
+    return tp_total, fp_total, fn_total
+
+
+def create_eval_batches(batch_size, config):
+    """
+    Create batches of variants for evaluation
+    :param batch_size: Number of pileups per batch
+    :param config: Config
+    :return: Mapping from variant type -> (batch src, tgt, vaftgt, altmask)
+    """
+    num_reads = 100
+    read_length = 146
+    base_error_rate = 0.01
+    if type(config) == str:
+        conf = load_train_conf(config)
     else:
-        print(f"Found {hits} of {len(known_vars)}")
-        return hits / len(known_vars)
-
+        conf = config
+    regions = bwasim.load_regions(conf['regions'])
+    eval_batches = {}
+    logger.info(f"Generating evaluation batches of size {batch_size}")
+    eval_batches['del'] = bwasim.make_batch(batch_size,
+                                                      regions,
+                                                      conf['reference'],
+                                                      numreads=num_reads,
+                                                      readlength=read_length,
+                                                      var_funcs=[bwasim.make_het_del],
+                                                      error_rate=base_error_rate,
+                                                      clip_prob=0)
+    eval_batches['ins'] = bwasim.make_batch(batch_size,
+                                                regions,
+                                                conf['reference'],
+                                                numreads=num_reads,
+                                                readlength=read_length,
+                                                var_funcs=[bwasim.make_het_ins],
+                                                error_rate=base_error_rate,
+                                                clip_prob=0)
+    eval_batches['snv'] = bwasim.make_batch(batch_size,
+                                                regions,
+                                                conf['reference'],
+                                                numreads=num_reads,
+                                                readlength=read_length,
+                                                var_funcs=[bwasim.make_het_snv],
+                                                error_rate=base_error_rate,
+                                                clip_prob=0)
+    eval_batches['mnv'] = bwasim.make_batch(batch_size,
+                                                regions,
+                                                conf['reference'],
+                                                numreads=num_reads,
+                                                readlength=read_length,
+                                                var_funcs=[bwasim.make_het_del],
+                                                error_rate=base_error_rate,
+                                                clip_prob=0)
+    logger.info("Done generating evaluation batches")
+    return eval_batches
 
 def eval_sim(statedict, config, **kwargs):
     max_read_depth = 100
@@ -368,13 +468,18 @@ def eval_sim(statedict, config, **kwargs):
     src, altmask = sort_by_ref(raw_src, altmask)
     seq_preds, vaf_preds = model(src)
 
-
+    tp_total = 0
+    fp_total = 0
+    fn_total = 0
     for b in range(src.shape[0]):
         print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
         print(util.readstr(seq_preds[b, :, :]))
         print(f"Actual VAF: {vafs[b]} predicted VAF: {vaf_preds[b].item():.4f}")
-        hitpct = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])
-        print(f"Item {b} vars detected: {hitpct} ")
+        tps, fps, fns = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])
+        tp_total += len(tps)
+        fp_total += len(fps)
+        fn_total += len(fns)
+        print(f"Item {b} TP: {len(tps)} FP: {len(fps)}  FN: {len(fns)}")
 
 
 
