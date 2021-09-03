@@ -6,7 +6,7 @@ import string
 import torch
 import torch.nn.functional as F
 
-from bam import reads_spanning, encode_pileup2, target_string_to_tensor, ensure_dim, string_to_tensor, encode_pileup3
+from bam import reads_spanning, target_string_to_tensor, ensure_dim, string_to_tensor, encode_pileup3
 import random
 import pysam
 import subprocess

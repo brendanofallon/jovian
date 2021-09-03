@@ -19,7 +19,7 @@ import util
 import vcf
 import loader
 from bam import target_string_to_tensor, encode_pileup2, reads_spanning, alnstart
-from model import VarTransformer, VarTransformerRE
+from model import VarTransformer, VarTransformerAltMask
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
@@ -215,12 +215,14 @@ def train_epochs(epochs,
                  max_read_depth=50,
                  feats_per_read=8,
                  init_learning_rate=0.001,
+                 checkpoint_freq=0,
                  statedict=None,
                  model_dest=None,
                  eval_batches=None):
     in_dim = (max_read_depth) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
-    # model = VarTransformerRE(seqlen=150, readcount=max_read_depth + 1, feats=feats_per_read, out_dim=4, nhead=4, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformerAltMask(max_read_depth, feats_per_read, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -239,6 +241,14 @@ def train_epochs(epochs,
             elapsed = datetime.now() - starttime
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
             scheduler.step()
+
+
+            if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
+                modelparts = str(model_dest).rsplit(".", maxsplit=1)
+                checkpoint_name = modelparts[0] + f"_epoch{epoch}" + modelparts[1]
+                logger.info(f"Saving model state dict to {checkpoint_name}")
+                torch.save(model.to('cpu').state_dict(), checkpoint_name)
+
 
             if eval_batches is not None:
                 for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
@@ -321,9 +331,9 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
     print("".join('*' if a==b else 'x' for a,b in zip(refseq, pred2str)))
     print(refseq)
     midwith = 100
-    for v in vcf.align_seqs(refseq[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2], 
+    for v in vcf.aln_to_vars(refseq[len(refseq) // 2 - midwith // 2:len(refseq) // 2 + midwith // 2],
                             pred2str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2],
-                            offset=minref + len(refseq)//2 - midwith//2 + 1):
+                             offset=minref + len(refseq)//2 - midwith//2 + 1):
         print(v)
 
 
@@ -342,11 +352,20 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     midend = tgt.shape[-1] // 2 + midwidth // 2
     refseqstr = util.readstr(refseq)
     known_vars = []
-    for v in vcf.align_seqs(refseqstr[midstart:midend], rseq1[midstart:midend]):
+
+    # print("Ref / target alignment:")
+    # aln = vcf.align_sequences(refseqstr[midstart:midend], rseq1[midstart:midend])
+    # print(aln.aligned_query_sequence)
+    # print(aln.aligned_target_sequence)
+    for v in vcf.aln_to_vars(refseqstr[midstart:midend], rseq1[midstart:midend]):
         known_vars.append(v)
 
+    # print("Ref / predictions alignment:")
+    # aln = vcf.align_sequences(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :]))
+    # print(aln.aligned_query_sequence)
+    # print(aln.aligned_target_sequence)
     pred_vars = []
-    for v in vcf.align_seqs(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :])):
+    for v in vcf.aln_to_vars(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :])):
         pred_vars.append(v)
 
     tps = [] # True postive - real and detected variant
@@ -446,24 +465,20 @@ def eval_sim(statedict, config, **kwargs):
     regions = bwasim.load_regions(conf['regions'])
     in_dim = (max_read_depth ) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=3).to(DEVICE)
-    # model = VarTransformerRE(seqlen=150, readcount=max_read_depth, feats=feats_per_read, out_dim=4, nhead=4,
-    #                          d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
     # SNVs
     batch_size = 10
-    vafs = 0.5 * np.ones(batch_size)
     src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
                                                   numreads=100,
-                                                  readlength=53,
+                                                  readlength=123,
                                                   var_funcs=[bwasim.make_het_del],
                                                   error_rate=0.01,
                                                   clip_prob=0)
 
-    print(util.to_pileup(src[0, :,:,:], altmask[0, :]))
     aex = altmask.unsqueeze(-1).unsqueeze(-1)
     fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                           src.shape[3]).transpose(1, 2)
@@ -474,15 +489,16 @@ def eval_sim(statedict, config, **kwargs):
     fp_total = 0
     fn_total = 0
     for b in range(src.shape[0]):
-        print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
-        print(util.readstr(seq_preds[b, :, :]))
-        print(f"Actual VAF: {vafs[b]} predicted VAF: {vaf_preds[b].item():.4f}")
-        tps, fps, fns = eval_prediction(src[b, :, -1, :], tgt[b, :], seq_preds[b, :, :])
+        # print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
+        # print(util.readstr(src[b, :, 0, :]))
+        # print(util.readstr(seq_preds[b, :, :]))
+        tps, fps, fns = eval_prediction(src[b, :, 0, :], tgt[b, :], seq_preds[b, :, :])
         tp_total += len(tps)
         fp_total += len(fps)
         fn_total += len(fns)
         print(f"Item {b} TP: {len(tps)} FP: {len(fps)}  FN: {len(fns)}")
 
+    print(f"PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
 
 
 def main():
@@ -492,6 +508,7 @@ def main():
     trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
+    trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=0, type=int)
     trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.set_defaults(func=train)

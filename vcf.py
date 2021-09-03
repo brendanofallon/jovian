@@ -31,13 +31,29 @@ def _cigtups(cigstr):
             yield cig
 
 
-def align_seqs(query, target, offset=0):
+def align_sequences(query, target):
+    """
+    Return Smith-Watterman alignment of both sequences
+    """
     aln = ssw_aligner.local_pairwise_align_ssw(query,
-                                     target,
-                                     gap_open_penalty=3,
-                                     gap_extend_penalty=1,
-                                     match_score=2,
-                                     mismatch_score=-1)
+                                               target,
+                                               gap_open_penalty=3,
+                                               gap_extend_penalty=1,
+                                               match_score=2,
+                                               mismatch_score=-1)
+    return aln
+
+
+def aln_to_vars(query, target, offset=0):
+    """
+    Smith-Watterman align the given sequences and return a generator over Variant objects
+    that describe differences between the sequences
+    :param query: String of bases
+    :param target:String of bases
+    :param offset: This amount will be added to each variant position
+    :return:
+    """
+    aln = align_sequences(query, target)
     # print(aln.aligned_query_sequence)
     # print(aln.aligned_target_sequence)
     cigs = list(c for c in _cigtups(aln.cigar))

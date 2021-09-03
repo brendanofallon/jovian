@@ -66,26 +66,41 @@ class VarTransformer(nn.Module):
         return output
 
 
-class ReadEncoder(nn.Module):
+class AltPredictor(nn.Module):
 
-    def __init__(self, seqlen, feats):
+    def __init__(self, readnum, feats):
         super().__init__()
-        self.fc = nn.Linear(seqlen * feats, 1)
-        self.softmax = nn.Softmax(dim=1)
+        self.fc1 = nn.Linear(feats + 1 + 5, 5)
+        self.fc2 = nn.Linear(5, 1)
+        #         self.cn = nn.Conv2d(in_channels=feats+1, out_channels=2, stride=1, kernel_size=(readnum,1), padding=(0,0))
+        self.l1 = nn.Linear(feats + 1, 5)
+        self.l2 = nn.Linear(5, 5)
+
+        self.elu = torch.nn.ELU()
 
     def forward(self, x):
-        x = x.transpose(1, 2).flatten(start_dim=2)
-        x = torch.sigmoid(self.fc(x)).squeeze(-1)
+        # r is 1 if base is a match with the ref sequence, otherwise 0
+        r = (x[:, :, :, 0:4] * x[:, :, 0:1, 0:4]).sum(dim=-1)  # x[:, :, 0:1..] is the reference seq
+        z = torch.cat((r.unsqueeze(-1), x[:, :, :, :]), dim=3)
+
+        y = self.elu(self.l1(z))
+        y = self.elu(self.l2(y))
+        ymean = y.mean(dim=2).unsqueeze(2)
+        z = torch.cat((ymean.expand(-1, -1, x.shape[2], -1), z), dim=3)
+
+        x = self.elu(self.fc1(z)).squeeze(-1)
+        x = 5 * self.elu(self.fc2(
+            x))  # Important that this is an ELU and not ReLU activation since it must be able to produce negative values, and the factor of three makes them even more negative which translates into something closer to zero after sigmoid()
+        x = torch.sigmoid(x.max(dim=1)[0]).squeeze(-1)
         return x
 
+class VarTransformerAltMask(nn.Module):
 
-class VarTransformerRE(nn.Module):
-
-    def __init__(self, seqlen, readcount, feats, out_dim, nhead=4, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
+    def __init__(self, readdepth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
         super().__init__()
-        self.embed_dim = nhead * 24
-        self.fc1 = nn.Linear(readcount * feats, self.embed_dim)
-        self.read_encoder = ReadEncoder(seqlen, feats)
+        self.embed_dim = nhead * 20
+        self.altpredictor = AltPredictor(readdepth, feature_count)
+        self.fc1 = nn.Linear(readdepth * feature_count, self.embed_dim)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
@@ -93,15 +108,15 @@ class VarTransformerRE(nn.Module):
         self.elu = torch.nn.ELU()
 
     def forward(self, src):
-        feats = src.shape[-1]
-        mask = self.read_encoder(src)
-        src_flat = src.flatten(start_dim=2)
+        altmask = self.altpredictor(src)
+        aex = altmask.unsqueeze(-1).unsqueeze(-1)
+        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                              src.shape[3]).transpose(1, 2)
+        src = src * fullmask
 
-        maskrep = mask.repeat(1, feats).unsqueeze(1)
-        src_flat = src_flat * maskrep
-
-        src_flat = self.elu(self.fc1(src_flat))
-        src_flat = self.pos_encoder(src_flat)
-        output = self.transformer_encoder(src_flat)
-        seqpreds, vafpreds = self.decoder(output)
-        return seqpreds, vafpreds
+        src = src.flatten(start_dim=2)
+        src = self.elu(self.fc1(src))
+        src = self.pos_encoder(src)
+        output = self.transformer_encoder(src)
+        output = self.decoder(output)
+        return output
