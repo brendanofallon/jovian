@@ -184,6 +184,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
         #fullmask = 0.9 * fullmask + 0.05
         #src = unsorted_src * fullmask
+
         src = unsorted_src
         optimizer.zero_grad()
 
@@ -239,6 +240,7 @@ def train_epochs(epochs,
             starttime = datetime.now()
             loss, refmatch, vafloss = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size, max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
+
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
             scheduler.step()
 
@@ -257,8 +259,15 @@ def train_epochs(epochs,
                     #fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1], src.shape[3]).transpose(1, 2)
                     #fullmask = 0.9 * fullmask + 0.05
                     #masked_src = src * fullmask
+
+                    with torch.no_grad():
+                        altpreds = model.altpredictor(src)
+                        minalt = altpreds.min().item()
+                        maxalt = altpreds.max().item()
+
                     predictions, vafpreds = model(src.to(DEVICE))
                     tps, fps, fns = eval_batch(src, tgt, predictions)
+                    logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
                     if tps > 0:
                         logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
                     else:
