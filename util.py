@@ -1,8 +1,10 @@
 import torch
-
-from bam import INDEX_TO_BASE
 import numpy as np
 
+
+INDEX_TO_BASE = [
+    'A', 'C', 'G', 'T'
+]
 
 def readstr(t):
     t = t.detach().cpu().numpy()

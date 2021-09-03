@@ -2,12 +2,10 @@ import torch
 import logging
 import pysam
 
+import util
 
 logger = logging.getLogger(__name__)
 
-INDEX_TO_BASE = [
-    'A', 'C', 'G', 'T'
-]
 
 
 EMPTY_TENSOR = torch.zeros(7)
@@ -88,7 +86,7 @@ def decode(t):
     if torch.sum(t[0:4]) == 0.0:
         return '-'
     else:
-        return INDEX_TO_BASE[t[0:4].argmax()]
+        return util.INDEX_TO_BASE[t[0:4].argmax()]
 
 
 def encode_cigop(readpos, refpos):
@@ -184,12 +182,51 @@ def iterate_cigar(rec):
             is_clipped = cigop in {4, 5}
 
 
+def iterate_bases(rec):
+    """
+    Generate encoded base calls for the given variant record, this version does NOT
+    insert gaps into the bases if there's a deletion in the cigar - it just reads right on thru
+    :param rec: pysam VariantRecord
+    :return: Generator for encoded base calls
+    """
+    cigtups = rec.cigartuples
+    bases = rec.query_sequence
+    quals = rec.query_qualities
+    cig_index = 0
+    n_bases_cigop = cigtups[cig_index][1]
+    cigop = cigtups[cig_index][0]
+    is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
+    is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
+    is_clipped = cigop in {4, 5}
+    for i, (base, qual) in enumerate(zip(bases, quals)):
+        if is_ref_consumed and is_seq_consumed:
+            encoded_cig = 0
+        elif is_ref_consumed and not is_seq_consumed:
+            encoded_cig = -1
+        else:
+            encoded_cig = 1
+        yield encode_basecall(base, qual, encoded_cig, is_clipped), is_ref_consumed
+        n_bases_cigop -= 1
+        if n_bases_cigop <= 0:
+            cig_index += 1
+            if cig_index >= len(cigtups):
+                break
+            n_bases_cigop = cigtups[cig_index][1]
+            cigop = cigtups[cig_index][0]
+            is_ref_consumed = cigop in {0, 2, 4, 5, 7}
+            is_seq_consumed = cigop in {0, 1, 3, 4, 7}
+            is_clipped = cigop in {4, 5}
+
+
+
+
+
 def rec_tensor_it(read, minref):
     for i in range(alnstart(read) - minref):
         yield EMPTY_TENSOR, True
 
     try:
-        for t in iterate_cigar(read):
+        for t in iterate_bases(read):
             yield t
     except StopIteration:
         pass
@@ -386,3 +423,17 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
     return reads_encoded, refseq, altseq
 
+
+# from util import readstr
+# aln = pysam.AlignmentFile("batch78.bam")
+# for read in aln.fetch():
+#     if read.query_name == "read_hetalt12":
+#         encoded_old = list(b for b, _ in iterate_cigar(read))
+#         encoded_new = list(b for b, _ in iterate_bases(read))
+#         told = torch.stack(encoded_old)
+#         tnew = torch.stack(encoded_new)
+#         print(readstr(told))
+#         print("".join(str(int(x)) for x in told[:, 5]))
+#         print(readstr(tnew))
+#         print("".join(str(int(x)) for x in tnew[:, 5]))
+#         break
