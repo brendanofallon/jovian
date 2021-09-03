@@ -180,10 +180,11 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
-        aex = altmask.unsqueeze(-1).unsqueeze(-1)
-        fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
-        fullmask = 0.9 * fullmask + 0.05
-        src = unsorted_src * fullmask
+        #aex = altmask.unsqueeze(-1).unsqueeze(-1)
+        #fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
+        #fullmask = 0.9 * fullmask + 0.05
+        #src = unsorted_src * fullmask
+        src = unsorted_src
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
@@ -252,13 +253,17 @@ def train_epochs(epochs,
             if eval_batches is not None:
                 for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
                     # Transform source somehow?
-                    aex = altmask.unsqueeze(-1).unsqueeze(-1)
-                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1], src.shape[3]).transpose(1, 2)
-                    fullmask = 0.9 * fullmask + 0.05
-                    masked_src = src * fullmask
-                    predictions, vafpreds = model(masked_src.to(DEVICE))
+                    #aex = altmask.unsqueeze(-1).unsqueeze(-1)
+                    #fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1], src.shape[3]).transpose(1, 2)
+                    #fullmask = 0.9 * fullmask + 0.05
+                    #masked_src = src * fullmask
+                    predictions, vafpreds = model(src.to(DEVICE))
                     tps, fps, fns = eval_batch(src, tgt, predictions)
-                    logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
+                    if tps > 0:
+                        logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
+                    else:
+                        logger.info(f"Eval: {vartype} PPA: No TPs found :(")
+
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
