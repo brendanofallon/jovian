@@ -454,7 +454,7 @@ def eval_sim(statedict, config, **kwargs):
     # SNVs
     batch_size = 10
     vafs = 0.5 * np.ones(batch_size)
-    raw_src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
+    src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
                                                   numreads=100,
@@ -463,10 +463,12 @@ def eval_sim(statedict, config, **kwargs):
                                                   error_rate=0.01,
                                                   clip_prob=0)
 
-    print(util.to_pileup(raw_src[0, :,:,:], altmask[0, :]))
-
-    src, altmask = sort_by_ref(raw_src, altmask)
-    seq_preds, vaf_preds = model(src)
+    print(util.to_pileup(src[0, :,:,:], altmask[0, :]))
+    aex = altmask.unsqueeze(-1).unsqueeze(-1)
+    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                          src.shape[3]).transpose(1, 2)
+    masked_src = src * fullmask
+    seq_preds, vaf_preds = model(masked_src)
 
     tp_total = 0
     fp_total = 0
