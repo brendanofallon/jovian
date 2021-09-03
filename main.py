@@ -247,7 +247,7 @@ def train_epochs(epochs,
                     fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                                           src.shape[3]).transpose(1, 2)
                     masked_src = src * fullmask
-                    predictions, vafpreds = model(masked_src)
+                    predictions, vafpreds = model(masked_src.to(DEVICE))
                     tps, fps, fns = eval_batch(src, tgt, predictions)
                     logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
 
@@ -354,13 +354,13 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     fps = [] # False positives - detected but not a real variant
     for true_var in known_vars:
         if true_var in pred_vars:
-            tps.add(true_var)
+            tps.append(true_var)
         else:
-            fns.add(true_var)
+            fns.append(true_var)
 
     for detected_var in pred_vars:
         if detected_var not in known_vars:
-            fps.add(detected_var)
+            fps.append(detected_var)
 
     return tps, fps, fns
 
