@@ -182,9 +182,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
         aex = altmask.unsqueeze(-1).unsqueeze(-1)
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
+        fullmask = 0.9 * fullmask + 0.05
         src = unsorted_src * fullmask
-        #src = remove_ref_reads(unsorted_src, maxreads=max_alt_reads, altmask=altmask)
-        # src = torch.cat((src[:, :, 0:20, :], src[:, :, -1:, :]), dim=2)
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
@@ -222,7 +221,7 @@ def train_epochs(epochs,
     in_dim = (max_read_depth) * feats_per_read
     # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     model = VarTransformerAltMask(max_read_depth, feats_per_read, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
-
+    # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=8, d_hid=300, n_encoder_layers=4).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -233,7 +232,7 @@ def train_epochs(epochs,
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.99)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.999)
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
@@ -254,10 +253,10 @@ def train_epochs(epochs,
                 for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
                     # Transform source somehow?
                     aex = altmask.unsqueeze(-1).unsqueeze(-1)
-                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                                          src.shape[3]).transpose(1, 2)
+                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1], src.shape[3]).transpose(1, 2)
+                    fullmask = 0.9 * fullmask + 0.05
                     masked_src = src * fullmask
-                    predictions, vafpreds = model(masked_src)
+                    predictions, vafpreds = model(masked_src.to(DEVICE))
                     tps, fps, fns = eval_batch(src, tgt, predictions)
                     logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
 
@@ -289,7 +288,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
                                      readsperpileup=100,
-                                     readlength=100,
+                                     readlength=90,
                                      error_rate=0.01,
                                      clip_prob=0)
     train_epochs(epochs,
@@ -482,6 +481,7 @@ def eval_sim(statedict, config, **kwargs):
     aex = altmask.unsqueeze(-1).unsqueeze(-1)
     fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                           src.shape[3]).transpose(1, 2)
+    fullmask = 0.9 * fullmask + 0.05
     masked_src = src * fullmask
     seq_preds, vaf_preds = model(masked_src)
 

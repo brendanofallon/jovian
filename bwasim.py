@@ -175,9 +175,16 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         var_func = random.choices(var_funcs, weights=weights)[0]
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
-        fq1, fq2, altseq, vaf = var_func(seq, readlength, numreads, vaf=0.5, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+        fq1, fq2, altseq, vaf = var_func(seq, readlength, numreads, vaf=0.25, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+        ns = sum(1 if b=='N' else 0 for b in seq)
+        if 0 < ns <10:
+            logger.warning(f"Replacing {ns} Ns with As near position {region[0]}:{pos}")
+            seq = seq.replace('N', 'A')
+        elif ns >= 10:
+            logger.warning(f"Skipping {regions[0]}:{pos}, too many Ns ({ns})")
+            continue
         var_info.append((region[0], pos-region_size//2, pos+region_size//2, seq, altseq, vaf))
-        logger.info(f"Item #{i}: {region[0]}:{pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
+        #logger.info(f"Item #{i}: {region[0]}:{pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
     fq2 = bgzip(fq2)
