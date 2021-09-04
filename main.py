@@ -261,7 +261,7 @@ def train_epochs(epochs,
                     #masked_src = src * fullmask
 
                     with torch.no_grad():
-                        altpreds = model.altpredictor(src)
+                        altpreds = model.altpredictor(src.to(DEVICE))
                         minalt = altpreds.min().item()
                         maxalt = altpreds.max().item()
 
