@@ -14,12 +14,13 @@ import argparse
 import yaml
 
 import bwasim
+import model
 import sim
 import util
 import vcf
 import loader
 from bam import target_string_to_tensor, encode_pileup2, reads_spanning, alnstart
-from model import VarTransformer, VarTransformerAltMask
+from model import VarTransformer, AltPredictor
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
@@ -166,7 +167,7 @@ def remove_ref_reads(reads, maxreads=50, altmask=None):
     return torch.stack(results).to(DEVICE)
 
 
-def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads):
+def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
     :param model: Model to train
@@ -180,12 +181,12 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
-        #aex = altmask.unsqueeze(-1).unsqueeze(-1)
-        #fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
-        #fullmask = 0.9 * fullmask + 0.05
-        #src = unsorted_src * fullmask
+        predicted_altmask = altpredictor(unsorted_src)
+        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+        fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
+        fullmask = 0.9 * fullmask + 0.05
+        src = unsorted_src * fullmask
 
-        src = unsorted_src
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
@@ -221,8 +222,8 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None):
     in_dim = (max_read_depth) * feats_per_read
-    # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
-    model = VarTransformerAltMask(max_read_depth, feats_per_read, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    # model = VarTransformerAltMask(max_read_depth, feats_per_read, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=8, d_hid=300, n_encoder_layers=4).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -231,8 +232,8 @@ def train_epochs(epochs,
     model.train()
     batch_size = 64
 
-    # altpredictor = model.AltPredictor(0, feats_per_read)
-    # altpredictor.load_state_dict(torch.load("altpredictor.sd"))
+    altpredictor = AltPredictor(0, 7)
+    altpredictor.load_state_dict(torch.load("altpredictor.sd"))
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
@@ -241,7 +242,14 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, refmatch, vafloss = train_epoch(model, optimizer, criterion, vaf_crit, dataloader, batch_size=batch_size, max_alt_reads=max_read_depth)
+            loss, refmatch, vafloss = train_epoch(model,
+                                                  optimizer,
+                                                  criterion,
+                                                  vaf_crit,
+                                                  dataloader,
+                                                  batch_size=batch_size,
+                                                  max_alt_reads=max_read_depth,
+                                                  altpredictor=altpredictor)
             elapsed = datetime.now() - starttime
 
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
@@ -258,10 +266,12 @@ def train_epochs(epochs,
             if eval_batches is not None:
                 for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
                     # Transform source somehow?
-                    #aex = altmask.unsqueeze(-1).unsqueeze(-1)
-                    #fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1], src.shape[3]).transpose(1, 2)
-                    #fullmask = 0.9 * fullmask + 0.05
-                    #masked_src = src * fullmask
+                    predicted_altmask = altpredictor(src)
+                    aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+                    fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1],
+                                          unsorted_src.shape[3]).transpose(1, 2)
+                    fullmask = 0.9 * fullmask + 0.05
+                    src = src * fullmask
 
                     with torch.no_grad():
                         altpreds = model.altpredictor(src.to(DEVICE))
@@ -546,6 +556,26 @@ def main():
     args = parser.parse_args()
     args.func(**vars(args))
 
+# def testaltpredictor():
+#     conf = load_train_conf("simtrain.yaml")
+#     regions = bwasim.load_regions(conf['regions'])
+#     ap = model.AltPredictor(-1, 7)
+#     ap.load_state_dict(torch.load("altpredictor.sd"))
+#     src, tgt, vaftgt, altmask = bwasim.make_batch(10,
+#                                                   regions,
+#                                                   conf['reference'],
+#                                                   numreads=100,
+#                                                   readlength=55,
+#                                                   var_funcs=[bwasim.make_het_snv],
+#                                                   error_rate=0.01,
+#                                                   clip_prob=0)
+#
+#     preds = ap(src)
+#     for b in range(src.shape[0]):
+#         print(f"\n Batch {b}")
+#         for pred, actual in zip(preds[b, :], altmask[b, :]):
+#             print(f"{pred:.3f}\t{actual:.3f}")
 
 if __name__ == "__main__":
+    # testaltpredictor()
     main()

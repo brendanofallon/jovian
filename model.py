@@ -70,26 +70,36 @@ class AltPredictor(nn.Module):
 
     def __init__(self, readnum, feats):
         super().__init__()
-        self.fc1 = nn.Linear(feats + 1 + 5, 5)
-        self.fc2 = nn.Linear(5, 1)
+        self.fc1 = nn.Linear(feats + 4 + 5 + 1, 5)
+        self.fc2 = nn.Linear(5, 5)
+        self.fc3 = nn.Linear(5, 1)
         #         self.cn = nn.Conv2d(in_channels=feats+1, out_channels=2, stride=1, kernel_size=(readnum,1), padding=(0,0))
-        self.l1 = nn.Linear(feats + 1, 5)
+        self.l1 = nn.Linear(feats + 4 + 1, 5)
         self.l2 = nn.Linear(5, 5)
+        self.l3 = nn.Linear(5, 5)
 
         self.elu = torch.nn.ELU()
 
-    def forward(self, x):
+    def forward(self, x, emit=False):
         # r is 1 if base is a match with the ref sequence, otherwise 0
         r = (x[:, :, :, 0:4] * x[:, :, 0:1, 0:4]).sum(dim=-1)  # x[:, :, 0:1..] is the reference seq
         z = torch.cat((r.unsqueeze(-1), x[:, :, :, :]), dim=3)
 
-        y = self.elu(self.l1(z))
-        y = self.elu(self.l2(y))
-        ymean = y.mean(dim=2).unsqueeze(2)
-        z = torch.cat((ymean.expand(-1, -1, x.shape[2], -1), z), dim=3)
+        # Compute the mean base usage across reads at every position, and join this with the features list for everything
+        b = (x[:, :, :, 0:4]).mean(dim=2)
+        bx = torch.cat((b.unsqueeze(2).expand(-1, -1, x.shape[2], -1), z), dim=3)
 
+        # Take the features for every read pos, then compute read-level features by taking a mean of the features across the reads
+        y = self.elu(self.l1(bx))
+        y = self.elu(self.l2(y) + y)
+        y = self.elu(self.l3(y) + y)
+        ymean = y.mean(dim=2).unsqueeze(2)
+        z = torch.cat((ymean.expand(-1, -1, x.shape[2], -1), bx), dim=3)
+
+        # Take mean read level features (after reduction) and compute change this is an alt read
         x = self.elu(self.fc1(z)).squeeze(-1)
-        x = 5 * self.elu(self.fc2(
+        x = self.elu(self.fc2(x) + x)
+        x = 5 * self.elu(self.fc3(
             x))  # Important that this is an ELU and not ReLU activation since it must be able to produce negative values, and the factor of three makes them even more negative which translates into something closer to zero after sigmoid()
         x = torch.sigmoid(x.max(dim=1)[0]).squeeze(-1)
         return x
@@ -114,9 +124,6 @@ class VarTransformerAltMask(nn.Module):
         # fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
         #                       src.shape[3]).transpose(1, 2)
         # src = src * fullmask
-
-        ex = altmask.unsqueeze(1).unsqueeze(-1).expand((-1, src.shape[1], -1, 1))
-        src = torch.cat((ex, src), dim=3)
 
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc1(src))
