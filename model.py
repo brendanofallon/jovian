@@ -94,13 +94,14 @@ class AltPredictor(nn.Module):
         x = torch.sigmoid(x.max(dim=1)[0]).squeeze(-1)
         return x
 
+
 class VarTransformerAltMask(nn.Module):
 
     def __init__(self, readdepth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
         super().__init__()
         self.embed_dim = nhead * 20
         self.altpredictor = AltPredictor(readdepth, feature_count)
-        self.fc1 = nn.Linear(readdepth * feature_count, self.embed_dim)
+        self.fc1 = nn.Linear(readdepth * (feature_count+1), self.embed_dim)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
@@ -109,10 +110,13 @@ class VarTransformerAltMask(nn.Module):
 
     def forward(self, src):
         altmask = self.altpredictor(src)
-        aex = altmask.unsqueeze(-1).unsqueeze(-1)
-        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                              src.shape[3]).transpose(1, 2)
-        src = src * fullmask
+        # aex = altmask.unsqueeze(-1).unsqueeze(-1)
+        # fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+        #                       src.shape[3]).transpose(1, 2)
+        # src = src * fullmask
+
+        ex = altmask.unsqueeze(1).unsqueeze(-1).expand((-1, src.shape[1], -1, 1))
+        src = torch.cat((ex, src), dim=3)
 
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc1(src))
