@@ -231,6 +231,9 @@ def train_epochs(epochs,
     model.train()
     batch_size = 64
 
+    # altpredictor = model.AltPredictor(0, feats_per_read)
+    # altpredictor.load_state_dict(torch.load("altpredictor.sd"))
+
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
