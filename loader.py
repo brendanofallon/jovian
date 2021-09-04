@@ -107,7 +107,7 @@ class BWASimLoader:
                                                               clip_prob=self.clip_prob)
 
                 self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[-1]
+            src, tgt, vaftgt, altmask = self.sim_data[i]
             yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
 
 
