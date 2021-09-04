@@ -413,7 +413,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     if len(reads) < 5:
         raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
 
-    reads_encoded = encode_pileup2(reads)
+    reads_encoded = encode_pileup3(reads)
     minref = min(alnstart(r) for r in reads)
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
     maxref = minref + reads_encoded.shape[0]

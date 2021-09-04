@@ -108,7 +108,7 @@ def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
         altseq[snvpos] = random.choice('ACTG')
     altseq = "".join(altseq)
     fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
-    return fq1, fq2, altseq, vaf
+    return fq1, fq2, altseq, vaf, snvpos
 
 
 def make_het_del(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
@@ -119,7 +119,7 @@ def make_het_del(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
         del ls[delpos]
     altseq = "".join(ls + ["A"] * del_len)
     fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
-    return fq1, fq2, altseq, vaf
+    return fq1, fq2, altseq, vaf, delpos
 
 
 def make_het_ins(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
@@ -129,7 +129,7 @@ def make_het_ins(seq, readlength, totreads, vaf, prefix, fragment_size, error_ra
     altseq = altseq[0:len(seq)]
     fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size,
                          error_rate=error_rate, clip_prob=clip_prob)
-    return fq1, fq2, altseq, vaf
+    return fq1, fq2, altseq, vaf, inspos
 
 
 def make_mnv(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
@@ -145,13 +145,13 @@ def make_mnv(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0
     altseq = altseq + "A" * (len(seq) - len(altseq))
     fq1, fq2 = var2fastq(seq, altseq, readlength, totreads, prefix=prefix, vaf=vaf, fragsize=fragment_size,
                          error_rate=error_rate, clip_prob=clip_prob)
-    return fq1, fq2, altseq, vaf
+    return fq1, fq2, altseq, vaf, delpos
 
 
 def make_novar(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
     fq1, fq2 = var2fastq(seq, seq, readlength, totreads, prefix=prefix, vaf=0.000001, fragsize=fragment_size,
                          error_rate=error_rate, clip_prob=clip_prob)
-    return fq1, fq2, seq, vaf
+    return fq1, fq2, seq, vaf, len(seq)//2
 
 
 def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, weights=None, error_rate=0.01, clip_prob=0):
@@ -175,15 +175,15 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         var_func = random.choices(var_funcs, weights=weights)[0]
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
-        fq1, fq2, altseq, vaf = var_func(seq, readlength, numreads, vaf=0.25, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+        fq1, fq2, altseq, vaf, varpos = var_func(seq, readlength, numreads, vaf=0.25, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         ns = sum(1 if b=='N' else 0 for b in seq)
-        if 0 < ns <10:
+        if 0 < ns < 10:
             logger.warning(f"Replacing {ns} Ns with As near position {region[0]}:{pos}")
             seq = seq.replace('N', 'A')
         elif ns >= 10:
             logger.warning(f"Skipping {regions[0]}:{pos}, too many Ns ({ns})")
             continue
-        var_info.append((region[0], pos-region_size//2, pos+region_size//2, seq, altseq, vaf))
+        var_info.append((region[0], pos-region_size//2, pos+region_size//2, seq, altseq, vaf, varpos + pos-region_size//2))
         #logger.info(f"Item #{i}: {region[0]}:{pos-region_size//2}-{pos+region_size//2} alt: {altseq}")
 
     fq1 = bgzip(fq1)
@@ -196,10 +196,10 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
     tgt = []
     vafs = []
     altmasks = []
-    for chrom, region_start, region_end, refseq, altseq, vaf in var_info:
+    for chrom, region_start, region_end, refseq, altseq, vaf, varpos in var_info:
         #print(f"Encoding tensors around {chrom}:{pos}")
         reftensor = string_to_tensor(refseq)
-        reads = reads_spanning(bam, chrom, (region_start+region_end)//2, max_reads=max_reads)
+        reads = reads_spanning(bam, chrom, varpos, max_reads=max_reads)
         if len(reads) < 3:
             logger.warning(f"Not enough reads spanning {chrom}:{(region_start+region_end)//2}, skipping")
             continue
