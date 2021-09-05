@@ -182,9 +182,9 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
         predicted_altmask = altpredictor(unsorted_src)
+        predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
-        fullmask = 0.9 * fullmask + 0.05
         src = unsorted_src * fullmask
 
         optimizer.zero_grad()
@@ -230,10 +230,11 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 64
+    batch_size = 128
 
     altpredictor = AltPredictor(0, 7)
     altpredictor.load_state_dict(torch.load("altpredictor.sd"))
+    altpredictor.to(DEVICE)
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
@@ -266,15 +267,16 @@ def train_epochs(epochs,
             if eval_batches is not None:
                 for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
                     # Transform source somehow?
-                    predicted_altmask = altpredictor(src)
+                    src = src.to(DEVICE)
+                    predicted_altmask = altpredictor(src.to(DEVICE))
+                    predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
                     aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-                    fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1],
-                                          unsorted_src.shape[3]).transpose(1, 2)
-                    fullmask = 0.9 * fullmask + 0.05
+                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                                          src.shape[3]).transpose(1, 2).to(DEVICE)
                     src = src * fullmask
 
                     with torch.no_grad():
-                        altpreds = model.altpredictor(src.to(DEVICE))
+                        altpreds = altpredictor(src.to(DEVICE))
                         minalt = altpreds.min().item()
                         maxalt = altpreds.max().item()
 
@@ -315,7 +317,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
                                      readsperpileup=100,
-                                     readlength=90,
+                                     readlength=145,
                                      error_rate=0.01,
                                      clip_prob=0)
     train_epochs(epochs,
@@ -413,7 +415,7 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
 def eval_batch(src, tgt, predictions):
     """
     Run evaluation on a single batch
-    :param src: Model input (with batch dimension)
+    :param src: Model input (with batch dimension as first dim and ref sequence as first element in dimension 2)
     :param tgt: Model targets / true alt sequence
     :param predictions: Model prediction
     :return: Total number of TP, FP, and FN variants

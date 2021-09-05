@@ -99,7 +99,7 @@ class BWASimLoader:
             if len(self.sim_data) <= i:
                 src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                               self.regions,
-                                                                self.refpath,
+                                                              self.refpath,
                                                               numreads=self.readsperpileup,
                                                               readlength=self.readlength,
                                                               var_funcs=None,

@@ -175,7 +175,8 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         var_func = random.choices(var_funcs, weights=weights)[0]
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
-        fq1, fq2, altseq, vaf, varpos = var_func(seq, readlength, numreads, vaf=0.25, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+        vaf = (np.random.rand() * 0.4) + 0.1 # Random between 0.1-0.5
+        fq1, fq2, altseq, vaf, varpos = var_func(seq, readlength, numreads, vaf=vaf, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         ns = sum(1 if b=='N' else 0 for b in seq)
         if 0 < ns < 10:
             logger.warning(f"Replacing {ns} Ns with As near position {region[0]}:{pos}")
