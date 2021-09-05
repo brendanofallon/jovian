@@ -450,12 +450,14 @@ def create_eval_batches(batch_size, config):
     regions = bwasim.load_regions(conf['regions'])
     eval_batches = {}
     logger.info(f"Generating evaluation batches of size {batch_size}")
+    vaffunc = loader.betavaf
     eval_batches['del'] = bwasim.make_batch(batch_size,
                                                       regions,
                                                       conf['reference'],
                                                       numreads=num_reads,
                                                       readlength=read_length,
                                                       var_funcs=[bwasim.make_het_del],
+                                                      vaf_func=vaffunc,
                                                       error_rate=base_error_rate,
                                                       clip_prob=0)
     eval_batches['ins'] = bwasim.make_batch(batch_size,
@@ -463,6 +465,7 @@ def create_eval_batches(batch_size, config):
                                                 conf['reference'],
                                                 numreads=num_reads,
                                                 readlength=read_length,
+                                                vaf_func=vaffunc,
                                                 var_funcs=[bwasim.make_het_ins],
                                                 error_rate=base_error_rate,
                                                 clip_prob=0)
@@ -471,6 +474,7 @@ def create_eval_batches(batch_size, config):
                                                 conf['reference'],
                                                 numreads=num_reads,
                                                 readlength=read_length,
+                                                vaf_func=vaffunc,
                                                 var_funcs=[bwasim.make_het_snv],
                                                 error_rate=base_error_rate,
                                                 clip_prob=0)
@@ -479,6 +483,7 @@ def create_eval_batches(batch_size, config):
                                                 conf['reference'],
                                                 numreads=num_reads,
                                                 readlength=read_length,
+                                                vaf_func=vaffunc,
                                                 var_funcs=[bwasim.make_het_del],
                                                 error_rate=base_error_rate,
                                                 clip_prob=0)
