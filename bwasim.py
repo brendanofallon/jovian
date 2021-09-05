@@ -154,7 +154,14 @@ def make_novar(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate
     return fq1, fq2, seq, vaf, len(seq)//2
 
 
-def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, weights=None, error_rate=0.01, clip_prob=0):
+def vaf_uniform(lower=0.1, upper=1.0):
+    """ Generates uniform random vars betwen upper and lower """
+    assert upper <= 1.0
+    assert lower > 0.0
+    return np.random.uniform(low=lower, high=upper)
+
+
+def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, vaf_func=vaf_uniform, weights=None, error_rate=0.01, clip_prob=0):
     prefix = "simfqs"
     refgenome = pysam.FastaFile(refpath)
     region_size = 2 * readlength
@@ -175,7 +182,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         var_func = random.choices(var_funcs, weights=weights)[0]
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
-        vaf = (np.random.rand() * 0.4) + 0.1 # Random between 0.1-0.5
+        vaf = vaf_func()
         fq1, fq2, altseq, vaf, varpos = var_func(seq, readlength, numreads, vaf=vaf, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         ns = sum(1 if b=='N' else 0 for b in seq)
         if 0 < ns < 10:

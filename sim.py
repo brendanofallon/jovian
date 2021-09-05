@@ -314,6 +314,6 @@ def make_batch_multi(size, seqlen, readsperbatch, readlength, error_rate, clip_p
 # print(f"Alt indexes: {altmask}")
 # print(util.to_pileup(src.transpose(0,1)))
 
-src, tgtseq, vafs, altmask = make_batch(5, 50, 10, readlength=30, factory_func=make_het_snv, error_rate=0.01, clip_prob=0.01)
-
-print(altmask.shape)
+# src, tgtseq, vafs, altmask = make_batch(5, 50, 10, readlength=30, factory_func=make_het_snv, error_rate=0.01, clip_prob=0.01)
+#
+# print(altmask.shape)
