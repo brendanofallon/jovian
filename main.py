@@ -233,7 +233,7 @@ def train_epochs(epochs,
     batch_size = 128
 
     altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor.sd"))
+    altpredictor.load_state_dict(torch.load("altpredictor2.sd"))
     altpredictor.to(DEVICE)
 
     criterion = nn.CrossEntropyLoss()
@@ -282,7 +282,6 @@ def train_epochs(epochs,
 
                     predictions, vafpreds = model(src.to(DEVICE))
                     tps, fps, fns = eval_batch(src, tgt, predictions)
-                    logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
                     if tps > 0:
                         logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
                     else:
@@ -558,25 +557,6 @@ def main():
     args = parser.parse_args()
     args.func(**vars(args))
 
-# def testaltpredictor():
-#     conf = load_train_conf("simtrain.yaml")
-#     regions = bwasim.load_regions(conf['regions'])
-#     ap = model.AltPredictor(-1, 7)
-#     ap.load_state_dict(torch.load("altpredictor.sd"))
-#     src, tgt, vaftgt, altmask = bwasim.make_batch(10,
-#                                                   regions,
-#                                                   conf['reference'],
-#                                                   numreads=100,
-#                                                   readlength=55,
-#                                                   var_funcs=[bwasim.make_het_snv],
-#                                                   error_rate=0.01,
-#                                                   clip_prob=0)
-#
-#     preds = ap(src)
-#     for b in range(src.shape[0]):
-#         print(f"\n Batch {b}")
-#         for pred, actual in zip(preds[b, :], altmask[b, :]):
-#             print(f"{pred:.3f}\t{actual:.3f}")
 
 if __name__ == "__main__":
     # testaltpredictor()
