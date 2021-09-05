@@ -81,7 +81,8 @@ def betavaf():
     if np.random.rand() < 0.1:
         return 1.0
     else:
-        return stats.beta(a=1.0, b=5.0).rvs(1)
+        return stats.beta(a=1.0, b=5.0).rvs(1)[0]
+
 
 class BWASimLoader:
 
