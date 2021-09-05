@@ -492,42 +492,49 @@ def eval_sim(statedict, config, **kwargs):
     conf = load_train_conf(config)
     regions = bwasim.load_regions(conf['regions'])
     in_dim = (max_read_depth ) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=3).to(DEVICE)
+
+    altpredictor = AltPredictor(0, 7)
+    altpredictor.load_state_dict(torch.load("altpredictor2.sd"))
+    altpredictor.to(DEVICE)
+
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
-    # SNVs
-    batch_size = 10
-    src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
+    batch_size = 20
+    for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
+        src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
                                                   numreads=100,
-                                                  readlength=123,
+                                                  readlength=100,
                                                   var_funcs=[bwasim.make_het_del],
+                                                  vaf_func=lambda : vaf,
                                                   error_rate=0.01,
                                                   clip_prob=0)
 
-    aex = altmask.unsqueeze(-1).unsqueeze(-1)
-    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                          src.shape[3]).transpose(1, 2)
-    fullmask = 0.9 * fullmask + 0.05
-    masked_src = src * fullmask
-    seq_preds, vaf_preds = model(masked_src)
+        predicted_altmask = altpredictor(src.to(DEVICE))
+        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                          src.shape[3]).transpose(1, 2).to(DEVICE)
+        masked_src = src * fullmask
+        seq_preds, vaf_preds = model(masked_src)
 
-    tp_total = 0
-    fp_total = 0
-    fn_total = 0
-    for b in range(src.shape[0]):
-        # print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
-        # print(util.readstr(src[b, :, 0, :]))
-        # print(util.readstr(seq_preds[b, :, :]))
-        tps, fps, fns = eval_prediction(src[b, :, 0, :], tgt[b, :], seq_preds[b, :, :])
-        tp_total += len(tps)
-        fp_total += len(fps)
-        fn_total += len(fns)
-        print(f"Item {b} TP: {len(tps)} FP: {len(fps)}  FN: {len(fns)}")
+        tp_total = 0
+        fp_total = 0
+        fn_total = 0
+        for b in range(src.shape[0]):
+            # print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
+            # print(util.readstr(src[b, :, 0, :]))
+            # print(util.readstr(seq_preds[b, :, :]))
+            tps, fps, fns = eval_prediction(src[b, :, 0, :], tgt[b, :], seq_preds[b, :, :], midwidth=50)
+            tp_total += len(tps)
+            fp_total += len(fps)
+            fn_total += len(fns)
+            # print(f"\tItem {b} TP: {len(tps)} FP: {len(fps)}  FN: {len(fns)}")
 
-    print(f"PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
+        print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
 
 
 def main():
