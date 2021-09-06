@@ -239,7 +239,7 @@ def train_epochs(epochs,
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.999)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
@@ -512,7 +512,7 @@ def eval_sim(statedict, config, **kwargs):
                                                   conf['reference'],
                                                   numreads=100,
                                                   readlength=100,
-                                                  var_funcs=[bwasim.make_het_del],
+                                                  var_funcs=[bwasim.make_mnv],
                                                   vaf_func=lambda : vaf,
                                                   error_rate=0.01,
                                                   clip_prob=0)
@@ -522,7 +522,7 @@ def eval_sim(statedict, config, **kwargs):
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
         fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                           src.shape[3]).transpose(1, 2).to(DEVICE)
-        masked_src = src * fullmask
+        masked_src = src.to(DEVICE) * fullmask
         seq_preds, vaf_preds = model(masked_src)
 
         tp_total = 0
