@@ -101,72 +101,6 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
         return loader.MultiLoader([l.get(timeout=2*60*60) for l in results])
 
 
-
-def sort_by_ref(reads, altmask=None):
-    """
-    Sort read tensors by how closely they match the sequence seq.
-    :param seq:
-    :param reads: Tensor of encoded reads, with dimension [batch, pos, read, feature]
-    :return: New tensor containing the same read tensors, but sorted
-    """
-    results = []
-    altmask_results = []
-    for batch in range(reads.shape[0]):
-        seq = reads[batch, :, 0, 0:4].argmax(dim=-1)
-        w = reads[batch, :, :, 0:4].sum(dim=-1)
-        t = reads[batch, :, :, 0:4].argmax(dim=-1)
-        matchsum = ((t == seq.repeat(reads.shape[2], 1).transpose(0,1)) * w).long().sum(dim=0)
-        results.append(reads[batch, :, torch.argsort(matchsum), :])
-        if altmask is not None:
-            altmask_results.append(altmask[batch, torch.argsort(matchsum)])
-    if altmask is not None:
-        return torch.stack(results), torch.stack(altmask_results)
-    else:
-        return torch.stack(results)
-
-
-def _is_ref_match(read):
-    assert len(read.shape) == 2, "expected 2-dim input"
-    bases = read[:, 0:4].sum().item()
-    indel = read[:, 5].sum().item()
-    refmatches = read[:, 6].sum().item()
-    clipped = read[:, 7].sum().item()
-    return indel == 0 and clipped == 0 and refmatches == bases
-
-
-def remove_ref_reads(reads, maxreads=50, altmask=None):
-    """
-    Zero out any read that is a perfect ref match (no indels / each base matches ref)
-    :param reads:
-    :param altmask:
-    :return:
-    """
-    results = []
-    altmask_results = []
-    with torch.no_grad():
-        for batch in range(reads.shape[0]):
-            amb = altmask[batch, :]
-            logger.info(f"Batch {batch}, tot alt reads: {amb.sum().item()}")
-            indel = reads[batch, :, :, 5].sum(dim=0)
-            refmatches = reads[batch, :, :, 6].sum(dim=0)
-            clipped = reads[batch, :, :, 7].sum(dim=0)
-            is_refmatch = (indel == 0) * (clipped == 0) * (reads[batch, :, :, 0:4].sum(dim=2).sum(dim=0) == refmatches)
-            is_refmatch[0] = False # Important - read[0] is the reference sequence - we don't want to remove it!
-            nonrefs = reads[batch, :, ~is_refmatch, :]
-            if is_refmatch[torch.where(amb)[0]].sum().item() > 0:
-                logger.error("Yikes, is_refmatch was true for at least one alt read!")
-
-            # assert is_refmatch[torch.where(amb)[0]].sum().item() == 0,
-            if nonrefs.shape[1] >= maxreads:
-                nonrefs = nonrefs[:, 0:maxreads, :]
-            else:
-                pad = torch.zeros(reads.shape[1], maxreads - nonrefs.shape[1], reads.shape[3]).to(DEVICE)
-                nonrefs = torch.cat((nonrefs, pad), dim=1)
-            results.append(nonrefs)
-
-    return torch.stack(results).to(DEVICE)
-
-
 def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
@@ -180,7 +114,6 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        # src, sorted_altmask = sort_by_ref(unsorted_src, altmask)
         predicted_altmask = altpredictor(unsorted_src)
         predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
@@ -191,7 +124,11 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         seq_preds, vaf_preds = model(src)
 
-        loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        focalwidth = 100
+        focalstart = seq_preds.shape[1] // 2 - focalwidth // 2
+        focalend = seq_preds.shape[1] // 2 + focalwidth // 2
+
+        loss = criterion(seq_preds[:, focalstart:focalend, :].flatten(start_dim=0, end_dim=1), tgt_seq[:, focalstart:focalend].flatten())
 
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
@@ -223,8 +160,6 @@ def train_epochs(epochs,
                  eval_batches=None):
     in_dim = (max_read_depth) * feats_per_read
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
-    # model = VarTransformerAltMask(max_read_depth, feats_per_read, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
-    # model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=8, d_hid=300, n_encoder_layers=4).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -266,7 +201,7 @@ def train_epochs(epochs,
 
             if eval_batches is not None:
                 for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
-                    # Transform source somehow?
+                    # Use 'altpredictor' to mask out non-alt reads
                     src = src.to(DEVICE)
                     predicted_altmask = altpredictor(src.to(DEVICE))
                     predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
@@ -505,7 +440,7 @@ def eval_sim(statedict, config, **kwargs):
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
-    batch_size = 20
+    batch_size = 50
     for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
         src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
