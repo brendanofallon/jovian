@@ -120,6 +120,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
         src = unsorted_src * fullmask
 
+
+
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
@@ -200,29 +202,24 @@ def train_epochs(epochs,
 
 
             if eval_batches is not None:
-                for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
-                    # Use 'altpredictor' to mask out non-alt reads
-                    src = src.to(DEVICE)
-                    predicted_altmask = altpredictor(src.to(DEVICE))
-                    predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-                    aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                                          src.shape[3]).transpose(1, 2).to(DEVICE)
-                    src = src * fullmask
+                with torch.no_grad():
+                    for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
+                        # Use 'altpredictor' to mask out non-alt reads
+                        src = src.to(DEVICE)
+                        predicted_altmask = altpredictor(src.to(DEVICE))
+                        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+                        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+                        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                                              src.shape[3]).transpose(1, 2).to(DEVICE)
+                        src = src * fullmask
 
-                    with torch.no_grad():
-                        altpreds = altpredictor(src.to(DEVICE))
-                        minalt = altpreds.min().item()
-                        maxalt = altpreds.max().item()
-
-                    predictions, vafpreds = model(src.to(DEVICE))
-                    tps, fps, fns = eval_batch(src, tgt, predictions)
-                    logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
-                    if tps > 0:
-                        logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
-                    else:
-                        logger.info(f"Eval: {vartype} PPA: No TPs found :(")
-
+                        predictions, vafpreds = model(src.to(DEVICE))
+                        tps, fps, fns = eval_batch(src, tgt, predictions)
+                        logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
+                        if tps > 0:
+                            logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
+                        else:
+                            logger.info(f"Eval: {vartype} PPA: No TPs found :(")
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
@@ -458,29 +455,25 @@ def eval_sim(statedict, config, **kwargs):
                                                   error_rate=0.01,
                                                   clip_prob=0)
 
-        predicted_altmask = altpredictor(src.to(DEVICE))
-        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                          src.shape[3]).transpose(1, 2).to(DEVICE)
-        masked_src = src * fullmask
-        seq_preds, vaf_preds = model(masked_src)
+            predicted_altmask = altpredictor(src.to(DEVICE))
+            predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+            aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+            fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                              src.shape[3]).transpose(1, 2).to(DEVICE)
+            masked_src = src * fullmask
+            seq_preds, vaf_preds = model(masked_src)
 
-        tp_total = 0
-        fp_total = 0
-        fn_total = 0
-        for b in range(src.shape[0]):
-            # print(util.to_pileup(src[b, :, :, :], altmask[b, :]))
-            # print(util.readstr(src[b, :, 0, :]))
-            # print(util.readstr(seq_preds[b, :, :]))
-            tps, fps, fns = eval_prediction(src[b, :, 0, :], tgt[b, :], seq_preds[b, :, :], midwidth=50)
-            tp_total += len(tps)
-            fp_total += len(fps)
-            fn_total += len(fns)
-            # print(f"\tItem {b} TP: {len(tps)} FP: {len(fps)}  FN: {len(fns)}")
+            tp_total = 0
+            fp_total = 0
+            fn_total = 0
+            for b in range(src.shape[0]):
+                tps, fps, fns = eval_prediction(src[b, :, 0, :], tgt[b, :], seq_preds[b, :, :], midwidth=50)
+                tp_total += len(tps)
+                fp_total += len(fps)
+                fn_total += len(fns)
 
-        print(f"{label}, {vaf:.3f}, {tp_total}, {fp_total}, {fn_total}")
-        # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
+            print(f"{label}, {vaf:.3f}, {tp_total}, {fp_total}, {fn_total}")
+            # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
 
 
 def main():
