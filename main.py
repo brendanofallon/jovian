@@ -116,7 +116,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         predicted_altmask = altpredictor(unsorted_src)
         amx = 0.95 / predicted_altmask.max(dim=1)[0]
-        predicted_altmask = predicted_altmask * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+        amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+        predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
+            (-1, predicted_altmask.shape[1])) + amin
+        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
         predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
@@ -204,9 +207,11 @@ def train_epochs(epochs,
                         src = src.to(DEVICE)
                         predicted_altmask = altpredictor(src.to(DEVICE))
                         amx = 0.95 / predicted_altmask.max(dim=1)[0]
-                        predicted_altmask = predicted_altmask * amx.unsqueeze(1).expand(
-                            (-1, predicted_altmask.shape[1]))
+                        amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+                        predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
+                            (-1, predicted_altmask.shape[1])) + amin
                         predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+                        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
                         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
                         fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                                               src.shape[3]).transpose(1, 2).to(DEVICE)
@@ -456,8 +461,10 @@ def eval_sim(statedict, config, **kwargs):
 
             predicted_altmask = altpredictor(src.to(DEVICE))
             amx = 0.95 / predicted_altmask.max(dim=1)[0]
-            predicted_altmask = predicted_altmask * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+            amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+            predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1])) + amin
             predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+            predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
             aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
             fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                               src.shape[3]).transpose(1, 2).to(DEVICE)
