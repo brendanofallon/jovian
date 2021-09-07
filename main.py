@@ -120,17 +120,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
         src = unsorted_src * fullmask
 
-
-
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
 
-        #focalwidth = 100
-        #focalstart = seq_preds.shape[1] // 2 - focalwidth // 2
-        #focalend = seq_preds.shape[1] // 2 + focalwidth // 2
-        #loss = criterion(seq_preds[:, focalstart:focalend, :].flatten(start_dim=0, end_dim=1), tgt_seq[:, focalstart:focalend].flatten())
-        
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
@@ -443,7 +436,7 @@ def eval_sim(statedict, config, **kwargs):
     model.eval()
 
     batch_size = 50
-    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv]:
+    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
         label = str(varfunc.__name__).split("_")[-1]
         for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
             src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
