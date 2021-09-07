@@ -115,6 +115,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         predicted_altmask = altpredictor(unsorted_src)
+        amx = 0.95 / predicted_altmask.max(dim=1)[0]
+        predicted_altmask = predicted_altmask * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
         predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
@@ -201,6 +203,9 @@ def train_epochs(epochs,
                         # Use 'altpredictor' to mask out non-alt reads
                         src = src.to(DEVICE)
                         predicted_altmask = altpredictor(src.to(DEVICE))
+                        amx = 0.95 / predicted_altmask.max(dim=1)[0]
+                        predicted_altmask = predicted_altmask * amx.unsqueeze(1).expand(
+                            (-1, predicted_altmask.shape[1]))
                         predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
                         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
                         fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
@@ -428,17 +433,17 @@ def eval_sim(statedict, config, **kwargs):
     in_dim = (max_read_depth ) * feats_per_read
 
     altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor2.sd"))
+    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
     altpredictor.to(DEVICE)
 
     model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
-    batch_size = 50
-    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
+    batch_size = 100
+    for varfunc in [bwasim.make_het_del]: #, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
         label = str(varfunc.__name__).split("_")[-1]
-        for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
+        for vaf in [0.10]: #[0.99, 0.50, 0.25, 0.10, 0.05]:
             src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
@@ -450,6 +455,8 @@ def eval_sim(statedict, config, **kwargs):
                                                   clip_prob=0)
 
             predicted_altmask = altpredictor(src.to(DEVICE))
+            amx = 0.95 / predicted_altmask.max(dim=1)[0]
+            predicted_altmask = predicted_altmask * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
             predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
             aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
             fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
