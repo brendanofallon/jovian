@@ -461,7 +461,7 @@ def eval_sim(statedict, config, **kwargs):
             aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
             fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
                               src.shape[3]).transpose(1, 2).to(DEVICE)
-            masked_src = src * fullmask
+            masked_src = src.to(DEVICE) * fullmask
             seq_preds, vaf_preds = model(masked_src)
 
             tp_total = 0
