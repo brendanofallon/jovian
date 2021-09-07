@@ -124,11 +124,12 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         seq_preds, vaf_preds = model(src)
 
-        focalwidth = 100
-        focalstart = seq_preds.shape[1] // 2 - focalwidth // 2
-        focalend = seq_preds.shape[1] // 2 + focalwidth // 2
-
-        loss = criterion(seq_preds[:, focalstart:focalend, :].flatten(start_dim=0, end_dim=1), tgt_seq[:, focalstart:focalend].flatten())
+        #focalwidth = 100
+        #focalstart = seq_preds.shape[1] // 2 - focalwidth // 2
+        #focalend = seq_preds.shape[1] // 2 + focalwidth // 2
+        #loss = criterion(seq_preds[:, focalstart:focalend, :].flatten(start_dim=0, end_dim=1), tgt_seq[:, focalstart:focalend].flatten())
+        
+        loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
@@ -159,7 +160,7 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None):
     in_dim = (max_read_depth) * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -436,7 +437,7 @@ def eval_sim(statedict, config, **kwargs):
     altpredictor.load_state_dict(torch.load("altpredictor2.sd"))
     altpredictor.to(DEVICE)
 
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=200, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
@@ -447,7 +448,7 @@ def eval_sim(statedict, config, **kwargs):
                                                   conf['reference'],
                                                   numreads=100,
                                                   readlength=100,
-                                                  var_funcs=[bwasim.make_mnv],
+                                                  var_funcs=[bwasim.make_het_ins],
                                                   vaf_func=lambda : vaf,
                                                   error_rate=0.01,
                                                   clip_prob=0)
