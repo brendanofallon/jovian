@@ -203,30 +203,6 @@ def train_epochs(epochs,
 
 
             if eval_batches is not None:
-<<<<<<< HEAD
-                for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
-                    # Use 'altpredictor' to mask out non-alt reads
-                    src = src.to(DEVICE)
-                    predicted_altmask = altpredictor(src.to(DEVICE))
-                    predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-                    aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-                    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                                          src.shape[3]).transpose(1, 2).to(DEVICE)
-                    src = src * fullmask
-
-                    with torch.no_grad():
-                        altpreds = altpredictor(src.to(DEVICE))
-                        minalt = altpreds.min().item()
-                        maxalt = altpreds.max().item()
-
-                    predictions, vafpreds = model(src.to(DEVICE))
-                    tps, fps, fns = eval_batch(src, tgt, predictions)
-                    if tps > 0:
-                        logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
-                    else:
-                        logger.info(f"Eval: {vartype} PPA: No TPs found :(")
-
-=======
                 with torch.no_grad():
                     for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
                         # Use 'altpredictor' to mask out non-alt reads
@@ -245,7 +221,6 @@ def train_epochs(epochs,
                             logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
                         else:
                             logger.info(f"Eval: {vartype} PPA: No TPs found :(")
->>>>>>> c5bc9387771ec892e0b94f429729f412e29f27b8
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
