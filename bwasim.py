@@ -161,7 +161,14 @@ def vaf_uniform(lower=0.1, upper=1.0):
     return np.random.uniform(low=lower, high=upper)
 
 
-def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, vaf_func=vaf_uniform, weights=None, error_rate=0.01, clip_prob=0):
+def betavaf():
+    if np.random.rand() < 0.1:
+        return 1.0
+    else:
+        return stats.beta(a=1.0, b=5.0).rvs(1)[0]
+
+
+def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, vaf_func=betavaf, weights=None, error_rate=0.01, clip_prob=0):
     prefix = "simfqs"
     refgenome = pysam.FastaFile(refpath)
     region_size = 2 * readlength
@@ -246,8 +253,8 @@ def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_p
     :return: source data tensor, target data tensor
     """
     snv_w = 9 # Bigger values here equal less variance among sizes
-    del_w = 8
-    ins_w = 8
+    del_w = 10
+    ins_w = 7
     mnv_w = 5
     novar_w = 10
     mix = np.ceil(np.random.dirichlet((snv_w, del_w, ins_w, mnv_w, novar_w)) * size) # Ceil because zero sizes break things

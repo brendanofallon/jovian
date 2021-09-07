@@ -120,17 +120,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
         src = unsorted_src * fullmask
 
-
-
         optimizer.zero_grad()
 
         seq_preds, vaf_preds = model(src)
 
-        #focalwidth = 100
-        #focalstart = seq_preds.shape[1] // 2 - focalwidth // 2
-        #focalend = seq_preds.shape[1] // 2 + focalwidth // 2
-        #loss = criterion(seq_preds[:, focalstart:focalend, :].flatten(start_dim=0, end_dim=1), tgt_seq[:, focalstart:focalend].flatten())
-        
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
