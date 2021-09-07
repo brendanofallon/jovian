@@ -441,9 +441,9 @@ def eval_sim(statedict, config, **kwargs):
     model.eval()
 
     batch_size = 100
-    for varfunc in [bwasim.make_het_del]: #, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
+    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
         label = str(varfunc.__name__).split("_")[-1]
-        for vaf in [0.10]: #[0.99, 0.50, 0.25, 0.10, 0.05]:
+        for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
             src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
