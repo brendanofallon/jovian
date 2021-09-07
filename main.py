@@ -169,7 +169,7 @@ def train_epochs(epochs,
     batch_size = 128
 
     altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor2.sd"))
+    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
     altpredictor.to(DEVICE)
 
     criterion = nn.CrossEntropyLoss()
@@ -389,7 +389,7 @@ def create_eval_batches(batch_size, config):
     regions = bwasim.load_regions(conf['regions'])
     eval_batches = {}
     logger.info(f"Generating evaluation batches of size {batch_size}")
-    vaffunc = loader.betavaf
+    vaffunc = bwasim.betavaf
     eval_batches['del'] = bwasim.make_batch(batch_size,
                                                       regions,
                                                       conf['reference'],
