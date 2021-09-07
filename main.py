@@ -329,6 +329,7 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     # print(aln.aligned_target_sequence)
     pred_vars = []
     for v in vcf.aln_to_vars(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :])):
+        v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
         pred_vars.append(v)
 
     tps = [] # True postive - real and detected variant
@@ -336,12 +337,14 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     fps = [] # False positives - detected but not a real variant
     for true_var in known_vars:
         if true_var in pred_vars:
+            logger.info(f"TP: {v}")
             tps.append(true_var)
         else:
             fns.append(true_var)
 
     for detected_var in pred_vars:
         if detected_var not in known_vars:
+            logger.info(f"FP: {detected_var}")
             fps.append(detected_var)
 
     return tps, fps, fns
@@ -442,13 +445,15 @@ def eval_sim(statedict, config, **kwargs):
     model.eval()
 
     batch_size = 50
-    for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
-        src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
+    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv]:
+        label = str(varfunc.__name__).split("_")[-1]
+        for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
+            src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
                                                   numreads=100,
                                                   readlength=100,
-                                                  var_funcs=[bwasim.make_het_del],
+                                                  var_funcs=[varfunc],
                                                   vaf_func=lambda : vaf,
                                                   error_rate=0.01,
                                                   clip_prob=0)
@@ -474,7 +479,8 @@ def eval_sim(statedict, config, **kwargs):
             fn_total += len(fns)
             # print(f"\tItem {b} TP: {len(tps)} FP: {len(fps)}  FN: {len(fns)}")
 
-        print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
+        print(f"{label}, {vaf:.3f}, {tp_total}, {fp_total}, {fn_total}")
+        # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
 
 
 def main():

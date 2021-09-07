@@ -7,6 +7,10 @@ class Variant:
     ref: str
     alt: str
     pos: int
+    qual: float
+
+    def __eq__(self, other):
+        return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
 
 
 @dataclass
@@ -66,7 +70,8 @@ def aln_to_vars(query, target, offset=0):
                 if mismatches:
                     yield Variant(ref="".join(mismatches[0]).replace("-", ""),
                                   alt="".join(mismatches[1]).replace("-", ""),
-                                  pos=mismatchstart)
+                                  pos=mismatchstart,
+                                  qual=-1)
                 mismatches = []
             else:
                 if mismatches:
