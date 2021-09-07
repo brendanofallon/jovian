@@ -30,9 +30,9 @@ class TwoHapDecoder(nn.Module):
 
     def __init__(self, in_dim, out_dim):
         super().__init__()
-        self.fc1 = nn.Linear(in_dim, 256)
-        self.fc2 = nn.Linear(256, out_dim)
-        self.fc_vaf = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(in_dim, 400)
+        self.fc2 = nn.Linear(400, out_dim)
+        self.fc_vaf = nn.Linear(400, 1)
         self.elu = nn.ELU()
         self.softmax = nn.Softmax(dim=2)
 

@@ -216,7 +216,7 @@ def train_epochs(epochs,
 
                         predictions, vafpreds = model(src.to(DEVICE))
                         tps, fps, fns = eval_batch(src, tgt, predictions)
-                        logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
+                        #logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
                         if tps > 0:
                             logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
                         else:
@@ -335,14 +335,14 @@ def eval_prediction(refseq, tgt, predictions, midwidth=100):
     fps = [] # False positives - detected but not a real variant
     for true_var in known_vars:
         if true_var in pred_vars:
-            logger.info(f"TP: {v}")
+            #logger.info(f"TP: {v}")
             tps.append(true_var)
         else:
             fns.append(true_var)
 
     for detected_var in pred_vars:
         if detected_var not in known_vars:
-            logger.info(f"FP: {detected_var}")
+            #logger.info(f"FP: {detected_var}")
             fps.append(detected_var)
 
     return tps, fps, fns
