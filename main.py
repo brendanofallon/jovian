@@ -19,7 +19,7 @@ import sim
 import util
 import vcf
 import loader
-from bam import target_string_to_tensor, encode_pileup2, reads_spanning, alnstart
+from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -267,9 +267,14 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
     max_read_depth = 200
-    feats_per_read = 8
+    feats_per_read = 7
     in_dim = max_read_depth * feats_per_read
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=5, d_hid=200, n_encoder_layers=2).to(DEVICE)
+
+    altpredictor = AltPredictor(0, 7)
+    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
+    altpredictor.to(DEVICE)
+
+    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
@@ -278,25 +283,28 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
 
-    reads_encoded = encode_pileup2(reads).to(DEVICE)
     minref = min(alnstart(r) for r in reads)
+    maxref = max(alnstart(r) + r.query_length for r in reads)
+    reads_encoded, _ = encode_pileup3(reads, minref, maxref)
+
     refseq = pysam.FastaFile(reference).fetch(chrom, minref, minref + reads_encoded.shape[0])
-    reft = target_string_to_tensor(refseq).unsqueeze(0).unsqueeze(0).to(DEVICE)
-    src = sort_by_ref(reft, reads_encoded.unsqueeze(0))
+    reftensor = string_to_tensor(refseq)
+    reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
+    padded_reads = ensure_dim(reads_w_ref, maxref-minref, max_read_depth).unsqueeze(0)
+
+    fullmask = create_altmask(altpredictor, padded_reads)
+    masked_reads = padded_reads * fullmask
     
-    print(util.to_pileup(src[0, :, :, :]))
-    seq1preds, seq2preds = model(src.flatten(start_dim=2))
-    pred1str = util.readstr(seq1preds[0, :, :])
-    pred2str = util.readstr(seq2preds[0, :, :])
+    print(util.to_pileup(padded_reads[0, :, :, :]))
+    seq_preds, _ = model(masked_reads.flatten(start_dim=2))
+    pred1str = util.readstr(seq_preds[0, :, :])
     print("\n")
     print(refseq)
     print(pred1str)
-    print(pred2str)
-    print("".join('*' if a==b else 'x' for a,b in zip(refseq, pred2str)))
-    print(refseq)
+
     midwith = 100
     for v in vcf.aln_to_vars(refseq[len(refseq) // 2 - midwith // 2:len(refseq) // 2 + midwith // 2],
-                            pred2str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2],
+                            pred1str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2],
                              offset=minref + len(refseq)//2 - midwith//2 + 1):
         print(v)
 
@@ -429,6 +437,28 @@ def create_eval_batches(batch_size, config):
     logger.info("Done generating evaluation batches")
     return eval_batches
 
+
+def create_altmask(altmaskmodel, src):
+    """
+    Create a new tensor of the same dimension as src that weights individual reads by their probability
+    of supporting a variant.
+    :param altmaskmodel: A function that returns a pytorch Tensor with dimension [batch, read], containing
+                        a value 0-1 for each read
+    :param src: Encoded pileup of dimension [batch, seq pos, read, feature]
+    :returns: Tensor with same dimension as src, with values 0-1 in read dimension replicated into features
+    """
+    predicted_altmask = altmaskmodel(src.to(DEVICE))
+    amx = 0.95 / predicted_altmask.max(dim=1)[0]
+    amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+    predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1])) + amin
+    predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+    predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
+    aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                          src.shape[3]).transpose(1, 2).to(DEVICE)
+    return fullmask
+
+
 def eval_sim(statedict, config, **kwargs):
     max_read_depth = 100
     feats_per_read = 7
@@ -459,15 +489,7 @@ def eval_sim(statedict, config, **kwargs):
                                                   error_rate=0.01,
                                                   clip_prob=0)
 
-            predicted_altmask = altpredictor(src.to(DEVICE))
-            amx = 0.95 / predicted_altmask.max(dim=1)[0]
-            amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-            predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1])) + amin
-            predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-            predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-            aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-            fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                              src.shape[3]).transpose(1, 2).to(DEVICE)
+            fullmask = create_altmask(altpredictor, src)
             masked_src = src.to(DEVICE) * fullmask
             seq_preds, vaf_preds = model(masked_src)
 
