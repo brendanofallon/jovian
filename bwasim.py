@@ -190,7 +190,7 @@ def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=Non
         pos = np.random.randint(region[1], region[2])
         seq = refgenome.fetch(region[0], pos-region_size//2, pos+region_size//2)
         vaf = vaf_func()
-        fq1, fq2, altseq, vaf, varpos = var_func(seq, readlength, numreads, vaf=vaf, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
+        fq1, fq2, altseq, vaf, varpos = var_func(seq, readlength, numreads // 2, vaf=vaf, prefix=prefix, fragment_size=fragment_size, error_rate=error_rate, clip_prob=clip_prob)
         ns = sum(1 if b=='N' else 0 for b in seq)
         if 0 < ns < 10:
             logger.warning(f"Replacing {ns} Ns with As near position {region[0]}:{pos}")
