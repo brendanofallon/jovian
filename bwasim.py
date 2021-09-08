@@ -40,8 +40,8 @@ def generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob):
         read1 = seq[start:min(len(seq), start+readlength)]
         read2 = seq[max(0, start+template_len-readlength):min(len(seq), start+template_len)]
         if error_rate:
-            read1 = mutate_seq(read1, error_rate)
-            read2 = mutate_seq(read2, error_rate)
+            read1 = mutate_chunk(mutate_seq(read1, error_rate), clip_prob)
+            read2 = mutate_chunk(mutate_seq(read2, error_rate), clip_prob)
         yield read1, read2
 
 
@@ -99,6 +99,18 @@ def mutate_seq(seq, error_rate):
 
     return "".join(output)
 
+
+def mutate_chunk(seq, clip_prob):
+    if clip_prob == 0 or np.random.rand() > clip_prob:
+        return seq
+
+    num_bases = np.random.randint(1, 30)
+    if np.random.rand() < 0.5:
+
+        seq = "".join(random.choice('ACTG') for _ in range(num_bases)) + seq[num_bases:]
+    else:
+        seq = seq[0:len(seq)-num_bases] + "".join(random.choice('ACTG') for _ in range(num_bases))
+    return seq
 
 def make_het_snv(seq, readlength, totreads, vaf, prefix, fragment_size, error_rate=0, clip_prob=0):
     snvpos = random.choice(range(max(0, len(seq) // 2 - 25), min(len(seq), len(seq) // 2 + 25)))
@@ -271,18 +283,23 @@ def make_mixed_batch(size, seqlen, readsperbatch, readlength, error_rate, clip_p
 
 
 
-def main():
-    refpath = "/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
-    #refpath = "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
-    # ref = pysam.FastaFile(refpath)
-    # seq = ref.fetch("2", 73612900, 73613200)
-    # fq1, fq2, altseq, vaf = make_het_snv(seq, 150, 100, 0.5, prefix="myhetsnv")
-    # fq1 = bgzip(fq1)
-    # fq2 = bgzip(fq2)
-    # print(f"Saved results to {fq1}, {fq2}")
-    regions = load_regions("cds100.bed")
-
-    src, tgt, vafs = make_batch(10, regions, refpath, numreads=100, readlength=150, error_rate=0.005, clip_prob=0)
-    print(f"src: {src.shape}")
-    print(f"tgt: {tgt.shape}")
-
+# def main():
+#     # refpath = "/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
+#     refpath = "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
+#     # ref = pysam.FastaFile(refpath)
+#     # seq = ref.fetch("2", 73612900, 73613200)
+#     # fq1, fq2, altseq, vaf = make_het_snv(seq, 150, 100, 0.5, prefix="myhetsnv")
+#     # fq1 = bgzip(fq1)
+#     # fq2 = bgzip(fq2)
+#     # print(f"Saved results to {fq1}, {fq2}")
+#     regions = load_regions("cds100.bed")
+#
+#     regions = regions[0:5]
+#     for r in regions:
+#         print(r)
+#     src, tgt, vafs = make_batch(5, regions, refpath, numreads=100, readlength=150, error_rate=0.02, clip_prob=0.02)
+#     print(f"src: {src.shape}")
+#     print(f"tgt: {tgt.shape}")
+#
+# if __name__=="__main__":
+#     main()
