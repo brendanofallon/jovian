@@ -127,6 +127,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         optimizer.zero_grad()
 
+        print(f"src shape: {src.shape}")
         seq_preds, vaf_preds = model(src)
 
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
@@ -166,7 +167,7 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 128
+    batch_size = 64
 
     altpredictor = AltPredictor(0, 7)
     altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
@@ -248,17 +249,17 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
-    eval_batches = create_eval_batches(25, conf)
+    eval_batches = create_eval_batches(25, 200, 145, conf)
     dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
-                                     readsperpileup=100,
+                                     readsperpileup=200,
                                      readlength=145,
                                      error_rate=0.01,
                                      clip_prob=0)
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=100,
+                 max_read_depth=200,
                  feats_per_read=7,
                  statedict=input_model,
                  model_dest=output_model,
@@ -380,15 +381,13 @@ def eval_batch(src, tgt, predictions):
     return tp_total, fp_total, fn_total
 
 
-def create_eval_batches(batch_size, config):
+def create_eval_batches(batch_size, num_reads, read_length, config):
     """
     Create batches of variants for evaluation
     :param batch_size: Number of pileups per batch
     :param config: Config
     :return: Mapping from variant type -> (batch src, tgt, vaftgt, altmask)
     """
-    num_reads = 100
-    read_length = 146
     base_error_rate = 0.01
     if type(config) == str:
         conf = load_train_conf(config)
@@ -460,7 +459,7 @@ def create_altmask(altmaskmodel, src):
 
 
 def eval_sim(statedict, config, **kwargs):
-    max_read_depth = 100
+    max_read_depth = 200
     feats_per_read = 7
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
@@ -475,15 +474,15 @@ def eval_sim(statedict, config, **kwargs):
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
-    batch_size = 10
-    for varfunc in [bwasim.make_het_del]: #, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
+    batch_size = 100
+    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
         label = str(varfunc.__name__).split("_")[-1]
-        for vaf in [0.10]: #[0.99, 0.50, 0.25, 0.10, 0.05]:
+        for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
             src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
                                                   regions,
                                                   conf['reference'],
-                                                  numreads=100,
-                                                  readlength=100,
+                                                  numreads=200,
+                                                  readlength=140,
                                                   var_funcs=[varfunc],
                                                   vaf_func=lambda : vaf,
                                                   error_rate=0.01,
