@@ -46,7 +46,8 @@ def generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob):
 
 
 def to_fastq(read, label, idx):
-    return f"@read_{label}{idx}\n{read}\n+\n" +'F' * len(read) + "\n"
+    quals = "".join(random.choices('F:,!'), k=len(read), weights=[84, 10, 5, 1])
+    return f"@read_{label}{idx}\n{read}\n+\n" + quals + "\n"
 
 
 def fq_from_seq(seq, numreads, readlength, fragsize, read_label, error_rate, clip_prob):
