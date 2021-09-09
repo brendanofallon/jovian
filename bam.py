@@ -413,10 +413,10 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     if len(reads) < 5:
         raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
 
-    reads_encoded, _ = encode_pileup3(reads)
     minref = min(alnstart(r) for r in reads)
+    maxref = max(alnstart(r) + r.query_length for r in reads)
+    reads_encoded, _ = encode_pileup3(reads, minref, maxref)
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
-    maxref = minref + reads_encoded.shape[0]
     refseq = fasta.fetch(chrom, minref, maxref) 
     assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
     altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
