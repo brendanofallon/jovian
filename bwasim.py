@@ -89,7 +89,7 @@ def mutate_seq(seq, error_rate):
     """
     normal_qual_weights = [84, 10, 5, 1]
     mismatch_qual_weights = [40, 35, 20, 5]
-    normal_quals = "".join(random.choices('F:,!'), k=len(read), weights=normal_qual_weights)
+    normal_quals = "".join(random.choices('F:,!', k=len(seq), weights=normal_qual_weights))
     if error_rate == 0:
         return seq, normal_quals
     n_muts = np.random.poisson(error_rate * len(seq))
@@ -100,7 +100,7 @@ def mutate_seq(seq, error_rate):
     for i in range(n_muts):
         which = np.random.randint(0, len(seq))
         c = random.choice('ACTG')
-        q = random.choices('F:,!', k=1, weights=mismatch_qual_weights)
+        q = random.choices('F:,!', k=1, weights=mismatch_qual_weights)[0]
         while c == output[which]:
             c = random.choice('ACTG')
         output[which] = c
