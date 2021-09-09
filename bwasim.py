@@ -40,20 +40,22 @@ def generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob):
         read1 = seq[start:min(len(seq), start+readlength)]
         read2 = seq[max(0, start+template_len-readlength):min(len(seq), start+template_len)]
         if error_rate:
-            read1 = mutate_chunk(mutate_seq(read1, error_rate), clip_prob)
-            read2 = mutate_chunk(mutate_seq(read2, error_rate), clip_prob)
-        yield read1, read2
+            seq1, quals1 = mutate_seq(read1, error_rate)
+            read1 = mutate_chunk(seq1, clip_prob)
+            seq2, quals2 = mutate_seq(read2, error_rate)
+            read2 = mutate_chunk(seq2, clip_prob)
+        yield (read1, quals1), (read2, quals2)
 
 
-def to_fastq(read, label, idx):
-    quals = "".join(random.choices('F:,!'), k=len(read), weights=[84, 10, 5, 1])
-    return f"@read_{label}{idx}\n{read}\n+\n" + quals + "\n"
+def to_fastq(read, quals, label, idx):
+    # quals = "".join(random.choices('F:,!'), k=len(read), weights=[84, 10, 5, 1])
+    return f"@read_{label}{idx}\n{read}\n+\n{quals}\n"
 
 
 def fq_from_seq(seq, numreads, readlength, fragsize, read_label, error_rate, clip_prob):
-    for i, (r1, r2) in enumerate(generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob)):
+    for i, ((r1, q1), (r2, q2)) in enumerate(generate_reads(seq, numreads, readlength, fragsize, error_rate, clip_prob)):
         r2 = revcomp(r2)
-        yield to_fastq(r1, read_label, i), to_fastq(r2, read_label, i)
+        yield to_fastq(r1, q1, read_label, i), to_fastq(r2, q2, read_label, i)
 
 
 def fq_to_file(seq, numreads, readlength, fragsize, prefix, read_label, error_rate, clip_prob):
@@ -83,22 +85,28 @@ def mutate_seq(seq, error_rate):
     Randomly (uniformly) alter the given sequence at error_rate fraction of positions
     :param seq: Input sequence of bases
     :param error_rate: Fraction of bases to alter
-    :return: New, altered sequence
+    :return: New, altered sequence and base qualities
     """
+    normal_qual_weights = [84, 10, 5, 1]
+    mismatch_qual_weights = [40, 35, 20, 5]
+    normal_quals = "".join(random.choices('F:,!'), k=len(read), weights=normal_qual_weights)
     if error_rate == 0:
-        return seq
+        return seq, normal_quals
     n_muts = np.random.poisson(error_rate * len(seq))
     if n_muts == 0:
-        return seq
+        return seq, normal_quals
     output = list(seq)
+    quals = list(normal_quals)
     for i in range(n_muts):
         which = np.random.randint(0, len(seq))
         c = random.choice('ACTG')
+        q = random.choices('F:,!', k=1, weights=mismatch_qual_weights)
         while c == output[which]:
             c = random.choice('ACTG')
         output[which] = c
+        quals[which] = q
 
-    return "".join(output)
+    return "".join(output), "".join(quals)
 
 
 def mutate_chunk(seq, clip_prob):
