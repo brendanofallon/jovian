@@ -520,7 +520,7 @@ def pregen(config, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-    dataloader.batches_in_epoch = 2
+    dataloader.batches_in_epoch = 30
     output_dir = Path(kwargs.get('dir'))
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
@@ -539,7 +539,7 @@ def main():
     parser = argparse.ArgumentParser()
     subparser = parser.add_subparsers()
 
-    genparser = subparser.add_parser("pregen", help="Pre-generate tensors frmo BAMs")
+    genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.set_defaults(func=pregen)
