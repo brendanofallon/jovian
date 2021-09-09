@@ -251,8 +251,10 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
     if kwargs.get("datadir") is not None:
+        logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
         dataloader = loader.PregenLoader(DEVICE, kwargs.get("datadir"))
     else:
+        logger.info(f"Using on-the-fly training data from sim loader")
         dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
@@ -511,17 +513,22 @@ def eval_sim(statedict, config, **kwargs):
 
 def pregen(config, **kwargs):
     conf = load_train_conf(config)
-    batch_size=64
-    train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    dataloader = loader.BWASimLoader(DEVICE,
+    batch_size = 64
+    if kwargs.get("sim"):
+        batches = 50
+        logger.info(f"Generating simulated data with batch size {batch_size} and {batches} total batches")
+        dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
                                      readsperpileup=200,
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-    dataloader.batches_in_epoch = 2
+        dataloader.batches_in_epoch = batches
+    else:
+        logger.info(f"Generated training data using config from {config}")
+        train_sets = [(c['bam'], c['labels']) for c in conf['data']]
+        dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     output_dir = Path(kwargs.get('dir'))
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
@@ -543,6 +550,7 @@ def main():
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors frmo BAMs")
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
+    genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
     genparser.set_defaults(func=pregen)
 
 
