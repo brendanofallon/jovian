@@ -4,6 +4,7 @@
 import logging
 from datetime import datetime
 from collections import defaultdict
+from pathlib import Path
 
 import pysam
 import torch
@@ -248,14 +249,17 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
-    eval_batches = create_eval_batches(25, 200, 145, conf)
-    dataloader = loader.BWASimLoader(DEVICE,
+    if kwargs.get("datadir") is not None:
+        dataloader = loader.PregenLoader(DEVICE, kwargs.get("datadir"))
+    else:
+        dataloader = loader.BWASimLoader(DEVICE,
                                      regions=conf['regions'],
                                      refpath=conf['reference'],
                                      readsperpileup=200,
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
+    eval_batches = create_eval_batches(25, 200, 145, conf)
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=200,
@@ -504,9 +508,43 @@ def eval_sim(statedict, config, **kwargs):
             # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
 
 
+def pregen(config, **kwargs):
+    conf = load_train_conf(config)
+    batch_size=64
+    train_sets = [(c['bam'], c['labels']) for c in conf['data']]
+    #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
+    dataloader = loader.BWASimLoader(DEVICE,
+                                     regions=conf['regions'],
+                                     refpath=conf['reference'],
+                                     readsperpileup=200,
+                                     readlength=145,
+                                     error_rate=0.02,
+                                     clip_prob=0.01)
+    dataloader.batches_in_epoch = 2
+    output_dir = Path(kwargs.get('dir'))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    src_prefix = "src"
+    tgt_prefix = "tgt"
+    logger.info(f"Saving tensors to {output_dir}/..")
+    for i, (src, tgt, _, _) in enumerate(dataloader.iter_once(batch_size)):
+        logger.info(f"Saving batch {i}")
+        torch.save(src, output_dir / f"{src_prefix}_{i}.pt")
+        torch.save(tgt, output_dir / f"{tgt_prefix}_{i}.pt")
+
+
+
+
+
 def main():
     parser = argparse.ArgumentParser()
     subparser = parser.add_subparsers()
+
+    genparser = subparser.add_parser("pregen", help="Pre-generate tensors frmo BAMs")
+    genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
+    genparser.add_argument("-d", "--dir", help="Output directory", default=".")
+    genparser.set_defaults(func=pregen)
+
+
     trainparser = subparser.add_parser("train", help="Train a model")
     trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
@@ -514,6 +552,7 @@ def main():
     trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=0, type=int)
     trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
+    trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")
