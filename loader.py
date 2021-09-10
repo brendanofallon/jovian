@@ -33,7 +33,7 @@ class ReadLoader:
     def iter_once(self, batch_size):
         offset = 0
         while offset < self.src.shape[0]:
-            yield self.src[offset:offset + batch_size, :, :, :].to(self.device), self.tgt[offset:offset + batch_size, :, :].to(self.device)
+            yield self.src[offset:offset + batch_size, :, :, :].to(self.device), self.tgt[offset:offset + batch_size, :, :].to(self.device), None, None
             offset += batch_size
 
 
@@ -199,8 +199,8 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
                 encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
 
             minseqlen = min(len(refseq), len(altseq))
-            reft = target_string_to_tensor(refseq[0:minseqlen])
-            altt = target_string_to_tensor(altseq[0:minseqlen])
+            # reft = target_string_to_tensor(refseq[0:minseqlen])
+            tgt = target_string_to_tensor(altseq[0:minseqlen])
         except Exception as ex:
             logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
             num_ok_errors -= 1
@@ -211,7 +211,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
 
         if minseqlen != encoded.shape[0]:
             encoded = encoded[0:minseqlen, :, :]
-        tgt = torch.stack((reft, altt))
+
         yield encoded, tgt, row.status, row.vtype
 
 # t = torch.arange(100).unsqueeze(1).unsqueeze(1).unsqueeze(1)
