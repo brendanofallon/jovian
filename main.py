@@ -130,6 +130,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         seq_preds, vaf_preds = model(src)
 
+        print(f"seq preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
@@ -527,7 +528,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generated training data using config from {config}")
         train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-        dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
+        dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=1e9, max_reads_per_aln=200)
     output_dir = Path(kwargs.get('dir'))
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
