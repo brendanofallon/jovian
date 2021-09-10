@@ -41,7 +41,7 @@ def trim_pileuptensor(src, tgt, width):
     :param tgt: Target tensor of shape [haplotype, sequence]
     :param width: Size to trim to
     """
-    assert src.shape[0] == tgt.shape[1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[1]}), not sure how to deal with this :("
+    assert src.shape[0] == tgt.shape[-1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
     if src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
         src = torch.cat((src, z))
@@ -67,7 +67,7 @@ def make_loader(bampath, refpath, csv, max_to_load=1e9, max_reads_per_aln=100):
         label_class = "-".join((status, vtype))
         classes.append(label_class)
         counter[label_class] += 1
-        src, tgt = trim_pileuptensor(enc, tgt, seq_len)
+        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
         allsrc.append(src)
@@ -93,13 +93,20 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln):
     :return: List of loaders
     """
     results = []
-    logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes (max to load = {max_to_load})")
-    with mp.Pool(processes=threads) as pool:
-        for bam, labels_csv in inputs:
-            result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
-            results.append(result)
-        pool.close()
-        return loader.MultiLoader([l.get(timeout=2*60*60) for l in results])
+    if len(inputs) == 1:
+        logger.info(
+            f"Loading training data for {len(inputs)} sample with 1 processe (max to load = {max_to_load})")
+        bam = inputs[0][0]
+        labels_csv = inputs[0][1]
+        return make_loader(bam, refpath, labels_csv, max_to_load, max_reads_per_aln)
+    else:
+        logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes (max to load = {max_to_load})")
+        with mp.Pool(processes=threads) as pool:
+            for bam, labels_csv in inputs:
+                result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
+                results.append(result)
+            pool.close()
+            return loader.MultiLoader([l.get(timeout=2*60*60) for l in results])
 
 
 def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
