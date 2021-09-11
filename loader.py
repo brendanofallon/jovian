@@ -40,6 +40,32 @@ class ReadLoader:
             offset += batch_size
 
 
+class LazyLoader:
+    """
+    A loader that doesn't load anything until iter_once() is called, and doesn't save anything in memory
+    This will be pretty slow but good if we can't fit all of the data into memory
+    Useful for 'pre-gen' where we just want to iterate over everything once and save it to a file
+    """
+
+    def __init__(self, bamlabelpairs, reference, reads_per_pileup, samples_per_pos):
+        self.bamlabels = bamlabelpairs
+        self.reference = reference
+        self.reads_per_pileup = reads_per_pileup
+        self.samples_per_pos = samples_per_pos
+
+    def iter_once(self, batch_size):
+        for bam, labels in self.bamlabels:
+            logger.info(f"Encoding tensors from {labels}")
+            for src, tgt in encode_chunks(bam,
+                                          self.reference,
+                                          labels,
+                                          batch_size,
+                                          self.reads_per_pileup,
+                                          self.samples_per_pos,
+                                          max_to_load=1e9):
+                yield src, tgt, None, None
+
+
 class WeightedLoader:
     """
     A fancier loader that has a sampling weight associated with each element
@@ -249,6 +275,38 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
                 continue
 
 
+
+def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
+    allsrc = []
+    alltgt = []
+    count = 0
+    seq_len = 300
+    logger.info(f"Creating new data loader from {bampath}")
+    for enc, tgt, status, vtype in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+        assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
+        assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+        allsrc.append(src)
+        alltgt.append(tgt)
+        count += 1
+        if count % 100 == 0:
+            logger.info(f"Loaded {count} tensors from {csv}")
+        if count == max_to_load:
+            logger.info(f"Stopping tensor load after {max_to_load}")
+            yield torch.stack(allsrc), torch.stack(alltgt).long()
+            break
+
+        if len(allsrc) >= chunk_size:
+            yield torch.stack(allsrc), torch.stack(alltgt).long()
+            allsrc = []
+            alltgt = []
+
+    if len(allsrc):
+        yield torch.stack(allsrc), torch.stack(alltgt).long()
+    logger.info(f"Done loading {count} tensors from {csv}")
+
+
+
 def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
     allsrc = []
     alltgt = []
@@ -302,10 +360,3 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln, s
                 results.append(result)
             pool.close()
             return MultiLoader([l.get(timeout=2*60*60) for l in results])
-
-# t = torch.arange(100).unsqueeze(1).unsqueeze(1).unsqueeze(1)
-# weights = 100 - np.arange(100)
-# wl = WeightedLoader(t, t, weights, 'cpu')
-#
-# for src, tgt in wl.iter_once(10):
-#     print(src)

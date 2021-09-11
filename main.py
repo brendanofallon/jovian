@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
-
 def call(statedict, bam, reference, chrom, pos, **kwargs):
     max_read_depth = 200
     feats_per_read = 7
@@ -203,6 +202,8 @@ def pregen(config, **kwargs):
     """
     conf = load_train_conf(config)
     batch_size = kwargs.get('batch_size', 64)
+    reads_per_pileup = kwargs.get('read_depth', 300)
+    samples_per_pos = kwargs.get('samples_per_pos', 4)
     if kwargs.get("sim"):
         batches = 50
         logger.info(f"Generating simulated data with batch size {batch_size} and {batches} total batches")
@@ -217,12 +218,8 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generated training data using config from {config}")
         train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-        dataloader = loader.make_multiloader(train_sets,
-                                             conf['reference'],
-                                             threads=6,
-                                             max_to_load=1e9,
-                                             max_reads_per_aln=300,
-                                             samples_per_pos=4)
+        dataloader = loader.LazyLoader(train_sets, conf['reference'], reads_per_pileup, samples_per_pos)
+
     output_dir = Path(kwargs.get('dir'))
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
