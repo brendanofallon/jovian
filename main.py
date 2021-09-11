@@ -122,6 +122,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
+        tgt_seq = tgt_seq.squeeze(1) # This might be a bad idea
         predicted_altmask = altpredictor(unsorted_src)
         amx = 0.95 / predicted_altmask.max(dim=1)[0]
         amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
@@ -137,7 +138,6 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         seq_preds, vaf_preds = model(src)
 
-        print(f"seq preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
@@ -274,6 +274,7 @@ def train(config, output_model, input_model, epochs, max_to_load, **kwargs):
                  dataloader,
                  max_read_depth=200,
                  feats_per_read=7,
+                 init_learning_rate=kwargs.get('learning_rate', 0.001),
                  statedict=input_model,
                  model_dest=output_model,
                  eval_batches=eval_batches)
@@ -564,6 +565,7 @@ def main():
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
     trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=0, type=int)
+    trainparser.add_argument("-lr", "--learning-rate", help="Initial learning rate", default=0.001, type=float)
     trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
