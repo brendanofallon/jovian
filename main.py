@@ -30,7 +30,6 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
                     level=logging.INFO) # handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
 
-
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
@@ -216,7 +215,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generated training data using config from {config}")
         train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-        dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=250, max_reads_per_aln=200)
+        dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=1e9, max_reads_per_aln=200)
     output_dir = Path(kwargs.get('dir'))
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
