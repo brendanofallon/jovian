@@ -1,15 +1,17 @@
 
 import logging
+import random
+from pathlib import Path
+from collections import defaultdict
+
 import scipy.stats as stats
 import numpy as np
 import pandas as pd
-from pathlib import Path
-
 import torch
 import pysam
 
 import bwasim
-from bam import target_string_to_tensor, encode_with_ref
+from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample
 import sim
 
 logger = logging.getLogger(__name__)
@@ -176,8 +178,29 @@ class SimLoader:
             yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
 
 
+def trim_pileuptensor(src, tgt, width):
+    """
+    Trim or zero-pad the sequence dimension of src and target (first dimension of src, second of target)
+    so they're equal to width
+    :param src: Data tensor of shape [sequence, read, features]
+    :param tgt: Target tensor of shape [haplotype, sequence]
+    :param width: Size to trim to
+    """
+    assert src.shape[0] == tgt.shape[-1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
+    if src.shape[0] < width:
+        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
+        src = torch.cat((src, z))
+        t = torch.zeros(tgt.shape[0], width - tgt.shape[1])
+        tgt = torch.cat((tgt, t), dim=1)
+    else:
+        start = src.shape[0] // 2 - width // 2
+        src = src[start:start+width, :, :]
+        tgt = tgt[:, start:start+width]
 
-def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
+    return src, tgt
+
+
+def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
     alignment (BAM) and labels csv file
@@ -185,22 +208,37 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
     :param refpath: Path to ref genome
     :param csv: CSV file containing CSRA, variant status (TP, FP, FN..) and type (SNV, del, ins, etc)
     :param max_reads_per_aln: Max reads to import for each pileup
-    :return:
+    :param samples_per_pos: Number of samples to create for a given position
+    :return: Generator
     """
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
     num_ok_errors = 20
 
     for i, row in pd.read_csv(csv).iterrows():
-        try:
-            if row.status == 'FP':
-                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.ref, bam, refgenome, max_reads_per_aln)
-            else:
-                encoded, refseq, altseq = encode_with_ref(str(row.chrom), row.pos, row.ref, row.alt, bam, refgenome, max_reads_per_aln)
+        if row.status == 'FP':
+            altseq = row.ref
+        else:
+            altseq = row.alt
 
-            minseqlen = min(len(refseq), len(altseq))
-            # reft = target_string_to_tensor(refseq[0:minseqlen])
-            tgt = target_string_to_tensor(altseq[0:minseqlen])
+        try:
+            for encoded, refseq, altseq in encode_and_downsample(str(row.chrom),
+                                                                 row.pos,
+                                                                 row.ref,
+                                                                 altseq,
+                                                                 bam,
+                                                                 refgenome,
+                                                                 max_reads_per_aln,
+                                                                 samples_per_pos):
+
+
+                minseqlen = min(len(refseq), len(altseq))
+                tgt = target_string_to_tensor(altseq[0:minseqlen])
+                if minseqlen != encoded.shape[0]:
+                    encoded = encoded[0:minseqlen, :, :]
+
+                yield encoded, tgt, row.status, row.vtype
+
         except Exception as ex:
             logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
             num_ok_errors -= 1
@@ -209,10 +247,60 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln):
             else:
                 continue
 
-        if minseqlen != encoded.shape[0]:
-            encoded = encoded[0:minseqlen, :, :]
 
-        yield encoded, tgt, row.status, row.vtype
+def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
+    allsrc = []
+    alltgt = []
+    count = 0
+    seq_len = 150
+    logger.info(f"Creating new data loader from {bampath}")
+    counter = defaultdict(int)
+    classes = []
+    for enc, tgt, status, vtype in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+        label_class = "-".join((status, vtype))
+        classes.append(label_class)
+        counter[label_class] += 1
+        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+        assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
+        assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+        allsrc.append(src)
+        alltgt.append(tgt)
+        count += 1
+        if count % 100 == 0:
+            logger.info(f"Loaded {count} tensors from {csv}")
+        if count == max_to_load:
+            logger.info(f"Stopping tensor load after {max_to_load}")
+            break
+    logger.info(f"Loaded {count} tensors from {csv}")
+    logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
+    weights = np.array([1.0 / counter[c] for c in classes])
+    return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
+
+
+
+def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln, samples_per_pos):
+    """
+    Create multiple ReadLoaders in parallel for each element in Inputs
+    :param inputs: List of (BAM path, labels csv) tuples
+    :param threads: Number of threads to use
+    :param max_reads_per_aln: Max number of reads for each pileup
+    :return: List of loaders
+    """
+    results = []
+    if len(inputs) == 1:
+        logger.info(
+            f"Loading training data for {len(inputs)} sample with 1 processe (max to load = {max_to_load})")
+        bam = inputs[0][0]
+        labels_csv = inputs[0][1]
+        return make_loader(bam, refpath, labels_csv, max_to_load=max_to_load, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos)
+    else:
+        logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes (max to load = {max_to_load})")
+        with mp.Pool(processes=threads) as pool:
+            for bam, labels_csv in inputs:
+                result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
+                results.append(result)
+            pool.close()
+            return MultiLoader([l.get(timeout=2*60*60) for l in results])
 
 # t = torch.arange(100).unsqueeze(1).unsqueeze(1).unsqueeze(1)
 # weights = 100 - np.arange(100)

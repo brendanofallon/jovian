@@ -1,3 +1,6 @@
+
+import random
+
 import torch
 import logging
 import pysam
@@ -350,3 +353,32 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
     return reads_encoded, refseq, altseq
 
+
+def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_samples):
+    """
+    Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
+    chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the
+    reads overlapping the position.
+    :param maxreads: Number of reads to downsample to
+    :returns: Tuple of encoded reads, reference sequence, alt sequence
+    """
+    allreads = reads_spanning(bam, chrom, pos, max_reads=float("inf"))
+    if len(allreads) < 5:
+        raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
+
+    if len(allreads) < maxreads:
+        logger.warning(f"{chrom}:{pos} does not contain {maxreads} overlapping reads, not downsampling")
+        num_samples = 1
+
+    pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
+    for i in range(num_samples):
+        reads = random.sample(allreads, min(len(allreads), maxreads))
+        minref = min(alnstart(r) for r in reads)
+        maxref = max(alnstart(r) + r.query_length for r in reads)
+        reads_encoded, _ = encode_pileup3(reads, minref, maxref)
+
+        refseq = fasta.fetch(chrom, minref, maxref)
+        assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
+        altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
+        assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
+        yield reads_encoded, refseq, altseq

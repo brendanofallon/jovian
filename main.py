@@ -20,6 +20,7 @@ import model
 import sim
 import util
 import vcf
+
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor
@@ -215,7 +216,12 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generated training data using config from {config}")
         train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-        dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=1e9, max_reads_per_aln=200)
+        dataloader = loader.make_multiloader(train_sets,
+                                             conf['reference'],
+                                             threads=6,
+                                             max_to_load=1e9,
+                                             max_reads_per_aln=300,
+                                             samples_per_pos=4)
     output_dir = Path(kwargs.get('dir'))
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
