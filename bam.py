@@ -248,91 +248,18 @@ def emit_tensor_aln(t):
 def alnstart(read):
     """
     If the first cigar element is hard or soft clip, return read.reference_start - size of first cigar element,
-    other return read.reference_start
+    otherwise return read.reference_start
     """
     if read.cigartuples[0][0] in {4, 5}:
         return read.reference_start - read.cigartuples[0][1]
     else:
         return read.reference_start
 
-
-def encode_pileup(reads):
-    """
-    Convert a list of reads (pysam VariantRecords) into a single tensor
-
-    :param reads: List of pysam VariantRecords
-    :return: Tensor with shape [position, read, features]
-    """
-    minref = min(alnstart(r) for r in reads)
-    maxref = max(alnstart(r) + r.query_length for r in reads)
-    its = [rec_tensor_it(r, minref) for r in reads]
-    refpos = minref
-    pos_tensors = [next(it) for it in its]
-    everything = []
-    total_positions = 0
-    alldone = False
-    while not alldone:
-        total_positions += 1
-        any_insertion = any(not r[1] for r in pos_tensors)  # r[1] is True if ref is consumed (which implies no insertion)
-        thispos = []
-        # if any_insertion:
-        #     print(f"Found insertion(s) at refpos {refpos} in reads " + ",".join(str(i) for i,r in enumerate(pos_tensors) if not r[1]))
-        while any_insertion:
-            for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
-                if not pos_tensor[1]:
-                    thispos.append(pos_tensor[0])
-                    pos_tensors[i] = next(it)
-                else:
-                    thispos.append(EMPTY_TENSOR)
-
-            any_insertion = any(not r[1] for r in pos_tensors)
-            assert len(thispos) == len(pos_tensors), "Yikes, this pos somehow has more entries than pos_tensors"
-            all_stacked = torch.stack(thispos)
-            thispos = []
-            everything.append(all_stacked)
-
-        thispos = []
-        refpos += 1
-        for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
-            thispos.append(pos_tensor[0])
-            pos_tensors[i] = next(it)
-        all_stacked = torch.stack(thispos)
-        everything.append(all_stacked)
-        alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
-    return torch.stack(everything)
-
-
-def encode_pileup2(reads):
-    """
-    Convert a list of reads (pysam VariantRecords) into a single tensor
-
-    :param reads: List of pysam reads
-    :return: Tensor with shape [position, read, features]
-    """
-    minref = min(alnstart(r) for r in reads)
-    maxref = max(alnstart(r) + r.query_length for r in reads)
-    isalt = ["alt" in r.query_name for r in reads]
-    its = [rec_tensor_it(r, minref) for r in reads]
-    refpos = minref
-    pos_tensors = [next(it) for it in its]
-    everything = []
-    total_positions = 0
-    alldone = False
-    while not alldone:
-        total_positions += 1
-        thispos = []
-        refpos += 1
-        for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
-            thispos.append(pos_tensor[0])
-            pos_tensors[i] = next(it)
-        all_stacked = torch.stack(thispos)
-        everything.append(all_stacked)
-        alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
-    return torch.stack(everything), torch.tensor(isalt)
-
 def _consume_n(it, n):
+    """ Yield the first n elements of the given iterator """
     for i in range(n):
         yield next(it)
+
 
 def encode_pileup3(reads, start, end):
     """
@@ -423,17 +350,3 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
     return reads_encoded, refseq, altseq
 
-
-# from util import readstr
-# aln = pysam.AlignmentFile("batch78.bam")
-# for read in aln.fetch():
-#     if read.query_name == "read_hetalt12":
-#         encoded_old = list(b for b, _ in iterate_cigar(read))
-#         encoded_new = list(b for b, _ in iterate_bases(read))
-#         told = torch.stack(encoded_old)
-#         tnew = torch.stack(encoded_new)
-#         print(readstr(told))
-#         print("".join(str(int(x)) for x in told[:, 5]))
-#         print(readstr(tnew))
-#         print("".join(str(int(x)) for x in tnew[:, 5]))
-#         break
