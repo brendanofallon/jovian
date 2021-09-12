@@ -287,6 +287,7 @@ def encode_pileup3(reads, start, end):
 
     return torch.stack(everything).transpose(0,1), torch.tensor(isalt)
 
+
 def ensure_dim(readtensor, seqdim, readdim):
     """
     Trim or zero-pad the readtensor to make sure it has exactly 'seqdim' size for the sequence length
