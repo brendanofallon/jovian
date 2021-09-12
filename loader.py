@@ -227,6 +227,50 @@ def trim_pileuptensor(src, tgt, width):
     return src, tgt
 
 
+def assign_class_indexes(rows):
+    """
+    Iterate over every row in rows and create a list of class indexes for each element
+    , where class index is currently row.vtype-row.status. So a class will be something like
+    snv-TP or small_del-FP, and each class gets a unique number
+    :returns : List of class indexes across rows
+    """
+    classcount = 0
+    classes = defaultdict(int)
+    idxs = []
+    for row in rows:
+        clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
+        if clz in classes:
+            idx = classes[clz]
+        else:
+            idx = classcount
+            classcount += 1
+            classes[clz] = idx
+        idxs.append(idx)
+    return idxs
+
+
+def upsample_labels(rows):
+    """
+    Generate class assignments for each element in rows (see assign_class_indexes),
+     then create a new list of rows that is upsampled to normalize class frequencies
+     The new list will be multiple times larger then the old list and will contain repeated
+     elements of the low frequency classes
+    :param rows: List of elements with vtype and status attributes (probably read in from a labels CSV file)
+    :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
+    """
+    label_idxs = np.array(assign_class_indexes(rows))
+    classes, counts = np.unique(label_idxs, return_counts=True)
+    freqs = 1.0 / (np.min(1.0/counts) * counts)
+    results = []
+    for clz, row in zip(label_idxs, rows):
+        freq = min(10, int(freqs[clz]))
+        for reps in range(freq):
+            results.append(row)
+
+    random.shuffle(results)
+    return results
+
+
 def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
@@ -242,7 +286,9 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
     bam = pysam.AlignmentFile(bampath)
     num_ok_errors = 20
 
-    for i, row in pd.read_csv(csv).iterrows():
+    labels = [l for _, l in pd.read_csv(csv).iterrows()]
+    upsampled_labels = upsample_labels(labels)
+    for row in upsampled_labels:
         if row.status == 'FP':
             altseq = row.ref
         else:
@@ -273,7 +319,6 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
                 raise ValueError(f"Too many errors for {bampath}, quitting!")
             else:
                 continue
-
 
 
 def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
