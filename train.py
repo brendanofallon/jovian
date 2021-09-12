@@ -44,11 +44,13 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         src = unsorted_src * fullmask
 
         optimizer.zero_grad()
-
+        
         seq_preds, vaf_preds = model(src)
 
+        tgt_seq = tgt_seq.squeeze(1)
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
+        #print(f"preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
             width = 20
@@ -180,6 +182,7 @@ def eval_batch(src, tgt, predictions):
         fn_total += len(fns)
     return tp_total, fp_total, fn_total
 
+
 def create_eval_batches(batch_size, num_reads, read_length, config):
     """
     Create batches of simulated variants for evaluation
@@ -261,11 +264,12 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-    eval_batches = create_eval_batches(25, 200, 145, conf)
+    eval_batches = None #create_eval_batches(25, 200, 145, conf)
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=200,
+                 max_read_depth=300,
                  feats_per_read=7,
                  statedict=input_model,
                  model_dest=output_model,
                  eval_batches=eval_batches)
+

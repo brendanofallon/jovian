@@ -247,11 +247,11 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
     reftensor = string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
-    padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0)
+    padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
 
-    fullmask = create_altmask(altpredictor, padded_reads)
+    fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
     masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(masked_reads.flatten(start_dim=2))
+    seq_preds, _ = model(masked_reads.flatten(start_dim=2).to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
@@ -265,7 +265,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     Call variants in BAM file with given model at positions given in the labels CSV, emit useful
     summary information about PPA / PPV, etc
     """
-    max_read_depth = 200
+    max_read_depth = 300
     feats_per_read = 7
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
