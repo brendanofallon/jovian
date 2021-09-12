@@ -8,6 +8,7 @@ import scipy.stats as stats
 import numpy as np
 import pandas as pd
 import torch
+import torch.multiprocessing as mp
 import pysam
 
 import bwasim
@@ -356,7 +357,7 @@ def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln, s
         logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes (max to load = {max_to_load})")
         with mp.Pool(processes=threads) as pool:
             for bam, labels_csv in inputs:
-                result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_to_load, max_reads_per_aln))
+                result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_reads_per_aln, samples_per_pos, max_to_load))
                 results.append(result)
             pool.close()
             return MultiLoader([l.get(timeout=2*60*60) for l in results])
