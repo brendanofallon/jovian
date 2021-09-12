@@ -284,6 +284,7 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     logger.info(f"Creating new data loader from {bampath}")
     for enc, tgt, status, vtype in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+        src = ensure_dim(src, seqlen, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
         allsrc.append(src)

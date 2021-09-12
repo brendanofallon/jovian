@@ -88,27 +88,21 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
     :param midwidth:
     :return: Sets of TP, FP, and FN vars
     """
-    # rseq1 = util.tgt_str(tgt)
-    midstart = 0 #len(refseqstr) // 2 - midwidth // 2
-    midend = len(refseqstr) # len(refseqstr) // 2 + midwidth // 2
-    # refseqstr = util.readstr(refseq)
+    midstart = len(refseqstr) // 2 - midwidth // 2
+    midend  =  len(refseqstr) // 2 + midwidth // 2
     known_vars = []
+    for v in vcf.aln_to_vars(refseqstr, altseq):
+        if midstart < v.pos < midend:
+            known_vars.append(v)
 
-    # print("Ref / target alignment:")
-    # aln = vcf.align_sequences(refseqstr[midstart:midend], rseq1[midstart:midend])
-    # print(aln.aligned_query_sequence)
-    # print(aln.aligned_target_sequence)
-    for v in vcf.aln_to_vars(refseqstr[midstart:midend], altseq[midstart:midend]):
-        known_vars.append(v)
 
-    # print("Ref / predictions alignment:")
-    # aln = vcf.align_sequences(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :]))
-    # print(aln.aligned_query_sequence)
-    # print(aln.aligned_target_sequence)
+
     pred_vars = []
-    for v in vcf.aln_to_vars(refseqstr[midstart:midend], util.readstr(predictions[midstart:midend, :])):
-        v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
-        pred_vars.append(v)
+    for v in vcf.aln_to_vars(refseqstr, util.readstr(predictions)):
+        if midstart < v.pos < midend:
+            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
+            pred_vars.append(v)
+
     tps = [] # True postive - real and detected variant
     fns = [] # False negatives - real variant but not detected
     fps = [] # False positives - detected but not a real variant
