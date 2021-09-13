@@ -284,7 +284,6 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
     """
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
-    num_ok_errors = 20
 
     labels = [l for _, l in pd.read_csv(csv).iterrows()]
     upsampled_labels = upsample_labels(labels)
@@ -314,11 +313,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
 
         except Exception as ex:
             logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
-            num_ok_errors -= 1
-            if num_ok_errors < 0:
-                raise ValueError(f"Too many errors for {bampath}, quitting!")
-            else:
-                continue
+
 
 
 def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
