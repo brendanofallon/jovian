@@ -278,7 +278,16 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     aln = pysam.AlignmentFile(bam)
     results = defaultdict(Counter)
     for i, row in pd.read_csv(labels).iterrows():
-        labeltype = f"{row.vtype}-{row.status}"
+        if row.ngs_vaf < 0.05:
+            vafgroup = "< 0.05"
+        elif 0.05 <= row.ngs_vaf < 0.15:
+            vafgroup = "0.05 - 0.15"
+        else:
+            vafgroup = "> 0.15"
+
+        labeltype = f"{row.vtype}-{row.status} {vafgroup}"
+        if results[labeltype]['rows'] > 100:
+            continue
         variants, seq_preds = callvars(altpredictor, model, aln, reference, str(row.chrom), int(row.pos), max_read_depth=max_read_depth)
         refwidth = seq_preds.shape[0]
         refseq = reference.fetch(str(row.chrom), int(row.pos) - refwidth//2, int(row.pos) + refwidth//2)
@@ -290,8 +299,8 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
         tps, fps, fns = eval_prediction(refseq, true_altseq, seq_preds,
                                         midwidth=150)
         print(f"{row.chrom}:{row.pos} {row.ref} -> {row.alt}\t{row.status} VAF: {row.ngs_vaf:.4f} TP: {len(tps)} FP: {len(fps)} FN: {len(fns)}")
-        print(f"TPs: {tps}")
-        print(f"FPs: {fps}")
+        # print(f"TPs: {tps}")
+        # print(f"FPs: {fps}")
         # print(f"TP: {total_tps} FP: {total_fps} FNs: {total_fns}")
         results[labeltype]['TP'] += len(tps)
         results[labeltype]['FP'] += len(fps)
@@ -299,7 +308,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
         results[labeltype]['rows'] += 1
 
     for key, val in results.items():
-        print(f"{key}")
+        print(f"{key} : total entries: {val['rows']}")
         for t, count in val.items():
             print(f"\t{t} : {count}")
 
