@@ -185,7 +185,7 @@ def betavaf():
     if np.random.rand() < 0.1:
         return 1.0
     else:
-        return stats.beta(a=1.0, b=5.0).rvs(1)[0]
+        return stats.beta(a=1.0, b=10.0).rvs(1)[0]
 
 
 def make_batch(batch_size, regions, refpath, numreads, readlength, var_funcs=None, vaf_func=betavaf, weights=None, error_rate=0.01, clip_prob=0):
