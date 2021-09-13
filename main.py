@@ -234,14 +234,22 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
 
+
+
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
     reads_encoded, _ = encode_pileup3(reads, minref, maxref)
+
 
     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
     reftensor = string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
     padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
+
+
+    # predicted_altmask = altpredictor(padded_reads.to(DEVICE))
+    # for read, maskval in zip(reads, predicted_altmask[0,:]):
+    #     print(f"{maskval.item():.3f}\t{read.query_name}")
 
     fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
     masked_reads = padded_reads * fullmask
