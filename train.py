@@ -85,7 +85,14 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None):
     in_dim = (max_read_depth) * feats_per_read
-    model = VarTransformerAltMask(readdepth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, altpredictor_sd="altpredictor3.sd").to(DEVICE)
+    model = VarTransformerAltMask(readdepth=max_read_depth, 
+                                feature_count=feats_per_read, 
+                                out_dim=4, 
+                                nhead=6, 
+                                d_hid=300, 
+                                n_encoder_layers=2, 
+                                altpredictor_sd="altpredictor3.sd",
+                                device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
