@@ -249,6 +249,24 @@ def assign_class_indexes(rows):
     return idxs
 
 
+def resample_classes(classes, rows, vals_per_class=100):
+    """
+    Randomly sample each class so that there are 'vals_per_class' members of each class
+    then return a list of class assignments and the selected rows
+    """
+    byclass = defaultdict(list)
+    for clz, row in zip(classes, rows):
+        byclass[clz].append(row)
+
+    result_rows = []
+    result_classes = []
+    for clz, classrows in byclass.items():
+        for _ in range(vals_per_class):
+            result_classes.append(clz)
+            result_rows.append(random.choice(classrows))
+    return result_classes, result_rows
+
+
 def upsample_labels(rows):
     """
     Generate class assignments for each element in rows (see assign_class_indexes),
@@ -259,7 +277,9 @@ def upsample_labels(rows):
     :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
     """
     label_idxs = np.array(assign_class_indexes(rows))
+    label_idxs, rows = resample_classes(label_idxs, rows, vals_per_class=100)
     classes, counts = np.unique(label_idxs, return_counts=True)
+
     freqs = 1.0 / (np.min(1.0/counts) * counts)
     results = []
     for clz, row in zip(label_idxs, rows):
