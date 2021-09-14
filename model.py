@@ -51,10 +51,10 @@ class TwoHapDecoder(nn.Module):
 
 class VarTransformer(nn.Module):
 
-    def __init__(self, in_dim, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
         super().__init__()
         self.embed_dim = nhead * 20
-        self.fc1 = nn.Linear(in_dim, 200)
+        self.fc1 = nn.Linear(read_depth * feature_count, 200)
         self.fc2 = nn.Linear(200, self.embed_dim)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
