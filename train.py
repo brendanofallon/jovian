@@ -268,7 +268,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=300,
-                 feats_per_read=7,
+                 feats_per_read=8,
                  statedict=input_model,
                  model_dest=output_model,
                  eval_batches=eval_batches)

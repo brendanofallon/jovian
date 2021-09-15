@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 
-EMPTY_TENSOR = torch.zeros(7)
+EMPTY_TENSOR = torch.zeros(8)
 
 class MockRead:
 
@@ -75,12 +75,13 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, cigop, clipped):
-    ebc = torch.zeros(7)
+def encode_basecall(base, qual, cigop, strand, clipped):
+    ebc = torch.zeros(8)
     ebc = update_from_base(base, ebc)
     ebc[4] = qual / 100 - 0.5
     ebc[5] = cigop
-    ebc[6] = 1 if clipped else 0
+    ebc[6] = 1 if strand else 0
+    ebc[7] = 1 if clipped else 0
     return ebc
 
 
@@ -102,29 +103,15 @@ def encode_cigop(readpos, refpos):
     return 0
 
 
-# def variantrec_to_tensor(rec):
-#     seq = []
-#     for readpos, refpos in rec.get_aligned_pairs():
-#         if readpos is not None and refpos is not None:
-#             seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
-#                                        encode_cigop(readpos, refpos)))
-#         elif readpos is None and refpos is not None:
-#             seq.append(encode_basecall('-', 50, encode_cigop(readpos, refpos)))  # Deletion
-#         elif readpos is not None and refpos is None:
-#             seq.append(encode_basecall(rec.query_sequence[readpos], rec.query_qualities[readpos],
-#                                        encode_cigop(readpos, refpos)))  # Insertion
-#
-#     return torch.vstack(seq)
-
-
 
 def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0, 0) for b in bases])
+    return torch.vstack([encode_basecall(b, 50, 0, 0, 0) for b in bases])
 
 
 def target_string_to_tensor(bases):
     """
-    The target version doesn't include the qual or cigop features
+    Encode the string into a tensor with base index values, like class labels, for each position
+     The tensor looks like [0,1,2,1,0,2,3,0...]
     """
     result = torch.tensor([base_index(b) for b in bases]).long()
     return result
@@ -172,7 +159,7 @@ def iterate_cigar(rec):
             encoded_cig = -1
         else:
             encoded_cig = 1
-        yield encode_basecall(base, qual, encoded_cig, is_clipped), is_ref_consumed
+        yield encode_basecall(base, qual, encoded_cig, rec.is_reverse, is_clipped), is_ref_consumed
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -208,7 +195,7 @@ def iterate_bases(rec):
             encoded_cig = -1
         else:
             encoded_cig = 1
-        yield encode_basecall(base, qual, encoded_cig, is_clipped), is_ref_consumed
+        yield encode_basecall(base, qual, encoded_cig, rec.is_reverse, is_clipped), is_ref_consumed
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -248,6 +235,7 @@ def emit_tensor_aln(t):
             print(b, end='')
         print()
 
+
 def alnstart(read):
     """
     If the first cigar element is hard or soft clip, return read.reference_start - size of first cigar element,
@@ -257,6 +245,7 @@ def alnstart(read):
         return read.reference_start - read.cigartuples[0][1]
     else:
         return read.reference_start
+
 
 def _consume_n(it, n):
     """ Yield the first n elements of the given iterator """

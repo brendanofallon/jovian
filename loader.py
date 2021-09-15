@@ -297,7 +297,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
     alignment (BAM) and labels csv file
     :param bampath: Path to input BAM file
     :param refpath: Path to ref genome
-    :param csv: CSV file containing CSRA, variant status (TP, FP, FN..) and type (SNV, del, ins, etc)
+    :param csv: CSV file containing C/P/R/A, variant status (TP, FP, FN..) and type (SNV, del, ins, etc)
     :param max_reads_per_aln: Max reads to import for each pileup
     :param samples_per_pos: Number of samples to create for a given position
     :return: Generator

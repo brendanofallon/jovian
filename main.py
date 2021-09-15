@@ -36,7 +36,7 @@ DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_avai
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
     max_read_depth = 300
-    feats_per_read = 7
+    feats_per_read = 8
 
     altpredictor = AltPredictor(0, 7)
     altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
@@ -277,7 +277,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
     altpredictor.to(DEVICE)
 
-    model = VarTransformer(read_depths=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
