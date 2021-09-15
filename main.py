@@ -36,7 +36,7 @@ DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_avai
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
     max_read_depth = 300
-    feats_per_read = 7
+    feats_per_read = 8
 
     altpredictor = AltPredictor(0, 7)
     altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
