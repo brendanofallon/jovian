@@ -217,8 +217,14 @@ def pregen(config, **kwargs):
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
     tgt_prefix = "tgt"
+    existing_tgt = list(output_dir.glob(tgt_prefix + "*"))
+    startval = 0
+    if existing_tgt:
+        idxs = [int(t.name.replace(".pt", "").split("_")[-1]) for t in existing_tgt]
+        startval = max(idxs)
+        logger.info(f"Found existing data in directory {output_dir}, starting indexes at {startval}")
     logger.info(f"Saving tensors to {output_dir}/..")
-    for i, (src, tgt, _, _) in enumerate(dataloader.iter_once(batch_size)):
+    for i, (src, tgt, _, _) in enumerate(dataloader.iter_once(batch_size), start=startval):
         logger.info(f"Saving batch {i}")
         torch.save(src, output_dir / f"{src_prefix}_{i}.pt")
         torch.save(tgt, output_dir / f"{tgt_prefix}_{i}.pt")
