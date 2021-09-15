@@ -294,7 +294,11 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
         labeltype = f"{row.vtype}-{row.status} {vafgroup}"
         if results[labeltype]['rows'] > 100:
             continue
-        variants, seq_preds = callvars(altpredictor, model, aln, reference, str(row.chrom), int(row.pos), max_read_depth=max_read_depth)
+        try:
+            variants, seq_preds = callvars(altpredictor, model, aln, reference, str(row.chrom), int(row.pos), max_read_depth=max_read_depth)
+        except:
+            logger.warning(f"Hmm, exception processing {row.chrom}:{row.pos}, skipping it")
+            continue
         refwidth = seq_preds.shape[0]
         refseq = reference.fetch(str(row.chrom), int(row.pos) - refwidth//2, int(row.pos) + refwidth//2)
         if row.status == 'TP' or row.status == 'FN':

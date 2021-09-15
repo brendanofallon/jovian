@@ -31,6 +31,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     """
     epoch_loss_sum = 0
     vafloss_sum = 0
+    count = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         predicted_altmask = altpredictor(unsorted_src)
         amx = 0.95 / predicted_altmask.max(dim=1)[0]
@@ -50,6 +51,9 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         tgt_seq = tgt_seq.squeeze(1)
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
 
+        count += 1
+        if count % 100 == 0:
+            logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
         #print(f"preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
@@ -74,7 +78,7 @@ def train_epochs(epochs,
                  dataloader,
                  max_read_depth=50,
                  feats_per_read=8,
-                 init_learning_rate=0.001,
+                 init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  statedict=None,
                  model_dest=None,

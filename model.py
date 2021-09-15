@@ -113,8 +113,9 @@ class AltPredictor(nn.Module):
 
 class VarTransformerAltMask(nn.Module):
 
-    def __init__(self, readdepth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None):
+    def __init__(self, readdepth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, device='cpu'):
         super().__init__()
+        self.device=device
         self.embed_dim = nhead * 20
         self.altpredictor = AltPredictor(readdepth, feature_count)
         if altpredictor_sd is not None:
@@ -129,16 +130,16 @@ class VarTransformerAltMask(nn.Module):
         self.elu = torch.nn.ELU()
 
     def forward(self, src):
-        altmask = self.altpredictor(src)
+        altmask = self.altpredictor(src).to(self.device)
         amx = 0.95 / altmask.max(dim=1)[0]
         amin = altmask.min(dim=1)[0].unsqueeze(1).expand((-1, altmask.shape[1]))
         altmask = (altmask - amin) * amx.unsqueeze(1).expand(
             (-1, altmask.shape[1])) + amin
-        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1), altmask[:, 1:]), dim=1)
+        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(self.device), altmask[:, 1:]), dim=1)
         predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
         fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                              src.shape[3]).transpose(1, 2)
+                              src.shape[3]).transpose(1, 2).to(self.device)
 
         src = src * fullmask
         src = src.flatten(start_dim=2)
