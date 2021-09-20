@@ -130,9 +130,9 @@ def create_altmask(altmaskmodel, src):
     :returns: Tensor with same dimension as src, with values 0-1 in read dimension replicated into features
     """
     predicted_altmask = altmaskmodel(src.to(DEVICE))
-    amx = 0.95 / predicted_altmask.max(dim=1)[0]
     amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-    predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1])) + amin
+    amx = 0.95 / (predicted_altmask - amin).max(dim=1)[0]
+    predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1])) # + amin
     predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
     predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
     aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
@@ -273,13 +273,13 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     summary information about PPA / PPV, etc
     """
     max_read_depth = 300
-    feats_per_read =8
+    feats_per_read = 8
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
 
     reference = pysam.FastaFile(conf['reference'])
 
-    altpredictor = AltPredictor(0,8)
+    altpredictor = AltPredictor(0, 8)
     altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
     altpredictor.to(DEVICE)
 
@@ -302,8 +302,9 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
             continue
         try:
             variants, seq_preds = callvars(altpredictor, model, aln, reference, str(row.chrom), int(row.pos), max_read_depth=max_read_depth)
-        except:
+        except Exception as ex:
             logger.warning(f"Hmm, exception processing {row.chrom}:{row.pos}, skipping it")
+            logger.warning(ex)
             continue
         refwidth = seq_preds.shape[0]
         refseq = reference.fetch(str(row.chrom), int(row.pos) - refwidth//2, int(row.pos) + refwidth//2)

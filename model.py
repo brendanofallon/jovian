@@ -113,16 +113,16 @@ class AltPredictor(nn.Module):
 
 class VarTransformerAltMask(nn.Module):
 
-    def __init__(self, readdepth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, device='cpu'):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, device='cpu'):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * 20
-        self.altpredictor = AltPredictor(readdepth, feature_count)
+        self.altpredictor = AltPredictor(read_depth, feature_count)
         if altpredictor_sd is not None:
             logger.info(f"Loading altpredictor statedict from {altpredictor_sd}")
             self.altpredictor.load_state_dict(torch.load(altpredictor_sd))
 
-        self.fc1 = nn.Linear(readdepth * feature_count, self.embed_dim)
+        self.fc1 = nn.Linear(read_depth * feature_count, self.embed_dim)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
