@@ -73,7 +73,10 @@ def bgzip(path):
 
 
 def var2fastq(seq, altseq, readlength, totreads, prefix, vaf=0.5, fragsize=200, error_rate=0, clip_prob=0):
-    num_altreads = stats.binom(totreads - 1, vaf).rvs(1)[0] + 1
+    if vaf < 1e-4:
+        num_altreads = 0
+    else:
+        num_altreads = stats.binom(totreads - 1, vaf).rvs(1)[0] + 1
     fq_to_file(seq, totreads - num_altreads, readlength, fragsize, prefix, "ref", error_rate, clip_prob)
     fq1, fq2 = fq_to_file(altseq, num_altreads, readlength, fragsize, prefix, "hetalt", error_rate, clip_prob)
     return fq1, fq2

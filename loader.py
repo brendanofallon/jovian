@@ -101,6 +101,8 @@ class PregenLoader:
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.pathpairs = self._find_files()
+        if not self.pathpairs:
+            raise ValueError(f"Could not find any files in {datadir}")
 
     def _find_files(self):
         allsrc = list(self.datadir.glob(self.src_prefix + "*"))

@@ -95,9 +95,10 @@ def aln_to_vars(refseq, altseq, offset=0):
     q_offset = 0
     t_offset = 0
 
+    variant_pos_offset = 0
     if aln.query_begin > 0:
         # yield Variant(ref='', alt=altseq[0:aln.query_begin], pos=offset, qual=-1)
-        q_offset += aln.query_begin
+        q_offset += aln.query_begin # Maybe we don't want this?
     if aln.target_begin > 0:
         # yield Variant(ref=refseq[0:aln.target_begin], alt='', pos=offset, qual=-1)
         t_offset += aln.target_begin
@@ -107,11 +108,13 @@ def aln_to_vars(refseq, altseq, offset=0):
             for v in _mismatches_to_vars(refseq[t_offset:t_offset+cig.len], altseq[q_offset:q_offset+cig.len], offset + t_offset):
                 yield v
             q_offset += cig.len
+            variant_pos_offset += cig.len
             t_offset += cig.len
 
         elif cig.op == "I":
-            yield Variant(ref='', alt=altseq[q_offset:q_offset+cig.len], pos=offset + q_offset, qual=-1)
+            yield Variant(ref='', alt=altseq[q_offset:q_offset+cig.len], pos=offset + variant_pos_offset, qual=-1)
             q_offset += cig.len
+            variant_pos_offset += cig.len
 
         elif cig.op == "D":
             yield Variant(ref=refseq[t_offset:t_offset + cig.len], alt='', pos=offset + t_offset, qual=-1)

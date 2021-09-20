@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 import loader
 import bwasim
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, AltPredictor
+from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
@@ -33,16 +33,17 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     count = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        predicted_altmask = altpredictor(unsorted_src)
-        amx = 0.95 / predicted_altmask.max(dim=1)[0]
-        amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-        predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
-            (-1, predicted_altmask.shape[1])) + amin
-        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-        predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-        fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
-        src = unsorted_src * fullmask
+        # predicted_altmask = altpredictor(unsorted_src)
+        # amx = 0.95 / predicted_altmask.max(dim=1)[0]
+        # amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+        # predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
+        #     (-1, predicted_altmask.shape[1])) + amin
+        # predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
+        # predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+        # aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+        # fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
+        # src = unsorted_src * fullmask
+        src = unsorted_src
 
         optimizer.zero_grad()
         
@@ -84,7 +85,7 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None):
 
-    model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -92,9 +93,11 @@ def train_epochs(epochs,
     model.train()
     batch_size = 64
 
-    altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
-    altpredictor.to(DEVICE)
+    # altpredictor = AltPredictor(0, 7)
+    # altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
+    # altpredictor.to(DEVICE)
+    
+    altpredictor = None
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
