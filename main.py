@@ -273,14 +273,14 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     summary information about PPA / PPV, etc
     """
     max_read_depth = 300
-    feats_per_read = 7
+    feats_per_read =8
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
 
     reference = pysam.FastaFile(conf['reference'])
 
-    altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
+    altpredictor = AltPredictor(0,8)
+    altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
     altpredictor.to(DEVICE)
 
     model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)

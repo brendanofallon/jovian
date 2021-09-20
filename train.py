@@ -33,16 +33,17 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     count = 0
     for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        predicted_altmask = altpredictor(unsorted_src)
-        amx = 0.95 / predicted_altmask.max(dim=1)[0]
-        amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-        predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
-            (-1, predicted_altmask.shape[1])) + amin
-        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-        predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-        fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
-        src = unsorted_src * fullmask
+        with torch.no_grad():
+            predicted_altmask = altpredictor(unsorted_src)
+            amx = 0.95 / predicted_altmask.max(dim=1)[0]
+            amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+            predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
+                (-1, predicted_altmask.shape[1])) + amin
+            predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
+            predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+            aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+            fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
+            src = unsorted_src * fullmask
 
         optimizer.zero_grad()
         
@@ -54,7 +55,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         count += 1
         if count % 100 == 0:
             logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
-        #print(f"preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
+        #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
             width = 20
@@ -65,7 +66,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
 
 
-        loss.backward(retain_graph=True)
+        loss.backward()
         # vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
@@ -92,8 +93,8 @@ def train_epochs(epochs,
     model.train()
     batch_size = 64
 
-    altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
+    altpredictor = AltPredictor(0, 8)
+    altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
     altpredictor.to(DEVICE)
 
     criterion = nn.CrossEntropyLoss()
@@ -274,6 +275,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  max_read_depth=300,
                  feats_per_read=8,
                  statedict=input_model,
+                 init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  eval_batches=eval_batches)
 
