@@ -131,10 +131,12 @@ class VarTransformerAltMask(nn.Module):
 
     def forward(self, src):
         altmask = self.altpredictor(src).to(self.device)
-        amx = 0.95 / altmask.max(dim=1)[0]
-        amin = altmask.min(dim=1)[0].unsqueeze(1).expand((-1, altmask.shape[1]))
-        altmask = (altmask - amin) * amx.unsqueeze(1).expand(
-            (-1, altmask.shape[1])) + amin
+        #amx = 0.95 / altmask.max(dim=1)[0]
+        #amin = altmask.min(dim=1)[0].unsqueeze(1).expand((-1, altmask.shape[1]))
+        #altmask = (altmask - amin) * amx.unsqueeze(1).expand(
+        #    (-1, altmask.shape[1])) + amin
+
+        # Force the first read in each batch to have weight = 1, because this is the reference read but we _dont_ want to mask it
         predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(self.device), altmask[:, 1:]), dim=1)
         predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
         aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
