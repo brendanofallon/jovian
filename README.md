@@ -75,19 +75,19 @@ which will generate a textual summary of the PPA / PPV / TPs / FPs / FNs for eac
 
 Engineering stuff:
 
-    - When training, retain a few batches / samples for validation. Don't use them for training but report their accuracy once per epoch
-    - Log basic stats to csv or similar when training, so its easy to look at train & val loss / gradient norm / % match etc 
-    - Save best model (lowest loss?) during training
-    - Tensorboard integration?
-    - VCF output
-    - When calling a given region, do we just want to make one prediction from the model? What if the number of reads in the pileup is much bigger
+  - When training, retain a few batches / samples for validation. Don't use them for training but report their accuracy once per epoch
+  - Log basic stats to csv or similar when training, so its easy to look at train & val loss / gradient norm / % match etc 
+  - Save best model (lowest loss?) during training
+  - Tensorboard integration?
+  - VCF output
+   - When calling a given region, do we just want to make one prediction from the model? What if the number of reads in the pileup is much bigger
     than the 'read_depth' dimension of the model - should we repeatedly sample the reads, make multiple predictions, and look for variants that appear
     in (most) of the replicates? Should we randomize on the target position as well?
     
 Research stuff:
 
-    - Learning curves - how does validation accuracy improve as more training data is added?
-    - Model hyperparameter tweaking - How many encoder layers should we use? What the best embedding dimension? Whats the best output size for the initial linear layers? Do we need those two initial linear layers?
-    - Should we somehow encode read identity into the features? Right now, there's no way (I think) for the model to figure that a given basecall in one position came from the same read as a basecall at a different position
-    - Maybe there's a better way to do alt masking / prediction? Would a transformer work here as well?
-    - 
+  - Learning curves - how does validation accuracy improve as more training data is added?
+   - Model hyperparameter tweaking - How many encoder layers should we use? What the best embedding dimension? Whats the best output size for the initial linear layers? Do we need those two initial linear layers?
+  - Should we somehow encode read identity into the features? Right now, there's no way (I think) for the model to figure that a given basecall in one position came from the same read as a basecall at a different position
+  - Maybe there's a better way to do alt masking / prediction? Would a transformer work here as well?
+  - 
