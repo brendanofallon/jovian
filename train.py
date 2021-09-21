@@ -2,9 +2,11 @@
 import logging
 import yaml
 from datetime import datetime
+import os
 
 import torch
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,38 @@ from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
+
+
+class TrainLogger:
+    """ Simple utility for writing various items to a log file CSV """
+
+    def __init__(self, output, headers):
+        self.headers = list(headers)
+        if type(output) == str:
+            self.output = open(output, "a")
+        else:
+            self.output = output
+        self._write_header()
+
+
+    def _write_header(self):
+        self.output.write(",".join(self.headers) + "\n")
+        self._flush_and_fsync()
+
+    def _flush_and_fsync(self):
+        try:
+            self.output.flush()
+            os.fsync()
+        except:
+            pass
+
+    def log(self, items):
+        assert len(items) == len(self.headers), f"Expected {len(headers)} items to log, but got {len(items)}"
+        self.output.write(
+            ",".join(str(items[k]) for k in self.headers) + "\n"
+        )
+        self._flush_and_fsync()
+
 
 
 
@@ -32,19 +66,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     count = 0
-    for unsorted_src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
-        # predicted_altmask = altpredictor(unsorted_src)
-        # amx = 0.95 / predicted_altmask.max(dim=1)[0]
-        # amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-        # predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
-        #     (-1, predicted_altmask.shape[1])) + amin
-        # predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-        # predicted_altmask = torch.cat((torch.ones(unsorted_src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-        # aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-        # fullmask = aex.expand(unsorted_src.shape[0], unsorted_src.shape[2], unsorted_src.shape[1], unsorted_src.shape[3]).transpose(1, 2)
-        # src = unsorted_src * fullmask
-        src = unsorted_src
-
+    for src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
         optimizer.zero_grad()
         
         seq_preds, vaf_preds = model(src)
@@ -93,16 +115,18 @@ def train_epochs(epochs,
     model.train()
     batch_size = 64
 
-    # altpredictor = AltPredictor(0, 7)
-    # altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
-    # altpredictor.to(DEVICE)
-    
-    altpredictor = None
-
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
+
+    trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
+    logger.info(f"Training log data will be saved at {trainlogpath}")
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "refmatch", "learning_rate", "epochtime"])
+
+    tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
+    tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
+
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
@@ -113,11 +137,21 @@ def train_epochs(epochs,
                                                   dataloader,
                                                   batch_size=batch_size,
                                                   max_alt_reads=max_read_depth,
-                                                  altpredictor=altpredictor)
+                                                  altpredictor=None)
             elapsed = datetime.now() - starttime
 
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
             scheduler.step()
+            trainlogger.log({
+                "epoch": epoch,
+                "trainingloss": loss,
+                "refmatch": refmatch,
+                "learning_rate": scheduler.get_last_lr()[0],
+                "epochtime": elapsed.total_seconds(),
+            })
+
+            tensorboardWriter.add_scalar("loss/train", loss, epoch)
+            tensorboardWriter.add_scalar("refmatch/train", refmatch, epoch)
 
 
             if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
@@ -127,30 +161,30 @@ def train_epochs(epochs,
                 torch.save(model.to('cpu').state_dict(), checkpoint_name)
 
 
-            if eval_batches is not None:
-                with torch.no_grad():
-                    for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
-                        # Use 'altpredictor' to mask out non-alt reads
-                        src = src.to(DEVICE)
-                        predicted_altmask = altpredictor(src.to(DEVICE))
-                        amx = 0.95 / predicted_altmask.max(dim=1)[0]
-                        amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-                        predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
-                            (-1, predicted_altmask.shape[1])) + amin
-                        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-                        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-                        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-                        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                                              src.shape[3]).transpose(1, 2).to(DEVICE)
-                        src = src * fullmask
-
-                        predictions, vafpreds = model(src.to(DEVICE))
-                        tps, fps, fns = eval_batch(src, tgt, predictions)
-                        #logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
-                        if tps > 0:
-                            logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
-                        else:
-                            logger.info(f"Eval: {vartype} PPA: No TPs found :(")
+            # if eval_batches is not None:
+            #     with torch.no_grad():
+            #         for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
+            #             # Use 'altpredictor' to mask out non-alt reads
+            #             src = src.to(DEVICE)
+            #             predicted_altmask = altpredictor(src.to(DEVICE))
+            #             amx = 0.95 / predicted_altmask.max(dim=1)[0]
+            #             amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
+            #             predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
+            #                 (-1, predicted_altmask.shape[1])) + amin
+            #             predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
+            #             predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
+            #             aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+            #             fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+            #                                   src.shape[3]).transpose(1, 2).to(DEVICE)
+            #             src = src * fullmask
+            #
+            #             predictions, vafpreds = model(src.to(DEVICE))
+            #             tps, fps, fns = eval_batch(src, tgt, predictions)
+            #             #logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
+            #             if tps > 0:
+            #                 logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
+            #             else:
+            #                 logger.info(f"Eval: {vartype} PPA: No TPs found :(")
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:

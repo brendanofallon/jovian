@@ -23,7 +23,7 @@ import vcf
 
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, AltPredictor
+from model import VarTransformer, AltPredictor, VarTransformerAltMask
 from train import train, load_train_conf
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -255,10 +255,10 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     # predicted_altmask = altpredictor(padded_reads.to(DEVICE))
     # for read, maskval in zip(reads, predicted_altmask[0,:]):
     #     print(f"{maskval.item():.3f}\t{read.query_name}")
+    # fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
+    # masked_reads = padded_reads * fullmask
 
-    fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
-    masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(masked_reads.flatten(start_dim=2).to(DEVICE))
+    seq_preds, _ = model(padded_reads)
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
@@ -279,11 +279,12 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     reference = pysam.FastaFile(conf['reference'])
 
-    altpredictor = AltPredictor(0, 8)
-    altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
-    altpredictor.to(DEVICE)
+    # altpredictor = AltPredictor(0, 8)
+    # altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
+    # altpredictor.to(DEVICE)
+    altpredictor = None
 
-    model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict))
     model.eval()
 
