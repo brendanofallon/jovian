@@ -254,9 +254,16 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     # predicted_altmask = altpredictor(padded_reads.to(DEVICE))
     # for read, maskval in zip(reads, predicted_altmask[0,:]):
     #     print(f"{maskval.item():.3f}\t{read.query_name}")
+<<<<<<< HEAD
     #fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
     #masked_reads = padded_reads * fullmask
     seq_preds, _ = model(padded_reads.to(DEVICE))
+=======
+    # fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
+    # masked_reads = padded_reads * fullmask
+
+    seq_preds, _ = model(padded_reads)
+>>>>>>> 2f328ed46a73c1d6f392ae432ff18bdb6510362f
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
@@ -277,9 +284,6 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     reference = pysam.FastaFile(conf['reference'])
 
-    #altpredictor = AltPredictor(0, 8)
-    #altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
-    #altpredictor.to(DEVICE)
     altpredictor = None
 
     model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
