@@ -251,19 +251,8 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
 
 
-    # predicted_altmask = altpredictor(padded_reads.to(DEVICE))
-    # for read, maskval in zip(reads, predicted_altmask[0,:]):
-    #     print(f"{maskval.item():.3f}\t{read.query_name}")
-<<<<<<< HEAD
-    #fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
     #masked_reads = padded_reads * fullmask
     seq_preds, _ = model(padded_reads.to(DEVICE))
-=======
-    # fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
-    # masked_reads = padded_reads * fullmask
-
-    seq_preds, _ = model(padded_reads)
->>>>>>> 2f328ed46a73c1d6f392ae432ff18bdb6510362f
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
