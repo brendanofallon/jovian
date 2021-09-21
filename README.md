@@ -76,7 +76,9 @@ which will generate a textual summary of the PPA / PPV / TPs / FPs / FNs for eac
 Engineering stuff:
 
     - When training, retain a few batches / samples for validation. Don't use them for training but report their accuracy once per epoch
+    - Log basic stats to csv or similar when training, so its easy to look at train & val loss / gradient norm / % match etc 
     - Save best model (lowest loss?) during training
+    - Tensorboard integration?
     - VCF output
     - When calling a given region, do we just want to make one prediction from the model? What if the number of reads in the pileup is much bigger
     than the 'read_depth' dimension of the model - should we repeatedly sample the reads, make multiple predictions, and look for variants that appear
