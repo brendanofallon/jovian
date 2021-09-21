@@ -77,7 +77,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         count += 1
         if count % 100 == 0:
             logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
-        #print(f"preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
+        #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
         # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
         with torch.no_grad():
             width = 20
@@ -88,7 +88,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
 
 
-        loss.backward(retain_graph=True)
+        loss.backward()
         # vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
@@ -311,6 +311,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  max_read_depth=300,
                  feats_per_read=8,
                  statedict=input_model,
+                 init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  eval_batches=eval_batches)
 
