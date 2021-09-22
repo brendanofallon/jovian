@@ -238,7 +238,7 @@ def trim_pileuptensor(src, tgt, width):
     if src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
         src = torch.cat((src, z))
-        t = torch.zeros(tgt.shape[0], width - tgt.shape[1])
+        t = torch.zeros(tgt.shape[0], width - tgt.shape[1]).long()
         tgt = torch.cat((tgt, t), dim=1)
     else:
         start = src.shape[0] // 2 - width // 2

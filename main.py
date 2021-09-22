@@ -240,7 +240,6 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
 
 
-
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
     reads_encoded, _ = encode_pileup3(reads, minref, maxref)
@@ -252,13 +251,8 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
 
 
-    # predicted_altmask = altpredictor(padded_reads.to(DEVICE))
-    # for read, maskval in zip(reads, predicted_altmask[0,:]):
-    #     print(f"{maskval.item():.3f}\t{read.query_name}")
-    # fullmask = create_altmask(altpredictor, padded_reads).to(DEVICE)
-    # masked_reads = padded_reads * fullmask
-
-    seq_preds, _ = model(padded_reads)
+    #masked_reads = padded_reads * fullmask
+    seq_preds, _ = model(padded_reads.to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
@@ -279,9 +273,6 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     reference = pysam.FastaFile(conf['reference'])
 
-    # altpredictor = AltPredictor(0, 8)
-    # altpredictor.load_state_dict(torch.load("altpredictor8.sd"))
-    # altpredictor.to(DEVICE)
     altpredictor = None
 
     model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
