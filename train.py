@@ -97,6 +97,32 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
+def calc_val_accuracy(valpaths, model):
+    """
+    Compute accuracy (fraction of predicted bases that match actual bases)
+    across all samples in valpaths, using the given model, and return it
+    :param valpaths: List of paths to (src, tgt) saved tensors
+    :returns : Average model accuracy across all validation sets
+    """
+    width = 20
+    with torch.no_grad():
+        match_sum = 0
+        count = 0
+        for srcpath, tgtpath in valpaths:
+            src = torch.load(srcpath, map_location=DEVICE)
+            tgt = torch.load(tgtpath, map_location=DEVICE)
+            tgt = tgt.squeeze(1)
+
+            seq_preds, _ = model(src)
+            mid = seq_preds.shape[1] // 2
+            midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
+                        ).float().mean()
+            match_sum += midmatch
+            count += 1
+    return match_sum / count
+
+
 def train_epochs(epochs,
                  dataloader,
                  max_read_depth=50,
@@ -122,15 +148,23 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "refmatch", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "trainmatch", "valmatch", "learning_rate", "epochtime"])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
 
+
+    try:
+        valpaths = dataloader.retain_val_samples(fraction=0.05)
+        logger.info(f"Pulled {len(valpaths)} samples to use for validation")
+    except Exception as ex:
+        logger.warning(f"Error loading validation samples, will not have any validation data for this run {ex}")
+        valpaths = []
+
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, refmatch, vafloss = train_epoch(model,
+            loss, train_accuracy, vafloss = train_epoch(model,
                                                   optimizer,
                                                   criterion,
                                                   vaf_crit,
@@ -140,18 +174,25 @@ def train_epochs(epochs,
                                                   altpredictor=None)
             elapsed = datetime.now() - starttime
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} Ref match: {refmatch:.4f}  vafloss: {vafloss:.4f} ")
+            if valpaths:
+                val_accuracy = calc_val_accuracy(valpaths, model)
+            else:
+                val_accuracy = float("NaN")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}")
+
             scheduler.step()
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
-                "refmatch": refmatch,
+                "trainmatch": train_accuracy,
+                "valmatch": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
 
             tensorboardWriter.add_scalar("loss/train", loss, epoch)
-            tensorboardWriter.add_scalar("refmatch/train", refmatch, epoch)
+            tensorboardWriter.add_scalar("match/train", train_accuracy, epoch)
+            tensorboardWriter.add_scalar("match/val", val_accuracy, epoch)
 
 
             if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
@@ -160,31 +201,6 @@ def train_epochs(epochs,
                 logger.info(f"Saving model state dict to {checkpoint_name}")
                 torch.save(model.to('cpu').state_dict(), checkpoint_name)
 
-
-            # if eval_batches is not None:
-            #     with torch.no_grad():
-            #         for vartype, (src, tgt, vaftgt, altmask) in eval_batches.items():
-            #             # Use 'altpredictor' to mask out non-alt reads
-            #             src = src.to(DEVICE)
-            #             predicted_altmask = altpredictor(src.to(DEVICE))
-            #             amx = 0.95 / predicted_altmask.max(dim=1)[0]
-            #             amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-            #             predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand(
-            #                 (-1, predicted_altmask.shape[1])) + amin
-            #             predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-            #             predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-            #             aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-            #             fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-            #                                   src.shape[3]).transpose(1, 2).to(DEVICE)
-            #             src = src * fullmask
-            #
-            #             predictions, vafpreds = model(src.to(DEVICE))
-            #             tps, fps, fns = eval_batch(src, tgt, predictions)
-            #             #logger.info(f"Eval: Min alt mask: {minalt:.3f} max: {maxalt:.3f}")
-            #             if tps > 0:
-            #                 logger.info(f"Eval: {vartype} PPA: {(tps / (tps + fns)):.3f} PPV: {(tps / (tps + fps)):.3f}")
-            #             else:
-            #                 logger.info(f"Eval: {vartype} PPA: No TPs found :(")
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:

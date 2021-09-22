@@ -1,6 +1,7 @@
 
 import logging
 import random
+import math
 from pathlib import Path
 from collections import defaultdict
 
@@ -104,6 +105,20 @@ class PregenLoader:
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
 
+    def retain_val_samples(self, fraction):
+        """
+        Remove a fraction of the samples from this loader and return them
+        :returns : List of (src, tgt) PATH tuples (not loaded tensors)
+        """
+        num_to_retain = int(math.ceil(len(self.pathpairs) * fraction))
+        val_samples = random.sample(self.pathpairs, num_to_retain)
+        newdata = []
+        for sample in self.pathpairs:
+            if sample not in val_samples:
+                newdata.append(sample)
+        self.pathpairs = newdata
+        return val_samples
+
     def _find_files(self):
         allsrc = list(self.datadir.glob(self.src_prefix + "*"))
         alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
@@ -123,6 +138,10 @@ class PregenLoader:
         return pairs
 
     def iter_once(self, batch_size):
+        """
+        Potential performace boost: Load everything into tensors but force them to be on CPU
+        until the last minute, when ew move them to GPU?
+        """
         for src, tgt in self.pathpairs:
             yield torch.load(src, map_location=self.device), torch.load(tgt, map_location=self.device), None, None
 
