@@ -49,7 +49,7 @@ The configuration file `conf.yaml` must have a path to the reference genome and 
       - bam: /path/to/another/bam
         labels: /path/to/another/labels.csv
       .... more bams/ labels ...
-The 'labels.csv' contains a list of genomic regions, chrom/pos/ref/alt and 'TP/FN/FP' status. *This is the tp_fn_fp.csv" file produced by the Caravel calc_ppa_ppv task*,
+The 'labels.csv' contains a list of genomic regions, chrom/pos/ref/alt and 'TP/FN/FP' status. *This is the tp_fn_fp.csv file produced by the Caravel calc_ppa_ppv task*,
 no modifications needed. 
 
 ### Performing a training run
