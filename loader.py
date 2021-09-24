@@ -96,11 +96,12 @@ class WeightedLoader:
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, src_prefix="src", tgt_prefix="tgt"):
+    def __init__(self, device, datadir, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
         self.device = device
         self.datadir = Path(datadir)
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
+        self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = self._find_files()
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -119,31 +120,37 @@ class PregenLoader:
         self.pathpairs = newdata
         return val_samples
 
+    def _find_tgt(self, suffix, files):
+        found = None
+        for tgt in files:
+            tsuf = tgt.name.split("_")[-1]
+            if tsuf == suffix:
+                if found:
+                    raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
+                found = tgt
+        if found is None:
+            raise ValueError(f"Could not find matching tgt file for {suffix}")
+        return found
+
     def _find_files(self):
         allsrc = list(self.datadir.glob(self.src_prefix + "*"))
         alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
+        allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
         pairs = []
         for src in allsrc:
             suffix = src.name.split("_")[-1]
-            found = False
-            for tgt in alltgt:
-                tsuf = tgt.name.split("_")[-1]
-                if tsuf == suffix:
-                    if found:
-                        raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-                    found = True
-                    pairs.append((src, tgt))
-            if not found:
-                raise ValueError(f"Uh oh, didn't find any match for suffix {suffix}!")
+            tgt = self._find_tgt(suffix, alltgt)
+            vaftgt = self._find_tgt(suffix, allvaftgt)
+            pairs.append((src, tgt, vaftgt))
         return pairs
 
     def iter_once(self, batch_size):
         """
-        Potential performace boost: Load everything into tensors but force them to be on CPU
+        Potential performance boost: Load everything into tensors but force them to be on CPU
         until the last minute, when ew move them to GPU?
         """
-        for src, tgt in self.pathpairs:
-            yield torch.load(src, map_location=self.device), torch.load(tgt, map_location=self.device), None, None
+        for src, tgt, vaftgt in self.pathpairs:
+            yield torch.load(src, map_location=self.device), torch.load(tgt, map_location=self.device), torch.load(vaftgt, map_location=self.device), None
 
 
 
