@@ -305,6 +305,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
     :param epochs: How many passes over training data to conduct
     """
     logger.info(f"Found torch device: {DEVICE}")
+    if 'cuda'  in str(DEVICE):
+        logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
