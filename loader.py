@@ -57,14 +57,14 @@ class LazyLoader:
     def iter_once(self, batch_size):
         for bam, labels in self.bamlabels:
             logger.info(f"Encoding tensors from {labels}")
-            for src, tgt in encode_chunks(bam,
+            for src, tgt, vaftgt in encode_chunks(bam,
                                           self.reference,
                                           labels,
                                           batch_size,
                                           self.reads_per_pileup,
                                           self.samples_per_pos,
                                           max_to_load=1e9):
-                yield src, tgt, None, None
+                yield src, tgt, vaftgt, None
 
 
 class WeightedLoader:
@@ -282,23 +282,33 @@ def resample_classes(classes, rows, vals_per_class=100):
     result_rows = []
     result_classes = []
     for clz, classrows in byclass.items():
-        for _ in range(vals_per_class):
-            result_classes.append(clz)
-            result_rows.append(random.choice(classrows))
+        # If there are MORE instances on this class than we want, grab a random sample of them
+        if len(classrows) > vals_per_class:
+            rows = random.sample(classrows, vals_per_class)
+            result_rows.extend(rows)
+            result_classes.extend([clz] * vals_per_class)
+        else:
+            # If there are FEWER instances of the class than we want, then loop over them
+            # repeatedly - no random sampling since that might ignore a few of the precious few samples we do have
+            for i in range(vals_per_class):
+                result_classes.append(clz)
+                idx = i % len(classrows)
+                result_rows.append(classrows[idx])
     return result_classes, result_rows
 
 
-def upsample_labels(rows):
+def upsample_labels(rows, vals_per_class):
     """
     Generate class assignments for each element in rows (see assign_class_indexes),
-     then create a new list of rows that is upsampled to normalize class frequencies
+     then create a new list of rows that is "upsampled" to normalize class frequencies
      The new list will be multiple times larger then the old list and will contain repeated
      elements of the low frequency classes
     :param rows: List of elements with vtype and status attributes (probably read in from a labels CSV file)
+    :param vals_per_class: Number of instances to retain for each class
     :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
     """
     label_idxs = np.array(assign_class_indexes(rows))
-    label_idxs, rows = resample_classes(label_idxs, rows, vals_per_class=100)
+    label_idxs, rows = resample_classes(label_idxs, rows, vals_per_class=vals_per_class)
     classes, counts = np.unique(label_idxs, return_counts=True)
 
     freqs = 1.0 / (np.min(1.0/counts) * counts)
@@ -312,22 +322,24 @@ def upsample_labels(rows):
     return results
 
 
-def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
+def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, vals_per_class):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
-    alignment (BAM) and labels csv file
+    alignment (BAM) and labels csv file. This performs some class normalized by upsampling / downsampling
+    rows from the CSV based on "class", which is something like "snv-TP" or "ins-FP" (defined by assign_class_indexes
+    function), may include VAF at some point?
     :param bampath: Path to input BAM file
     :param refpath: Path to ref genome
-    :param csv: CSV file containing C/P/R/A, variant status (TP, FP, FN..) and type (SNV, del, ins, etc)
+    :param csv: CSV file containing C/S/R/A, variant status (TP, FP, FN..) and type (SNV, del, ins, etc)
     :param max_reads_per_aln: Max reads to import for each pileup
-    :param samples_per_pos: Number of samples to create for a given position
+    :param samples_per_pos: Max number of samples to create for a given position when read resampling
     :return: Generator
     """
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
 
     labels = [l for _, l in pd.read_csv(csv).iterrows()]
-    upsampled_labels = upsample_labels(labels)
+    upsampled_labels = upsample_labels(labels, vals_per_class=vals_per_class)
     for row in upsampled_labels:
         if row.status == 'FP':
             altseq = row.ref
@@ -350,7 +362,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
                 if minseqlen != encoded.shape[0]:
                     encoded = encoded[0:minseqlen, :, :]
 
-                yield encoded, tgt, row.status, row.vtype
+                yield encoded, tgt, row.status, row.vtype, row.exp_vaf
 
         except Exception as ex:
             logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
@@ -358,33 +370,48 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos):
 
 
 def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
+    """
+    Generator for creating batches of src, tgt (data and label) tensors from a CSV file
+
+    :param bampath: Path to BAM file
+    :param refpath: Path to human genome reference fasta file
+    :param csv: Path to labels CSV file
+    :param chunk_size: Number of samples / instances to include in one generated tensor
+    :param max_reads_per_aln: Max read depth per tensor (defines index 2 of tensor)
+    :param samples_per_pos: Randomly resample reads this many times, max, per position
+    :returns : Generator of src, tgt tensor tuples
+    """
     allsrc = []
     alltgt = []
+    alltgtvaf = []
     count = 0
+    vals_per_class = 500
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}")
-    for enc, tgt, status, vtype in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+    for enc, tgt, status, vtype, vaf in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
         allsrc.append(src)
         alltgt.append(tgt)
+        alltgtvaf.append(vaf)
         count += 1
         if count % 100 == 0:
             logger.info(f"Loaded {count} tensors from {csv}")
         if count == max_to_load:
             logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc), torch.stack(alltgt).long()
+            yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc), torch.stack(alltgt).long()
+            yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
             allsrc = []
             alltgt = []
+            alltgtvaf = []
 
     if len(allsrc):
-        yield torch.stack(allsrc), torch.stack(alltgt).long()
+        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.stack(alltgtvaf)
     logger.info(f"Done loading {count} tensors from {csv}")
 
 
