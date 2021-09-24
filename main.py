@@ -219,10 +219,10 @@ def pregen(config, **kwargs):
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
     existing_tgt = list(output_dir.glob(tgt_prefix + "*"))
-    startval = 0
+    startval = kwargs.get('start_from', 0)
     if existing_tgt:
         idxs = [int(t.name.replace(".pt", "").split("_")[-1]) for t in existing_tgt]
-        startval = max(idxs)
+        startval = max(max(idxs), startval)
         logger.info(f"Found existing data in directory {output_dir}, starting indexes at {startval}")
     logger.info(f"Saving tensors to {output_dir}/..")
     for i, (src, tgt, vaftgt, _) in enumerate(dataloader.iter_once(batch_size), start=startval):
@@ -332,6 +332,7 @@ def main():
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
+    genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.set_defaults(func=pregen)
 
     evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")
