@@ -356,9 +356,13 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
     if len(allreads) < 5:
         raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
 
-    if len(allreads) < maxreads:
-        logger.warning(f"{chrom}:{pos} does not contain {maxreads} overlapping reads, not downsampling")
-        num_samples = 1
+    if (len(allreads) // maxreads) < num_samples:
+        num_samples = max(1, len(allreads) // maxreads)
+        # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
+
+    # if len(allreads) < maxreads:
+    #     # logger.warning(f"{chrom}:{pos} does not contain {maxreads} overlapping reads, not downsampling")
+    #     num_samples = 1
 
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
     for i in range(num_samples):
