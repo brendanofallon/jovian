@@ -45,8 +45,8 @@ class TwoHapDecoder(nn.Module):
         x1 = self.softmax(self.fc2(x))
         # VAF stuff is VERY experimental - x has shape [batch, seqlen (in general this is variable), 4] - no linear
         # layer can be operate over the seq_dim since it can change from run to run, so instead we just sum it?? (Mean works better than sum)
-        x_vaf = torch.sigmoid(self.fc_vaf(x).mean(dim=1))
-        return x1, x_vaf
+        # x_vaf = torch.sigmoid(self.fc_vaf(x).mean(dim=1))
+        return x1
 
 
 class VarTransformer(nn.Module):
@@ -149,4 +149,6 @@ class VarTransformerAltMask(nn.Module):
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src)
         output = self.decoder(output)
-        return output
+
+        pred_vaf = altmask.mean(dim=1)
+        return output, pred_vaf

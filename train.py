@@ -78,7 +78,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         if count % 100 == 0:
             logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
-        # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
+
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
@@ -86,13 +86,16 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
+        loss.backward(retain_graph=vaf_criterion is not None)
 
+        if vaf_criterion is not None:
+            vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
+            vafloss.backward()
+            vafloss_sum += vafloss.detach().item()
 
-        loss.backward()
-        # vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
-        # vafloss_sum += vafloss.detach().item()
+
 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
