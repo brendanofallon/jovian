@@ -89,10 +89,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         loss.backward(retain_graph=vaf_criterion is not None)
 
-        if vaf_criterion is not None:
-            vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
-            vafloss.backward()
-            vafloss_sum += vafloss.detach().item()
+        #if vaf_criterion is not None:
+        #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
+        #    vafloss.backward()
+        #    vafloss_sum += vafloss.detach().item()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
         optimizer.step()
