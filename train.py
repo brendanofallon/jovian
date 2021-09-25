@@ -4,6 +4,7 @@ import yaml
 from datetime import datetime
 import os
 
+import numpy as np
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
@@ -66,7 +67,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     count = 0
-    for src, tgt_seq, tgtvaf, altmask in loader.iter_once(batch_size):
+    for batch, (src, tgt_seq, tgtvaf, altmask) in enumerate(loader.iter_once(batch_size)):
         optimizer.zero_grad()
         
         seq_preds, vaf_preds = model(src)
@@ -93,9 +94,12 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             vafloss.backward()
             vafloss_sum += vafloss.detach().item()
 
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
-
+        if np.isnan(epoch_loss_sum):
+            logger.warning(f"Loss is NAN!!")
+        logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 

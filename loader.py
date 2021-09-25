@@ -103,6 +103,7 @@ class PregenLoader:
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = self._find_files()
+        logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
 
