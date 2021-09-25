@@ -196,7 +196,7 @@ def pregen(config, **kwargs):
     conf = load_train_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
-    samples_per_pos = kwargs.get('samples_per_pos', 4)
+    samples_per_pos = kwargs.get('samples_per_pos', 10)
     if kwargs.get("sim"):
         batches = 50
         logger.info(f"Generating simulated data with batch size {batch_size} and {batches} total batches")
@@ -217,17 +217,19 @@ def pregen(config, **kwargs):
     output_dir.mkdir(parents=True, exist_ok=True)
     src_prefix = "src"
     tgt_prefix = "tgt"
+    vaf_prefix = "vaftgt"
     existing_tgt = list(output_dir.glob(tgt_prefix + "*"))
-    startval = 0
+    startval = kwargs.get('start_from', 0)
     if existing_tgt:
         idxs = [int(t.name.replace(".pt", "").split("_")[-1]) for t in existing_tgt]
-        startval = max(idxs)
+        startval = max(max(idxs), startval)
         logger.info(f"Found existing data in directory {output_dir}, starting indexes at {startval}")
     logger.info(f"Saving tensors to {output_dir}/..")
-    for i, (src, tgt, _, _) in enumerate(dataloader.iter_once(batch_size), start=startval):
+    for i, (src, tgt, vaftgt, _) in enumerate(dataloader.iter_once(batch_size), start=startval):
         logger.info(f"Saving batch {i}")
         torch.save(src, output_dir / f"{src_prefix}_{i}.pt")
         torch.save(tgt, output_dir / f"{tgt_prefix}_{i}.pt")
+        torch.save(vaftgt, output_dir / f"{vaf_prefix}_{i}.pt")
 
 
 def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
@@ -330,6 +332,7 @@ def main():
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
+    genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.set_defaults(func=pregen)
 
     evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")

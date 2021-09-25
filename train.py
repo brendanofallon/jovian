@@ -78,7 +78,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         if count % 100 == 0:
             logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
-        # vafloss = vaf_criterion(vaf_preds.double().squeeze(1), tgtvaf.double())
+
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
@@ -86,13 +86,16 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
+        loss.backward(retain_graph=vaf_criterion is not None)
 
+        if vaf_criterion is not None:
+            vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
+            vafloss.backward()
+            vafloss_sum += vafloss.detach().item()
 
-        loss.backward()
-        # vafloss.backward()
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
-        # vafloss_sum += vafloss.detach().item()
+
 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
@@ -102,25 +105,29 @@ def calc_val_accuracy(valpaths, model):
     Compute accuracy (fraction of predicted bases that match actual bases)
     across all samples in valpaths, using the given model, and return it
     :param valpaths: List of paths to (src, tgt) saved tensors
-    :returns : Average model accuracy across all validation sets
+    :returns : Average model accuracy across all validation sets, vaf MSE 
     """
     width = 20
     with torch.no_grad():
         match_sum = 0
         count = 0
-        for srcpath, tgtpath in valpaths:
+        vaf_mse_sum = 0
+        for srcpath, tgtpath, vaftgtpath in valpaths:
             src = torch.load(srcpath, map_location=DEVICE)
             tgt = torch.load(tgtpath, map_location=DEVICE)
+            vaf = torch.load(vaftgtpath, map_location=DEVICE)
             tgt = tgt.squeeze(1)
 
-            seq_preds, _ = model(src)
+            seq_preds, vaf_preds = model(src)
             mid = seq_preds.shape[1] // 2
             midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
                         ).float().mean()
             match_sum += midmatch
             count += 1
-    return match_sum / count
+
+            vaf_mse_sum += ((vaf - vaf_preds) * (vaf-vaf_preds)).mean().item()
+    return match_sum / count, vaf_mse_sum / count
 
 
 def train_epochs(epochs,
@@ -175,10 +182,10 @@ def train_epochs(epochs,
             elapsed = datetime.now() - starttime
 
             if valpaths:
-                val_accuracy = calc_val_accuracy(valpaths, model)
+                val_accuracy, val_vaf_mse = calc_val_accuracy(valpaths, model)
             else:
-                val_accuracy = float("NaN")
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}")
+                val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
             scheduler.step()
             trainlogger.log({
