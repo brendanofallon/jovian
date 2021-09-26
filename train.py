@@ -67,6 +67,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     count = 0
+    vafloss = torch.tensor([0])
     for batch, (src, tgt_seq, tgtvaf, altmask) in enumerate(loader.iter_once(batch_size)):
         optimizer.zero_grad()
         
@@ -89,7 +90,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         loss.backward(retain_graph=vaf_criterion is not None)
 
-        #if vaf_criterion is not None:
+        #if vaf_criterion is not None and np.random.rand() < 0.10:
         #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
         #    vafloss.backward()
         #    vafloss_sum += vafloss.detach().item()
@@ -99,7 +100,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
-        logger.info(f"batch: {batch} loss: {loss.item()}")
+        #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
@@ -316,7 +317,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
     :param epochs: How many passes over training data to conduct
     """
     logger.info(f"Found torch device: {DEVICE}")
-    if 'cuda'  in str(DEVICE):
+    if 'cuda' in str(DEVICE):
         logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
     conf = load_train_conf(config)
     train_sets = [(c['bam'], c['labels']) for c in conf['data']]
