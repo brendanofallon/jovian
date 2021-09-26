@@ -348,6 +348,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
 
     labels = [l for _, l in pd.read_csv(csv).iterrows()]
     upsampled_labels = upsample_labels(labels, vals_per_class=vals_per_class)
+    logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {csv}")
     for row in upsampled_labels:
         if row.status == 'FP':
             altseq = row.ref
