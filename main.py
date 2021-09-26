@@ -199,9 +199,9 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
 
-    logger.info(f"Saving tensors to {output_dir}/..")
+    logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, _) in enumerate(dataloader.iter_once(batch_size)):
-        logger.info(f"Saving batch {i} from sample ")
+        logger.info(f"Saving batch {i} with uid {uid}")
         torch.save(src, output_dir / f"{src_prefix}_{uid}-{i}.pt")
         torch.save(tgt, output_dir / f"{tgt_prefix}_{uid}-{i}.pt")
         torch.save(vaftgt, output_dir / f"{vaf_prefix}_{uid}-{i}.pt")
