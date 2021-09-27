@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from collections import defaultdict
 import gzip
+import io
 
 import scipy.stats as stats
 import numpy as np
@@ -104,6 +105,8 @@ class PregenLoader:
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = self._find_files()
+        self.cache = {} # Maps filenames to data, experimental
+        self.max_cache_size = 2000 # ? No idea what makes sense here
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -135,6 +138,9 @@ class PregenLoader:
         return found
 
     def _find_files(self):
+        """
+        Match up all src / tgt files and store them as tuples in a list
+        """
         allsrc = list(self.datadir.glob(self.src_prefix + "*"))
         alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
         allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
@@ -157,13 +163,34 @@ class PregenLoader:
         else:
             return torch.load(path, map_location=self.device)
 
+    def item(self, path):
+        """
+        Return a tensor from the given path, doing a cache lookup first to see if we alrady have the data
+        Cached data is gzipped, so decompress it when returning
+        If the cache is smaller then max cache size, add the new data (still compressed) to the cache
+        """
+
+        if not path.endswith('.gz'):
+            # If data is not compressed, don't try to store it in RAM. This is mostly for legacy support
+            return torch.load(path, map_location=self.device)
+
+        if path in self.cache:
+            return torch.load(io.BytesIO(gzip.decompress(gz)), map_location=self.device)
+        elif len(self.cache) < self.max_cache_size:
+            with open(path, 'rb') as fh:
+                data = fh.read()
+                self.cache[path] = data
+                return torch.load(io.BytesIO(gzip.decompress(data)), map_location=self.device)
+        else:
+            return self._unzip_load(path)
+
     def iter_once(self, batch_size):
         """
         Potential performance boost: Load everything into tensors but force them to be on CPU
         until the last minute, when ew move them to GPU?
         """
         for src, tgt, vaftgt in self.pathpairs:
-            yield self._unzip_load(src), self._unzip_load(tgt), self._unzip_load(vaftgt), None
+            yield self.item(src), self.item(tgt), self.item(vaftgt), None
 
 
 
