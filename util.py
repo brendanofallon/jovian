@@ -1,10 +1,25 @@
 import torch
 import numpy as np
-
+import gzip
 
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
+
+
+
+def unzip_load(path, device='cpu'):
+    """
+    Read the given file and load then tensor it contains, 
+    If path has a .gz suffix, ungzip it first then load
+    :returns: torch.Tensor read from file
+    """
+    if str(path).endswith('.gz'):
+        with gzip.open(path, 'rb') as fh:
+            return torch.load(fh, map_location=device)
+    else:
+        return torch.load(path, map_location=device)
+
 
 def readstr(t):
     t = t.detach().cpu().numpy()

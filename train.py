@@ -13,8 +13,10 @@ logger = logging.getLogger(__name__)
 
 import loader
 import bwasim
+import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
+
 
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
@@ -118,9 +120,9 @@ def calc_val_accuracy(valpaths, model):
         count = 0
         vaf_mse_sum = 0
         for srcpath, tgtpath, vaftgtpath in valpaths:
-            src = torch.load(srcpath, map_location=DEVICE)
-            tgt = torch.load(tgtpath, map_location=DEVICE)
-            vaf = torch.load(vaftgtpath, map_location=DEVICE)
+            src = util.unzip_load(srcpath, DEVICE)
+            tgt = util.unzip_load(tgtpath, DEVICE)
+            vaf = util.unzip_load(vaftgtpath, DEVICE)
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)

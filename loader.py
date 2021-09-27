@@ -16,6 +16,7 @@ import pysam
 import bwasim
 from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample, ensure_dim
 import sim
+import util
 
 logger = logging.getLogger(__name__)
 
@@ -146,16 +147,6 @@ class PregenLoader:
             pairs.append((src, tgt, vaftgt))
         return pairs
 
-    def _unzip_load(self, path):
-        """
-        If path has a .gz suffix, ungzip it first then load
-        otherwise just return torch.load(path)
-        """
-        if str(path).endswith('.gz'):
-            with gzip.open(path, 'rb') as fh:
-                return torch.load(fh, map_location=self.device)
-        else:
-            return torch.load(path, map_location=self.device)
 
     def iter_once(self, batch_size):
         """
@@ -163,7 +154,7 @@ class PregenLoader:
         until the last minute, when ew move them to GPU?
         """
         for src, tgt, vaftgt in self.pathpairs:
-            yield self._unzip_load(src), self._unzip_load(tgt), self._unzip_load(vaftgt), None
+            yield util.unzip_load(src, self.device), util.unzip_load(tgt, self.device), util.unzip_load(vaftgt, self.device), None
 
 
 
