@@ -17,6 +17,7 @@ import pysam
 import bwasim
 from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample, ensure_dim
 import sim
+import util
 
 logger = logging.getLogger(__name__)
 
@@ -152,16 +153,6 @@ class PregenLoader:
             pairs.append((src, tgt, vaftgt))
         return pairs
 
-    def _unzip_load(self, path):
-        """
-        If path has a .gz suffix, ungzip it first then load
-        otherwise just return torch.load(path)
-        """
-        if str(path).endswith('.gz'):
-            with gzip.open(path, 'rb') as fh:
-                return torch.load(fh, map_location=self.device)
-        else:
-            return torch.load(path, map_location=self.device)
 
     def item(self, path):
         """
@@ -169,7 +160,6 @@ class PregenLoader:
         Cached data is gzipped, so decompress it when returning
         If the cache is smaller then max cache size, add the new data (still compressed) to the cache
         """
-
         if not path.endswith('.gz'):
             # If data is not compressed, don't try to store it in RAM. This is mostly for legacy support
             return torch.load(path, map_location=self.device)
@@ -191,6 +181,7 @@ class PregenLoader:
         """
         for src, tgt, vaftgt in self.pathpairs:
             yield self.item(src), self.item(tgt), self.item(vaftgt), None
+
 
 
 
@@ -459,7 +450,7 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
             alltgtvaf = []
 
     if len(allsrc):
-        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.stack(alltgtvaf)
+        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
     logger.info(f"Done loading {count} tensors from {csv}")
 
 
