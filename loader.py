@@ -160,7 +160,7 @@ class PregenLoader:
         Cached data is gzipped, so decompress it when returning
         If the cache is smaller then max cache size, add the new data (still compressed) to the cache
         """
-        if not path.endswith('.gz'):
+        if not str(path).endswith('.gz'):
             # If data is not compressed, don't try to store it in RAM. This is mostly for legacy support
             return torch.load(path, map_location=self.device)
 
@@ -172,13 +172,9 @@ class PregenLoader:
                 self.cache[path] = data
                 return torch.load(io.BytesIO(gzip.decompress(data)), map_location=self.device)
         else:
-            return self._unzip_load(path)
+            return util.unzip_load(path, self.device)
 
     def iter_once(self, batch_size):
-        """
-        Potential performance boost: Load everything into tensors but force them to be on CPU
-        until the last minute, when ew move them to GPU?
-        """
         for src, tgt, vaftgt in self.pathpairs:
             yield self.item(src), self.item(tgt), self.item(vaftgt), None
 
