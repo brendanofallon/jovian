@@ -97,7 +97,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #    vafloss.backward()
         #    vafloss_sum += vafloss.detach().item()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
