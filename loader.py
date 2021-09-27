@@ -4,6 +4,7 @@ import random
 import math
 from pathlib import Path
 from collections import defaultdict
+import gzip
 
 import scipy.stats as stats
 import numpy as np
@@ -145,13 +146,24 @@ class PregenLoader:
             pairs.append((src, tgt, vaftgt))
         return pairs
 
+    def _unzip_load(self, path):
+        """
+        If path has a .gz suffix, ungzip it first then load
+        otherwise just return torch.load(path)
+        """
+        if str(path).endswith('.gz'):
+            with gzip.open(path, 'rb') as fh:
+                return torch.load(fh, map_location=self.device)
+        else:
+            return torch.load(path, map_location=self.device)
+
     def iter_once(self, batch_size):
         """
         Potential performance boost: Load everything into tensors but force them to be on CPU
         until the last minute, when ew move them to GPU?
         """
         for src, tgt, vaftgt in self.pathpairs:
-            yield torch.load(src, map_location=self.device), torch.load(tgt, map_location=self.device), torch.load(vaftgt, map_location=self.device), None
+            yield self._unzip_load(src), self._unzip_load(tgt), self._unzip_load(vaftgt), None
 
 
 
@@ -348,6 +360,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
 
     labels = [l for _, l in pd.read_csv(csv).iterrows()]
     upsampled_labels = upsample_labels(labels, vals_per_class=vals_per_class)
+    logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {csv}")
     for row in upsampled_labels:
         if row.status == 'FP':
             altseq = row.ref
