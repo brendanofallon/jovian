@@ -423,7 +423,7 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
             alltgtvaf = []
 
     if len(allsrc):
-        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.stack(alltgtvaf)
+        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
     logger.info(f"Done loading {count} tensors from {csv}")
 
 
