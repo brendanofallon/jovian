@@ -165,7 +165,7 @@ class PregenLoader:
             return torch.load(path, map_location=self.device)
 
         if path in self.cache:
-            return torch.load(io.BytesIO(gzip.decompress(gz)), map_location=self.device)
+            return torch.load(io.BytesIO(gzip.decompress(self.cache[path])), map_location=self.device)
         elif len(self.cache) < self.max_cache_size:
             with open(path, 'rb') as fh:
                 data = fh.read()
