@@ -76,16 +76,14 @@ which will generate a textual summary of the PPA / PPV / TPs / FPs / FNs for eac
 
 Engineering stuff:
 
-  - When training, retain a few batches / samples for validation. Don't use them for training but report their accuracy once per epoch (done!)
   - Save best model (lowest loss?) during training
-  - Tensorboard integration? (done!)
-  - learn how to use GPUs at the CHPC (done!)
+  - Store training config in a single yaml / .py file for easy reference 
   - Figure out how to make better use of GPU memory and RAM when training (right now we just store everything on disk and load it into ram on the fly, which is slow) (but still, not evreything can fit into RAM) (much less GPU memory) 
   - VCF output
   - When calling a given region, do we just want to make one prediction from the model? What if the number of reads in the pileup is much bigger
     than the 'read_depth' dimension of the model - should we repeatedly sample the reads, make multiple predictions, and look for variants that appear
     in (most) of the replicates? Sho`uld we randomize on the target position as well?
-  - Multithread pregen (done! much faster now :)
+  - Rethink 'pregen' - would be great if we could dynamically alter the class resampling strategy & batch size on the fly, without having to do pregen (but does this mean storing every single pileup tensor as a single file??? Could easily be 1M files or more)
     
 Research stuff:
 
@@ -93,5 +91,7 @@ Research stuff:
   - Model hyperparameter tweaking - How many encoder layers should we use? What the best embedding dimension? Whats the best output size for the initial linear layers? Do we need those two initial linear layers?
   - Should we somehow encode read identity into the features? Right now, there's no way (I think) for the model to figure that a given basecall in one position came from the same read as a basecall at a different position
   - Maybe there's a better way to do alt masking / prediction? Would a transformer work here as well?
-  - Redo *all training samples* with 'raw' BAMs and capture-wide data (currently the ONCCN ROI is being used, for no good reason)  (done!)
+  - Other activation functions inside transformer - ELU or GELU or ReLU 'squared' sometimes improve training performance
+  - Look into FastFormer / EfficientTransformer variants
+  
 
