@@ -420,7 +420,7 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     alltgt = []
     alltgtvaf = []
     count = 0
-    vals_per_class = 500
+    vals_per_class = 1000
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}")
     for enc, tgt, status, vtype, vaf in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
