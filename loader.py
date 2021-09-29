@@ -1,10 +1,19 @@
 
 import logging
+logger = logging.getLogger(__name__)
+
 import random
 import math
 from pathlib import Path
 from collections import defaultdict
 import gzip
+import lz4.frame
+
+try:
+    import blosc
+except ImportError:
+    logger.warning("Could not load blosc package, but its experimental and you probably dont need it anyway")
+
 import io
 
 import scipy.stats as stats
@@ -19,7 +28,6 @@ from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample,
 import sim
 import util
 
-logger = logging.getLogger(__name__)
 
 
 class ReadLoader:
@@ -107,7 +115,7 @@ class PregenLoader:
         self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = self._find_files()
         self.cache = {} # Maps filenames to data, experimental
-        self.max_cache_size = 2000 # ? No idea what makes sense here
+        self.max_cache_size = 10000 # ? No idea what makes sense here
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -140,7 +148,7 @@ class PregenLoader:
 
     def _find_files(self):
         """
-        Match up all src / tgt files and store them as tuples in a list
+        Match up all src / tgt / vaftgt files and store them as tuples in a list
         """
         allsrc = list(self.datadir.glob(self.src_prefix + "*"))
         alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
@@ -153,26 +161,30 @@ class PregenLoader:
             pairs.append((src, tgt, vaftgt))
         return pairs
 
-
-    def item(self, path):
+    def _from_cache(self, path, decomp_func):
         """
-        Return a tensor from the given path, doing a cache lookup first to see if we alrady have the data
-        Cached data is gzipped, so decompress it when returning
-        If the cache is smaller then max cache size, add the new data (still compressed) to the cache
+        Attempt to retrieve the item with the given path from the cache, if it's not in the cache then add it
+        only if the cache size is less than self.max_cache_size
         """
-        if not str(path).endswith('.gz'):
-            # If data is not compressed, don't try to store it in RAM. This is mostly for legacy support
-            return torch.load(path, map_location=self.device)
-
         if path in self.cache:
-            return torch.load(io.BytesIO(gzip.decompress(self.cache[path])), map_location=self.device)
-        elif len(self.cache) < self.max_cache_size:
+            return torch.load(io.BytesIO(decomp_func(self.cache[path])), map_location=self.device)
+        else:
             with open(path, 'rb') as fh:
                 data = fh.read()
+            if len(self.cache) < self.max_cache_size:
                 self.cache[path] = data
-                return torch.load(io.BytesIO(gzip.decompress(data)), map_location=self.device)
+            return torch.load(io.BytesIO(decomp_func(data)), map_location=self.device)
+
+    def item(self, path):
+        if str(path).endswith('.gz'):
+            decomp_func = gzip.decompress
+        elif str(path).endswith('.lz4'):
+            decomp_func = lz4.frame.decompress
+        elif str(path).endswith('.blp'):
+            decomp_func = blosc.decompress
         else:
-            return util.unzip_load(path, self.device)
+            decomp_func = lambda x: x
+        return self._from_cache(path, decomp_func)
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt in self.pathpairs:
