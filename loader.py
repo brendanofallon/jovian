@@ -115,7 +115,7 @@ class PregenLoader:
         self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = self._find_files()
         self.cache = {} # Maps filenames to data, experimental
-        self.max_cache_size = 10000 # ? No idea what makes sense here
+        self.max_cache_size = 2000 # ? No idea what makes sense here
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")

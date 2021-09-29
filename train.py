@@ -206,7 +206,7 @@ def train_epochs(epochs,
                 "epoch": epoch,
                 "trainingloss": loss,
                 "trainmatch": train_accuracy,
-                "valmatch": val_accuracy,
+                "valmatch": val_accuracy.item(),
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
