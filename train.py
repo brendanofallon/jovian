@@ -145,7 +145,8 @@ def train_epochs(epochs,
                  checkpoint_freq=0,
                  statedict=None,
                  model_dest=None,
-                 eval_batches=None):
+                 eval_batches=None,
+                 val_dir=None):
 
     model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
@@ -169,8 +170,14 @@ def train_epochs(epochs,
 
     valpaths = []
     try:
-        valpaths = dataloader.retain_val_samples(fraction=0.05)
-        logger.info(f"Pulled {len(valpaths)} samples to use for validation")
+        if val_dir:
+            logger.info(f"Using validation data in {val_dir}")
+            valpaths = load_train_data(val_dir)
+        else:
+            logger.info(f"No val. dir. provided retaining a few training samples for validation")
+            valpaths = dataloader.retain_val_samples(fraction=0.05)
+            logger.info(f"Pulled {len(valpaths)} samples to use for validation")
+
     except Exception as ex:
         logger.warning(f"Error loading validation samples, will not have any validation data for this run {ex}")
         valpaths = []

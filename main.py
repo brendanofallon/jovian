@@ -6,6 +6,7 @@ import random
 from collections import defaultdict, Counter
 from pathlib import Path
 from string import ascii_letters, digits
+import gzip
 
 import pysam
 import torch
@@ -202,10 +203,10 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, _) in enumerate(dataloader.iter_once(batch_size)):
         logger.info(f"Saving batch {i} with uid {uid}")
-        torch.save(src, output_dir / f"{src_prefix}_{uid}-{i}.pt")
-        torch.save(tgt, output_dir / f"{tgt_prefix}_{uid}-{i}.pt")
-        torch.save(vaftgt, output_dir / f"{vaf_prefix}_{uid}-{i}.pt")
-
+        for data, prefix in zip([src, tgt, vaftgt],
+                                [src_prefix, tgt_prefix, vaf_prefix]):
+            with gzip.open(output_dir / f"{prefix}_{uid}-{i}.pt.gz", "wb") as fh:
+                torch.save(data, fh)
 
 def pregen(config, **kwargs):
     """
@@ -389,6 +390,7 @@ def main():
     trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
+    trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")
