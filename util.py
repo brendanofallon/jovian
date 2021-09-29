@@ -1,11 +1,43 @@
 import torch
 import numpy as np
 import gzip
+import lz4.frame
+import io
+
+try:
+    import blosc
+except ImportError:
+    logger.warning("Could not import blosc library, required for blp / blosc decompression")
+
 
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+
+def tensor_from_lz4(path, device):
+    return torch.load(io.BytesIO(lz4.frame.decompress(path)), map_location=device)
+
+
+def tensor_from_gzip(path, device):
+    return torch.load(io.BytesIO(gzip.decompress(path)), map_location=device)
+
+
+def tensor_from_blosc(path, device):
+    return torch.load(io.BytesIO(blosc.decompress(path)), map_location=device)
+
+
+def tensor_from_file(path, device):
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if str(path).endswith('.gz'):
+        return tensor_from_gz(data, device)
+    elif str(path).endswith('.lz4'):
+        return tensor_from_lz4(data, device)
+    elif str(path).endswith('.blp'):
+        return tensor_from_blosc(data, device)
+    else:
+        return torch.load(path, map_location=device)
 
 
 def unzip_load(path, device='cpu'):
