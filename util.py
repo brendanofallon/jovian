@@ -3,6 +3,9 @@ import numpy as np
 import gzip
 import lz4.frame
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import blosc
