@@ -7,6 +7,7 @@ from collections import defaultdict, Counter
 from pathlib import Path
 from string import ascii_letters, digits
 import gzip
+import lz4.frame
 
 import pysam
 import torch
@@ -203,7 +204,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
         logger.info(f"Saving batch {i} with uid {uid}")
         for data, prefix in zip([src, tgt, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
-            with gzip.open(output_dir / f"{prefix}_{uid}-{i}.pt.gz", "wb") as fh:
+            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
 
 def pregen(config, **kwargs):

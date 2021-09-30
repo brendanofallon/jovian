@@ -120,8 +120,8 @@ def calc_val_accuracy(valpaths, model):
         count = 0
         vaf_mse_sum = 0
         for srcpath, tgtpath, vaftgtpath in valpaths:
-            src = util.tensor_from_file(srcpath, DEVICE)
-            tgt = util.tensor_from_file(tgtpath, DEVICE)
+            src = util.tensor_from_file(srcpath, DEVICE).float()
+            tgt = util.tensor_from_file(tgtpath, DEVICE).long()
             vaf = util.tensor_from_file(vaftgtpath, DEVICE)
             tgt = tgt.squeeze(1)
 

@@ -69,16 +69,16 @@ def update_from_base(base, tensor):
     elif base == 'T':
         tensor[3] = 1
     elif base == 'N':
-        tensor[0:4] = 0.25
+        tensor[0:4] = 1
     elif base == '-':
-        tensor[0:4] = 0.0
+        tensor[0:4] = 0
     return tensor
 
 
 def encode_basecall(base, qual, cigop, strand, clipped):
-    ebc = torch.zeros(8)
+    ebc = torch.zeros(8).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
     ebc = update_from_base(base, ebc)
-    ebc[4] = qual / 100 - 0.5
+    ebc[4] = int(round(qual / 10))
     ebc[5] = cigop
     ebc[6] = 1 if strand else 0
     ebc[7] = 1 if clipped else 0

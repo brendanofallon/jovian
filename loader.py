@@ -188,8 +188,7 @@ class PregenLoader:
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt in self.pathpairs:
-            logger.info(f"Got {src}")
-            yield self.item(src), self.item(tgt), self.item(vaftgt), None
+            yield self.item(src).float(), self.item(tgt).long(), self.item(vaftgt), None
 
 
 
@@ -449,17 +448,17 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
             logger.info(f"Loaded {count} tensors from {csv}")
         if count == max_to_load:
             logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf)
             allsrc = []
             alltgt = []
             alltgtvaf = []
 
     if len(allsrc):
-        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
     logger.info(f"Done loading {count} tensors from {csv}")
 
 
