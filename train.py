@@ -218,7 +218,7 @@ def train_epochs(epochs,
 
             if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
-                checkpoint_name = modelparts[0] + f"_epoch{epoch}" + modelparts[1]
+                checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
                 torch.save(model.to('cpu').state_dict(), checkpoint_name)
 
@@ -352,5 +352,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
+                 checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  eval_batches=eval_batches)
 
