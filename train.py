@@ -329,12 +329,15 @@ def train(config, output_model, input_model, epochs, **kwargs):
     if 'cuda' in str(DEVICE):
         logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
     conf = load_train_conf(config)
-    train_sets = [(c['bam'], c['labels']) for c in conf['data']]
+    # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
     if kwargs.get("datadir") is not None:
         logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
-        dataloader = loader.PregenLoader(DEVICE, kwargs.get("datadir"))
+        dataloader = loader.PregenLoader(DEVICE,
+                                         kwargs.get("datadir"),
+                                         threads=kwargs.get('threads'),
+                                         max_decomped_batches=kwargs.get('max_decomp_batches'))
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
         dataloader = loader.BWASimLoader(DEVICE,

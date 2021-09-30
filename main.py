@@ -386,10 +386,12 @@ def main():
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
     trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=10, type=int)
     trainparser.add_argument("-lr", "--learning-rate", help="Initial learning rate", default=0.001, type=float)
-    trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
+    trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4)
+    trainparser.add_argument("-md", "--max-decomp-batches",
+                             help="Max number batches to decompress and store in memory at once", default=20)
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")
