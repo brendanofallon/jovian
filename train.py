@@ -120,9 +120,9 @@ def calc_val_accuracy(valpaths, model):
         count = 0
         vaf_mse_sum = 0
         for srcpath, tgtpath, vaftgtpath in valpaths:
-            src = util.unzip_load(srcpath, DEVICE)
-            tgt = util.unzip_load(tgtpath, DEVICE)
-            vaf = util.unzip_load(vaftgtpath, DEVICE)
+            src = util.tensor_from_file(srcpath, DEVICE)
+            tgt = util.tensor_from_file(tgtpath, DEVICE)
+            vaf = util.tensor_from_file(vaftgtpath, DEVICE)
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
@@ -168,7 +168,7 @@ def train_epochs(epochs,
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
 
-
+    valpaths = []
     try:
         if val_dir:
             logger.info(f"Using validation data in {val_dir}")
@@ -181,7 +181,7 @@ def train_epochs(epochs,
     except Exception as ex:
         logger.warning(f"Error loading validation samples, will not have any validation data for this run {ex}")
         valpaths = []
-
+    
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
@@ -206,7 +206,7 @@ def train_epochs(epochs,
                 "epoch": epoch,
                 "trainingloss": loss,
                 "trainmatch": train_accuracy,
-                "valmatch": val_accuracy,
+                "valmatch": val_accuracy.item(),
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
