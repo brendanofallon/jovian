@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from collections import defaultdict
 import gzip
+import lz4
 import io
 
 import scipy.stats as stats
@@ -165,17 +166,18 @@ class PregenLoader:
             return torch.load(path, map_location=self.device)
 
         if path in self.cache:
-            return torch.load(io.BytesIO(gzip.decompress(self.cache[path])), map_location=self.device)
+            return torch.load(io.BytesIO(lz4.frame.decompress(self.cache[path])), map_location=self.device)
         elif len(self.cache) < self.max_cache_size:
             with open(path, 'rb') as fh:
                 data = fh.read()
                 self.cache[path] = data
-                return torch.load(io.BytesIO(gzip.decompress(data)), map_location=self.device)
+                return torch.load(io.BytesIO(lz4.frame.decompress(data)), map_location=self.device)
         else:
             return util.unzip_load(path, self.device)
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt in self.pathpairs:
+            logger.info(f"Got {src}")
             yield self.item(src), self.item(tgt), self.item(vaftgt), None
 
 

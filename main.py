@@ -97,8 +97,6 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
         if midstart < v.pos < midend:
             known_vars.append(v)
 
-
-
     pred_vars = []
     for v in vcf.aln_to_vars(refseqstr, util.readstr(predictions)):
         if midstart < v.pos < midend:
