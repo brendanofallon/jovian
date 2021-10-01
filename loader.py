@@ -9,6 +9,7 @@ from collections import defaultdict
 from itertools import chain
 import gzip
 import lz4.frame
+from datetime import datetime
 
 try:
     import blosc
@@ -28,7 +29,6 @@ import bwasim
 from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample, ensure_dim
 import sim
 import util
-
 
 
 class ReadLoader:
@@ -105,9 +105,14 @@ class WeightedLoader:
             idx = np.random.choice(range(self.src.shape[0]), size=batch_size, replace=True, p=self.weights)
             yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
 
+
 def decomp_single(path):
-    with open(path, 'rb') as fh:
-        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
+    if str(path).endswith('.lz4'):
+        with open(path, 'rb') as fh:
+            return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
+    else:
+        return torch.load(path, map_location='cpu')
+
 
 def decompress_multi(paths, threads):
     """
@@ -115,9 +120,13 @@ def decompress_multi(paths, threads):
     but keep them on the CPU
     :returns : List of Tensors (all on CPU)
     """
+    start = datetime.now()
     with mp.Pool(threads) as pool:
         result = pool.map(decomp_single, paths)
+        elapsed = datetime.now() - start
+        logger.info(f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds()/len(result):.3f} secs per item)")
         return result
+
 
 class PregenLoader:
 
@@ -137,6 +146,7 @@ class PregenLoader:
         self.pathpairs = self._find_files()
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
+        logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -159,7 +169,7 @@ class PregenLoader:
     def _find_tgt(self, suffix, files):
         found = None
         for tgt in files:
-            tsuf = tgt.name.split("_")[-1]
+            tsuf = tgt.name.split("_")[-1].split(".")[0]
             if tsuf == suffix:
                 if found:
                     raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
@@ -177,7 +187,7 @@ class PregenLoader:
         allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
         pairs = []
         for src in allsrc:
-            suffix = src.name.split("_")[-1]
+            suffix = src.name.split("_")[-1].split(".")[0]
             tgt = self._find_tgt(suffix, alltgt)
             vaftgt = self._find_tgt(suffix, allvaftgt)
             pairs.append((src, tgt, vaftgt))
