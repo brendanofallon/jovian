@@ -369,6 +369,7 @@ def main():
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
+    genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     genparser.set_defaults(func=pregen)
@@ -389,9 +390,9 @@ def main():
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
-    trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4)
+    trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
     trainparser.add_argument("-md", "--max-decomp-batches",
-                             help="Max number batches to decompress and store in memory at once", default=20)
+                             help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")
