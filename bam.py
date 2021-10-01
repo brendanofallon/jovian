@@ -1,5 +1,6 @@
 
 import random
+import traceback
 
 import torch
 import logging
@@ -119,10 +120,10 @@ def target_string_to_tensor(bases):
 
 def pad_zeros(pre, data, post):
     if pre:
-        prepad = torch.zeros(pre, data.shape[-1])
+        prepad = torch.zeros(pre, data.shape[-1], dtype=data.dtype)
         data = torch.cat((prepad, data))
     if post:
-        postpad = torch.zeros(post, data.shape[-1])
+        postpad = torch.zeros(post, data.shape[-1], dtype=data.dtype)
         data = torch.cat((data, postpad))
     return data
 
@@ -268,11 +269,12 @@ def encode_pileup3(reads, start, end):
     everything = []
     for read in reads:
         try:
-            readencoded = [enc for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
+            readencoded = [enc.char() for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))
         except Exception as ex:
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")
-            continue
+            traceback.print_exception(type(ex), ex, ex.__traceback__)
+            raise ex
 
     return torch.stack(everything).transpose(0,1), torch.tensor(isalt)
 
@@ -287,13 +289,13 @@ def ensure_dim(readtensor, seqdim, readdim):
     if readtensor.shape[0] >= seqdim:
         readtensor = readtensor[0:seqdim, :, :]
     else:
-        pad = torch.zeros(seqdim - readtensor.shape[0], readtensor.shape[1], readtensor.shape[2])
+        pad = torch.zeros(seqdim - readtensor.shape[0], readtensor.shape[1], readtensor.shape[2], dtype=readtensor.dtype)
         readtensor = torch.cat((readtensor, pad), dim=0)
 
     if readtensor.shape[1] >= readdim:
         readtensor = readtensor[:, 0:readdim, :]
     else:
-        pad = torch.zeros(readtensor.shape[0], readdim - readtensor.shape[1], readtensor.shape[2])
+        pad = torch.zeros(readtensor.shape[0], readdim - readtensor.shape[1], readtensor.shape[2], dtype=readtensor.dtype)
         readtensor = torch.cat((readtensor, pad), dim=1)
     return readtensor
 

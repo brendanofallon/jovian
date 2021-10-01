@@ -326,7 +326,7 @@ def trim_pileuptensor(src, tgt, width):
     """
     assert src.shape[0] == tgt.shape[-1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
     if src.shape[0] < width:
-        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
+        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2], dtype=src.dtype)
         src = torch.cat((src, z))
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1]).long()
         tgt = torch.cat((tgt, t), dim=1)
