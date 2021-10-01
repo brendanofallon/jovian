@@ -6,8 +6,10 @@ import random
 import math
 from pathlib import Path
 from collections import defaultdict
+from itertools import chain
 import gzip
 import lz4.frame
+from datetime import datetime
 
 try:
     import blosc
@@ -27,7 +29,6 @@ import bwasim
 from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample, ensure_dim
 import sim
 import util
-
 
 
 class ReadLoader:
@@ -105,17 +106,47 @@ class WeightedLoader:
             yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
 
 
+def decomp_single(path):
+    if str(path).endswith('.lz4'):
+        with open(path, 'rb') as fh:
+            return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
+    else:
+        return torch.load(path, map_location='cpu')
+
+
+def decompress_multi(paths, threads):
+    """
+    Read & decompress all of the items in the paths with lz4, then load them into Tensors
+    but keep them on the CPU
+    :returns : List of Tensors (all on CPU)
+    """
+    start = datetime.now()
+    with mp.Pool(threads) as pool:
+        result = pool.map(decomp_single, paths)
+        elapsed = datetime.now() - start
+        logger.info(f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds()/len(result):.3f} secs per item)")
+        return result
+
+
 class PregenLoader:
 
-    def __init__(self, device, datadir, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
+    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
+        """
+        Create a new loader that reads tensors from a 'pre-gen' directory
+        :param device: torch.device
+        :param datadir: Directory to read data from
+        :param threads: Max threads to use for decompressing data
+        :param max_decomped_batches: Maximum number of batches to decompress at once. Increase this on machines with tons of RAM
+        """
         self.device = device
         self.datadir = Path(datadir)
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = self._find_files()
-        self.cache = {} # Maps filenames to data, experimental
-        self.max_cache_size = 10000 # ? No idea what makes sense here
+        self.threads = threads
+        self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
+        logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -132,12 +163,13 @@ class PregenLoader:
             if sample not in val_samples:
                 newdata.append(sample)
         self.pathpairs = newdata
+        logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
     def _find_tgt(self, suffix, files):
         found = None
         for tgt in files:
-            tsuf = tgt.name.split("_")[-1]
+            tsuf = tgt.name.split("_")[-1].split(".")[0]
             if tsuf == suffix:
                 if found:
                     raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
@@ -155,7 +187,7 @@ class PregenLoader:
         allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
         pairs = []
         for src in allsrc:
-            suffix = src.name.split("_")[-1]
+            suffix = src.name.split("_")[-1].split(".")[0]
             tgt = self._find_tgt(suffix, alltgt)
             vaftgt = self._find_tgt(suffix, allvaftgt)
             pairs.append((src, tgt, vaftgt))
@@ -175,20 +207,32 @@ class PregenLoader:
                 self.cache[path] = data
             return torch.load(io.BytesIO(decomp_func(data)), map_location=self.device)
 
-    def item(self, path):
-        if str(path).endswith('.gz'):
-            decomp_func = gzip.decompress
-        elif str(path).endswith('.lz4'):
-            decomp_func = lz4.frame.decompress
-        elif str(path).endswith('.blp'):
-            decomp_func = blosc.decompress
-        else:
-            decomp_func = lambda x: x
-        return self._from_cache(path, decomp_func)
+    # def item(self, path):
+    #     if str(path).endswith('.gz'):
+    #         decomp_func = gzip.decompress
+    #     elif str(path).endswith('.lz4'):
+    #         decomp_func = lz4.frame.decompress
+    #     elif str(path).endswith('.blp'):
+    #         decomp_func = blosc.decompress
+    #     else:
+    #         decomp_func = lambda x: x
+    #     return self._from_cache(path, decomp_func)
 
     def iter_once(self, batch_size):
-        for src, tgt, vaftgt in self.pathpairs:
-            yield self.item(src), self.item(tgt), self.item(vaftgt), None
+        """
+        Make one pass over the training data, in this case all of the files in the 'data dir'
+        Training data is compressed and on disk, which makes it slow. To increase performance we
+        load / decomp several batches in parallel, then train over each decompressed batch
+        sequentially
+        """
+        for i in range(0, len(self.pathpairs), self.max_decomped):
+            paths = self.pathpairs[i:i+self.max_decomped]
+            decomped = decompress_multi(chain.from_iterable(paths), self.threads)
+
+            for j in range(0, len(decomped), 3):
+                src, tgt, vaftgt = decomped[j:j+3]
+                yield src.to(self.device).float(), tgt.to(self.device).long(), vaftgt.to(self.device), None
+
 
 
 
@@ -282,7 +326,7 @@ def trim_pileuptensor(src, tgt, width):
     """
     assert src.shape[0] == tgt.shape[-1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
     if src.shape[0] < width:
-        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2])
+        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2], dtype=src.dtype)
         src = torch.cat((src, z))
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1]).long()
         tgt = torch.cat((tgt, t), dim=1)
@@ -448,17 +492,17 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
             logger.info(f"Loaded {count} tensors from {csv}")
         if count == max_to_load:
             logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf)
             allsrc = []
             alltgt = []
             alltgtvaf = []
 
     if len(allsrc):
-        yield torch.stack(allsrc), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
     logger.info(f"Done loading {count} tensors from {csv}")
 
 

@@ -7,6 +7,7 @@ from collections import defaultdict, Counter
 from pathlib import Path
 from string import ascii_letters, digits
 import gzip
+import lz4.frame
 
 import pysam
 import torch
@@ -101,8 +102,6 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
     for v in vcf.aln_to_vars(refseqstr, altseq):
         if midstart < v.pos < midend:
             known_vars.append(v)
-
-
 
     pred_vars = []
     for v in vcf.aln_to_vars(refseqstr, util.readstr(predictions)):
@@ -210,7 +209,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
         logger.info(f"Saving batch {i} with uid {uid}")
         for data, prefix in zip([src, tgt, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
-            with gzip.open(output_dir / f"{prefix}_{uid}-{i}.pt.gz", "wb") as fh:
+            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
 
 def pregen(config, **kwargs):
@@ -375,6 +374,7 @@ def main():
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
+    genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     genparser.set_defaults(func=pregen)
@@ -390,12 +390,14 @@ def main():
     trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
-    trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=0, type=int)
+    trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=10, type=int)
     trainparser.add_argument("-lr", "--learning-rate", help="Initial learning rate", default=0.001, type=float)
-    trainparser.add_argument("-m", "--max-to-load", help="Max number of input tensors to load", type=int, default=1e9)
     trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
+    trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
+    trainparser.add_argument("-md", "--max-decomp-batches",
+                             help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")

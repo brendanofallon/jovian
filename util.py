@@ -7,6 +7,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     import blosc
 except ImportError:
