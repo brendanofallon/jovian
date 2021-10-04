@@ -19,6 +19,9 @@ from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
 import wandb
 
+wandb.init(project='variant-transformer', entity='arup-rnd')
+
+
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 

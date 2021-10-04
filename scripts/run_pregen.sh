@@ -19,7 +19,7 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_all_upsample5k
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_all_upsample1k
 
 mkdir -p $DEST
 

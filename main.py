@@ -24,11 +24,6 @@ import model
 import sim
 import util
 import vcf
-
-import wandb
-
-wandb.init(project='variant-transformer', entity='arup-rnd')
-
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
