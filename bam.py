@@ -343,7 +343,11 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
     altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
     assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
-    return reads_encoded, refseq, altseq
+
+    ref_encoded = string_to_tensor(refseq)
+    encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
+
+    return encoded_with_ref, refseq, altseq
 
 
 def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_samples):
@@ -375,4 +379,8 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
         if ref == alt:
             assert refseq == altseq, "Ref == alt allele, but ref sequence didn't match alt sequence!"
         assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
-        yield reads_encoded, refseq, altseq
+
+        ref_encoded = string_to_tensor(refseq)
+        encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
+
+        yield encoded_with_ref, refseq, altseq
