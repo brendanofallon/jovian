@@ -343,7 +343,8 @@ def assign_class_indexes(rows):
     Iterate over every row in rows and create a list of class indexes for each element
     , where class index is currently row.vtype-row.status. So a class will be something like
     snv-TP or small_del-FP, and each class gets a unique number
-    :returns : List of class indexes across rows
+    :returns : 1. List of class indexes across rows.
+               2. A dictionary keyed by class index and valued by class names.
     """
     classcount = 0
     classes = defaultdict(int)
@@ -357,10 +358,11 @@ def assign_class_indexes(rows):
             classcount += 1
             classes[clz] = idx
         idxs.append(idx)
-    return idxs
+    class_names = {v: k for k, v in classes.items()}
+    return idxs, class_names
 
 
-def resample_classes(classes, rows, vals_per_class=100):
+def resample_classes(classes, class_names, rows, vals_per_class=100):
     """
     Randomly sample each class so that there are 'vals_per_class' members of each class
     then return a list of class assignments and the selected rows
@@ -373,13 +375,16 @@ def resample_classes(classes, rows, vals_per_class=100):
     result_classes = []
     for clz, classrows in byclass.items():
         # If there are MORE instances on this class than we want, grab a random sample of them
+        logger.info(f"Variant class {class_names[clz]} contains {len(classrows)} variants")
         if len(classrows) > vals_per_class:
+            logger.info(f"Randomly sampling {vals_per_class} variants for variant class {class_names[clz]}")
             rows = random.sample(classrows, vals_per_class)
             result_rows.extend(rows)
             result_classes.extend([clz] * vals_per_class)
         else:
             # If there are FEWER instances of the class than we want, then loop over them
             # repeatedly - no random sampling since that might ignore a few of the precious few samples we do have
+            logger.info(f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class} {class_names[clz]} variants")
             for i in range(vals_per_class):
                 result_classes.append(clz)
                 idx = i % len(classrows)
@@ -397,8 +402,10 @@ def upsample_labels(rows, vals_per_class):
     :param vals_per_class: Number of instances to retain for each class
     :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
     """
-    label_idxs = np.array(assign_class_indexes(rows))
-    label_idxs, rows = resample_classes(label_idxs, rows, vals_per_class=vals_per_class)
+    label_idxs, label_names = assign_class_indexes(rows)
+    label_idxs, rows = resample_classes(
+        np.array(label_idxs), label_names, rows, vals_per_class=vals_per_class
+    )
     classes, counts = np.unique(label_idxs, return_counts=True)
 
     freqs = 1.0 / (np.min(1.0/counts) * counts)
@@ -428,7 +435,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
 
-    labels = [l for _, l in pd.read_csv(csv).iterrows()]
+    labels = [l for _, l in pd.read_csv(csv, dtype={'chrom': str, 'filters': str}).iterrows()]
     upsampled_labels = upsample_labels(labels, vals_per_class=vals_per_class)
     logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {csv}")
     for row in upsampled_labels:
