@@ -216,6 +216,7 @@ def pregen(config, **kwargs):
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
+    vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
     processes = kwargs.get('threads', 1)
     if kwargs.get("sim"):
@@ -232,7 +233,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generating training data using config from {config}")
         dataloaders = [
-            loader.LazyLoader([(c['bam'], c['labels'])], conf['reference'], reads_per_pileup, samples_per_pos)
+            loader.LazyLoader([(c['bam'], c['labels'])], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
         ]
 
@@ -372,6 +373,7 @@ def main():
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
+    genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int)
     genparser.set_defaults(func=pregen)
 
     evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")
