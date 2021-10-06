@@ -60,11 +60,12 @@ class LazyLoader:
     Useful for 'pre-gen' where we just want to iterate over everything once and save it to a file
     """
 
-    def __init__(self, bamlabelpairs, reference, reads_per_pileup, samples_per_pos):
+    def __init__(self, bamlabelpairs, reference, reads_per_pileup, samples_per_pos, vals_per_class):
         self.bamlabels = bamlabelpairs
         self.reference = reference
         self.reads_per_pileup = reads_per_pileup
         self.samples_per_pos = samples_per_pos
+        self.vals_per_class = vals_per_class
 
     def iter_once(self, batch_size):
         for bam, labels in self.bamlabels:
@@ -75,6 +76,7 @@ class LazyLoader:
                                           batch_size,
                                           self.reads_per_pileup,
                                           self.samples_per_pos,
+                                          self.vals_per_class,
                                           max_to_load=1e9):
                 yield src, tgt, vaftgt, None
 
@@ -467,7 +469,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
 
 
 
-def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
+def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, vals_per_class, max_to_load=1e9):
     """
     Generator for creating batches of src, tgt (data and label) tensors from a CSV file
 
@@ -477,13 +479,13 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     :param chunk_size: Number of samples / instances to include in one generated tensor
     :param max_reads_per_aln: Max read depth per tensor (defines index 2 of tensor)
     :param samples_per_pos: Randomly resample reads this many times, max, per position
+    :param vals_per_class: 
     :returns : Generator of src, tgt tensor tuples
     """
     allsrc = []
     alltgt = []
     alltgtvaf = []
     count = 0
-    vals_per_class = 1000
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}")
     for enc, tgt, status, vtype, vaf in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
