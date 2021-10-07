@@ -237,7 +237,7 @@ def train_epochs(epochs,
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
-                torch.save(model.to('cpu').state_dict(), checkpoint_name)
+                torch.save(model.state_dict(), checkpoint_name)
 
 
         logger.info(f"Training completed after {epoch} epochs")
