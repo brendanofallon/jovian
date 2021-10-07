@@ -152,3 +152,85 @@ class VarTransformerAltMask(nn.Module):
 
         pred_vaf = altmask.mean(dim=1)
         return output, pred_vaf
+
+
+class AltPredictorConv(nn.Module):
+
+    def __init__(self, readnum, feats, device):
+        super().__init__()
+        self.device = device
+        self.l1 = nn.Linear(feats + 4 + 5, 10)
+        self.l2 = nn.Linear(10, 10)
+        self.conv1 = nn.Conv2d(in_channels=feats + 4 + 5 + 10, out_channels=10, kernel_size=(1, 5), padding='same')
+        self.fc1 = nn.Linear(10 + feats, 10)
+        self.fc2 = nn.Linear(10, 1)
+
+        self.elu = torch.nn.ELU()
+
+    def forward(self, x, emit=False):
+        x = x.to(self.device)
+        # r is 1 if base is a match with the ref sequence, otherwise 0
+        r = (x[:, :, :, 0:4] * x[:, :, 0:1, 0:4]).sum(dim=-1)  # x[:, :, 0:1..] is the reference seq
+        z = torch.cat((r.unsqueeze(-1), x[:, :, :, :]), dim=3).to(self.device)
+
+        # Compute the mean base usage across reads at every position, and join this with the features list for everything
+        b = (x[:, :, :, :]).mean(dim=2)
+        b[:, :, 0:4] = b[:, :, 0:4] / (b[:, :, 0:4].sum(dim=-1).unsqueeze(-1) + 0.001)
+        bx = torch.cat((b.unsqueeze(2).expand(-1, -1, x.shape[2], -1), z), dim=3).to(self.device)
+
+        # Take the features for every read pos, then compute read-level features by taking a mean of the features across the reads
+        y = self.elu(self.l1(bx))
+        y = self.elu(self.l2(y) + y)
+        ymean = y.mean(dim=2).unsqueeze(2)
+        z = torch.cat((ymean.expand(-1, -1, x.shape[2], -1), bx), dim=3).to(self.device)
+
+        cx = self.elu(self.conv1(z.transpose(3, 1))).transpose(1,
+                                                               3)  # Features must be in second dimension (we use it as 'channels')
+        cxz = torch.cat((cx, x), dim=3).to(self.device)
+        #         print(f"cx: {cx.shape}")
+
+        x = self.elu(self.fc1(cxz)).squeeze(-1)
+        x = 4 * self.elu(self.fc2(
+            x))  # Important that this is an ELU and not ReLU activation since it must be able to produce negative values, and the factor of 4 makes them even more negative which translates into something closer to zero after sigmoid()
+        x = torch.sigmoid(x.max(dim=1)[0]).squeeze(-1)
+        return x
+
+
+
+class VarTransformerFixedAltMask(nn.Module):
+
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, device='cpu'):
+        super().__init__()
+        self.device = device
+        self.embed_dim = nhead * 20
+        self.altpredictor = AltPredictorConv(read_depth, feature_count, device).to(self.device).requires_grad_(False)
+        if altpredictor_sd is not None:
+            logger.info(f"Loading altpredictor statedict from {altpredictor_sd}")
+            self.altpredictor.load_state_dict(torch.load(altpredictor_sd))
+
+        self.fc1 = nn.Linear(read_depth * feature_count, self.embed_dim)
+        self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
+        self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
+        self.elu = torch.nn.ELU()
+
+    def forward(self, src):
+        altmask = self.altpredictor(src)
+
+        # Force the first read in each batch to have weight = 1, because this is the reference read but we _dont_ want to mask it
+        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(self.device), altmask[:, 1:]), dim=1)
+        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
+        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
+        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
+                              src.shape[3]).transpose(1, 2).to(self.device)
+
+        src = src * fullmask
+        src = src.flatten(start_dim=2)
+        src = self.elu(self.fc1(src))
+        src = self.pos_encoder(src)
+        output = self.transformer_encoder(src)
+        output = self.decoder(output)
+
+        pred_vaf = altmask.mean(dim=1)
+        return output, pred_vaf
