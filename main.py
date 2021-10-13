@@ -292,7 +292,7 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
 
 
     #masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(padded_reads.to(DEVICE))
+    seq_preds, _ = model(padded_reads.float().to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
@@ -324,10 +324,12 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     for i, row in pd.read_csv(labels).iterrows():
         if row.ngs_vaf < 0.05:
             vafgroup = "< 0.05"
-        elif 0.05 <= row.ngs_vaf < 0.15:
-            vafgroup = "0.05 - 0.15"
+        elif 0.05 <= row.ngs_vaf < 0.25:
+            vafgroup = "0.05 - 0.25"
+        elif 0.25 <= row.ngs_vaf < 0.50:
+            vafgroup = "0.25 - 0.50"
         else:
-            vafgroup = "> 0.15"
+            vafgroup = "> 0.50"
 
         labeltype = f"{row.vtype}-{row.status} {vafgroup}"
         if results[labeltype]['rows'] > 100:
