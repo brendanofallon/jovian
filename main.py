@@ -216,6 +216,7 @@ def pregen(config, **kwargs):
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
+    vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
     processes = kwargs.get('threads', 1)
     if kwargs.get("sim"):
@@ -232,7 +233,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generating training data using config from {config}")
         dataloaders = [
-            loader.LazyLoader([(c['bam'], c['labels'])], conf['reference'], reads_per_pileup, samples_per_pos)
+            loader.LazyLoader([(c['bam'], c['labels'])], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
         ]
 
@@ -291,7 +292,7 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
 
 
     #masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(padded_reads.to(DEVICE))
+    seq_preds, _ = model(padded_reads.float().to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
@@ -323,10 +324,12 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     for i, row in pd.read_csv(labels).iterrows():
         if row.ngs_vaf < 0.05:
             vafgroup = "< 0.05"
-        elif 0.05 <= row.ngs_vaf < 0.15:
-            vafgroup = "0.05 - 0.15"
+        elif 0.05 <= row.ngs_vaf < 0.25:
+            vafgroup = "0.05 - 0.25"
+        elif 0.25 <= row.ngs_vaf < 0.50:
+            vafgroup = "0.25 - 0.50"
         else:
-            vafgroup = "> 0.15"
+            vafgroup = "> 0.50"
 
         labeltype = f"{row.vtype}-{row.status} {vafgroup}"
         if results[labeltype]['rows'] > 100:
@@ -372,6 +375,7 @@ def main():
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
+    genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int)
     genparser.set_defaults(func=pregen)
 
     evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")
