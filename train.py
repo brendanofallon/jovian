@@ -17,9 +17,11 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-import wandb
+ENABLE_WANDB=False
 
-wandb.init(project='variant-transformer', entity='arup-rnd')
+if ENABLE_WANDB:
+    import wandb
+    wandb.init(project='variant-transformer', entity='arup-rnd')
 
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
@@ -171,10 +173,11 @@ def train_epochs(epochs,
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
 
-    wandb.config.learning_rate = init_learning_rate
-    wandb.config.batch_size = 64
-    wandb.config.read_depth = max_read_depth
-    wandb.watch(model)
+    if ENABLE_WANDB:
+        wandb.config.learning_rate = init_learning_rate
+        wandb.config.batch_size = 64
+        wandb.config.read_depth = max_read_depth
+        wandb.watch(model)
 
     valpaths = []
     try:
@@ -209,14 +212,15 @@ def train_epochs(epochs,
                 val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
-            wandb.log({
-                "epoch": epoch,
-                "trainingloss": loss,
-                "trainmatch": train_accuracy,
-                "valmatch": val_accuracy.item(),
-                "learning_rate": scheduler.get_last_lr()[0],
-                "epochtime": elapsed.total_seconds(),
-            })
+            if ENABLE_WANDB:
+                wandb.log({
+                    "epoch": epoch,
+                    "trainingloss": loss,
+                    "trainmatch": train_accuracy,
+                    "valmatch": val_accuracy.item(),
+                    "learning_rate": scheduler.get_last_lr()[0],
+                    "epochtime": elapsed.total_seconds(),
+                })
 
             scheduler.step()
             trainlogger.log({

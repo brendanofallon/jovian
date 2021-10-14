@@ -292,7 +292,7 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
 
 
     #masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(padded_reads.to(DEVICE))
+    seq_preds, _ = model(padded_reads.float().to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
