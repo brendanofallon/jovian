@@ -17,7 +17,10 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-ENABLE_WANDB=False
+ENABLE_WANDB=True
+
+if ENABLE_WANDB:
+    import wandb
 
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
@@ -147,7 +150,8 @@ def train_epochs(epochs,
                  statedict=None,
                  model_dest=None,
                  eval_batches=None,
-                 val_dir=None):
+                 val_dir=None,
+                 altpredictor_sd=None):
 
     attention_heads = 6
     transformer_dim = 300
@@ -157,7 +161,8 @@ def train_epochs(epochs,
                                     out_dim=4, 
                                     nhead=attention_heads, 
                                     d_hid=transformer_dim, 
-                                    n_encoder_layers=encoder_layers, 
+                                    n_encoder_layers=encoder_layers,
+                                    altpredictor_sd=altpredictor_sd,
                                     device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -179,6 +184,8 @@ def train_epochs(epochs,
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
 
     if ENABLE_WANDB:
+        import wandb
+        wandb.init(project='variant-transformer', entity='arup-rnd')
         wandb.config.learning_rate = init_learning_rate
         wandb.config.feats_per_read = feats_per_read
         wandb.config.batch_size = batch_size
@@ -186,6 +193,7 @@ def train_epochs(epochs,
         wandb.config.attn_heads = attention_heads
         wandb.config.transformer_dim = transformer_dim
         wandb.config.encoder_layers = encoder_layers
+        wandb.config.altpredictor = altpredictor_sd
         wandb.watch(model)
 
     valpaths = []
@@ -359,10 +367,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
     if 'cuda' in str(DEVICE):
         logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
  
-    if ENABLE_WANDB:
-        import wandb
-        wandb.init(project='variant-transformer', entity='arup-rnd')
-
     conf = load_train_conf(config)
     # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
@@ -391,5 +395,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
-                 eval_batches=eval_batches)
+                 eval_batches=eval_batches,
+                 altpredictor_sd=kwargs.get('altpredictor'),
+                 )
 
