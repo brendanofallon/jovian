@@ -316,7 +316,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     summary information about PPA / PPV, etc
     """
     max_read_depth = 300
-    feats_per_read = 8
+    feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_train_conf(config)
 
