@@ -183,6 +183,7 @@ def iterate_bases(rec):
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
+        readpos = i/150 if not rec.is_reverse else 1.0 - i/150
         yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
@@ -251,7 +252,7 @@ def encode_pileup3(reads, start, end):
     # maxref = max(alnstart(r) + r.query_length for r in reads)
     isalt = ["alt" in r.query_name for r in reads]
     everything = []
-    for read in reads:
+    for readnum, read in enumerate(reads):
         try:
             readencoded = [enc.char() for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))

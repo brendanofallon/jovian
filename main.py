@@ -364,6 +364,13 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
             print(f"\t{t} : {count}")
 
 
+def print_pileup(path, idx, target=None, **kwargs):
+    src = util.tensor_from_file(path, device='cpu')
+    logger.info(f"Loaded tensor with shape {src.shape}")
+    s = util.to_pileup(src[idx, :, :, :])
+    print(s)
+
+
 def main():
     parser = argparse.ArgumentParser()
     subparser = parser.add_subparsers()
@@ -377,6 +384,11 @@ def main():
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int)
     genparser.set_defaults(func=pregen)
+
+    printpileupparser = subparser.add_parser("print", help="Print a tensor pileup")
+    printpileupparser.add_argument("-p", "--path", help="Path to saved tensor data", required=True)
+    printpileupparser.add_argument("-i", "--idx", help="Index of item in batch to emit", required=True, type=int)
+    printpileupparser.set_defaults(func=print_pileup)
 
     evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")
     evalbamparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
