@@ -19,10 +19,6 @@ from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
 ENABLE_WANDB=False
 
-if ENABLE_WANDB:
-    import wandb
-    wandb.init(project='variant-transformer', entity='arup-rnd')
-
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
@@ -153,7 +149,16 @@ def train_epochs(epochs,
                  eval_batches=None,
                  val_dir=None):
 
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
+    attention_heads = 6
+    transformer_dim = 300
+    encoder_layers = 2
+    model = VarTransformerAltMask(read_depth=max_read_depth, 
+                                    feature_count=feats_per_read, 
+                                    out_dim=4, 
+                                    nhead=attention_heads, 
+                                    d_hid=transformer_dim, 
+                                    n_encoder_layers=encoder_layers, 
+                                    device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -175,8 +180,12 @@ def train_epochs(epochs,
 
     if ENABLE_WANDB:
         wandb.config.learning_rate = init_learning_rate
-        wandb.config.batch_size = 64
+        wandb.config.feats_per_read = feats_per_read
+        wandb.config.batch_size = batch_size
         wandb.config.read_depth = max_read_depth
+        wandb.config.attn_heads = attention_heads
+        wandb.config.transformer_dim = transformer_dim
+        wandb.config.encoder_layers = encoder_layers
         wandb.watch(model)
 
     valpaths = []
@@ -349,6 +358,11 @@ def train(config, output_model, input_model, epochs, **kwargs):
     logger.info(f"Found torch device: {DEVICE}")
     if 'cuda' in str(DEVICE):
         logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
+ 
+    if ENABLE_WANDB:
+        import wandb
+        wandb.init(project='variant-transformer', entity='arup-rnd')
+
     conf = load_train_conf(config)
     # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
     #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)

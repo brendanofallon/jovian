@@ -27,13 +27,14 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
-from train import train, load_train_conf
+from train import train
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
                     level=logging.INFO) # handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
+
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
@@ -190,6 +191,14 @@ def eval_sim(statedict, config, **kwargs):
             # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
 
 
+def load_conf(confyaml):
+    logger.info(f"Loading configuration from {confyaml}")
+    conf = yaml.safe_load(open(confyaml).read())
+    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
+    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    return conf
+
+
 def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
@@ -212,7 +221,7 @@ def pregen(config, **kwargs):
     Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
     (this takes a long time)
     """
-    conf = load_train_conf(config)
+    conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
@@ -231,7 +240,7 @@ def pregen(config, **kwargs):
                                      clip_prob=0.01)]
         dataloaders[0].batches_in_epoch = batches
     else:
-        logger.info(f"Generating training data using config from {config}")
+        logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
         dataloaders = [
             loader.LazyLoader([(c['bam'], c['labels'])], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
@@ -382,7 +391,7 @@ def main():
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
-    genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int)
+    genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
     genparser.set_defaults(func=pregen)
 
     printpileupparser = subparser.add_parser("print", help="Print a tensor pileup")
