@@ -147,6 +147,7 @@ def train_epochs(epochs,
                  feats_per_read=8,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
+                 train_altpredictor=False,
                  statedict=None,
                  model_dest=None,
                  eval_batches=None,
@@ -163,6 +164,7 @@ def train_epochs(epochs,
                                     d_hid=transformer_dim, 
                                     n_encoder_layers=encoder_layers,
                                     altpredictor_sd=altpredictor_sd,
+                                    train_altpredictor=train_altpredictor,
                                     device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -194,6 +196,7 @@ def train_epochs(epochs,
         wandb.config.transformer_dim = transformer_dim
         wandb.config.encoder_layers = encoder_layers
         wandb.config.altpredictor = altpredictor_sd
+        wandb.config.train_altpredictor = train_altpredictor
         wandb.watch(model)
 
     valpaths = []
@@ -229,12 +232,17 @@ def train_epochs(epochs,
                 val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
+
+            if type(val_accuracy) == torch.Tensor:
+                val_accuracy = val_accuracy.item()
+
+
             if ENABLE_WANDB:
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
-                    "trainmatch": train_accuracy,
-                    "valmatch": val_accuracy.item(),
+                    "train_accuracy": train_accuracy,
+                    "val_accuarcy": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                 })
@@ -243,8 +251,8 @@ def train_epochs(epochs,
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
-                "trainmatch": train_accuracy,
-                "valmatch": val_accuracy.item(),
+                "train_accuracy": train_accuracy,
+                "val_accuracy": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
@@ -396,6 +404,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  eval_batches=eval_batches,
+                 val_dir=kwargs.get('val_dir'),
                  altpredictor_sd=kwargs.get('altpredictor'),
                  )
 
