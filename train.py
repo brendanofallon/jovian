@@ -94,7 +94,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
-        loss.backward(retain_graph=vaf_criterion is not None)
+        loss.backward()
 
         #if vaf_criterion is not None and np.random.rand() < 0.10:
         #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
