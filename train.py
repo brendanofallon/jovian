@@ -372,7 +372,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
     """
     logger.info(f"Found torch device: {DEVICE}")
     if 'cuda' in str(DEVICE):
-        logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
+        for idev in range(torch.cuda.device_count()):
+            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
  
     conf = load_train_conf(config)
     # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
