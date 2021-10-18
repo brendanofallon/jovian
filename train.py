@@ -17,7 +17,8 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-ENABLE_WANDB=True
+
+ENABLE_WANDB=False
 
 if ENABLE_WANDB:
     import wandb
@@ -94,7 +95,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
-        loss.backward(retain_graph=vaf_criterion is not None)
+        loss.backward(retain_graph=False)
 
         #if vaf_criterion is not None and np.random.rand() < 0.10:
         #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
