@@ -17,11 +17,7 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-ENABLE_WANDB=True
-
-if ENABLE_WANDB:
-    import wandb
-
+ENABLE_WANDB=False
 
 DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
@@ -183,6 +179,7 @@ def train_epochs(epochs,
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
 
+
     if ENABLE_WANDB:
         import wandb
         wandb.init(project='variant-transformer', entity='arup-rnd')
@@ -229,12 +226,15 @@ def train_epochs(epochs,
                 val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
+            if val_accuracy is not None and type(val_accuracy) == torch.Tensor:
+                val_accuracy = val_accuracy.item()
+
             if ENABLE_WANDB:
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
                     "trainmatch": train_accuracy,
-                    "valmatch": val_accuracy.item(),
+                    "valmatch": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                 })
@@ -244,7 +244,7 @@ def train_epochs(epochs,
                 "epoch": epoch,
                 "trainingloss": loss,
                 "trainmatch": train_accuracy,
-                "valmatch": val_accuracy.item(),
+                "valmatch": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })

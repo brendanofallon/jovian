@@ -5,6 +5,7 @@ import logging
 import torch
 import torch.nn as nn
 import math
+import positional_encodings as pse
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +140,12 @@ class VarTransformerAltMask(nn.Module):
         else:
             logger.info("Not loading altpredictor params, initializing randomly")
 
-        self.fc1 = nn.Linear(read_depth * feature_count, self.embed_dim)
-        self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        self.first_hidden_dim = 5
+        self.fc1 = nn.Linear(feature_count, self.first_hidden_dim)
+        self.fc2 = nn.Linear(read_depth * self.first_hidden_dim, self.embed_dim)
+
+        # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        self.pos_encoder = pse.PositionalEncoding2D(self.first_hidden_dim)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
         self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
@@ -148,10 +153,6 @@ class VarTransformerAltMask(nn.Module):
 
     def forward(self, src):
         altmask = self.altpredictor(src).to(self.device)
-        #amx = 0.95 / altmask.max(dim=1)[0]
-        #amin = altmask.min(dim=1)[0].unsqueeze(1).expand((-1, altmask.shape[1]))
-        #altmask = (altmask - amin) * amx.unsqueeze(1).expand(
-        #    (-1, altmask.shape[1])) + amin
 
         # Force the first read in each batch to have weight = 1, because this is the reference read but we _dont_ want to mask it
         predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(self.device), altmask[:, 1:]), dim=1)
@@ -161,9 +162,9 @@ class VarTransformerAltMask(nn.Module):
                               src.shape[3]).transpose(1, 2).to(self.device)
 
         src = src * fullmask
-        src = src.flatten(start_dim=2)
         src = self.elu(self.fc1(src))
-        src = self.pos_encoder(src)
+        src = self.pos_encoder(src) # Should happen *before* any sort of flattening.. but after first linear layer??
+        src = self.elu(self.fc2(src.flatten(start_dim=2)))
         output = self.transformer_encoder(src)
         output = self.decoder(output)
 
