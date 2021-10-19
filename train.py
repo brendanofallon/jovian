@@ -173,8 +173,6 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict))
     model.train()
     batch_size = 64
-    if hasattr(torch, "cuda") and torch.cuda.is_available():
-        batch_size *= torch.cuda.device_count()
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
