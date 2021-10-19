@@ -145,7 +145,7 @@ class PregenLoader:
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
-        self.pathpairs = self._find_files()
+        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -168,32 +168,32 @@ class PregenLoader:
         logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
-    def _find_tgt(self, suffix, files):
-        found = None
-        for tgt in files:
-            tsuf = tgt.name.split("_")[-1].split(".")[0]
-            if tsuf == suffix:
-                if found:
-                    raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-                found = tgt
-        if found is None:
-            raise ValueError(f"Could not find matching tgt file for {suffix}")
-        return found
-
-    def _find_files(self):
-        """
-        Match up all src / tgt / vaftgt files and store them as tuples in a list
-        """
-        allsrc = list(self.datadir.glob(self.src_prefix + "*"))
-        alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
-        allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
-        pairs = []
-        for src in allsrc:
-            suffix = src.name.split("_")[-1].split(".")[0]
-            tgt = self._find_tgt(suffix, alltgt)
-            vaftgt = self._find_tgt(suffix, allvaftgt)
-            pairs.append((src, tgt, vaftgt))
-        return pairs
+    # def _find_tgt(self, suffix, files):
+    #     found = None
+    #     for tgt in files:
+    #         tsuf = tgt.name.split("_")[-1].split(".")[0]
+    #         if tsuf == suffix:
+    #             if found:
+    #                 raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
+    #             found = tgt
+    #     if found is None:
+    #         raise ValueError(f"Could not find matching tgt file for {suffix}")
+    #     return found
+    #
+    # def _find_files(self):
+    #     """
+    #     Match up all src / tgt / vaftgt files and store them as tuples in a list
+    #     """
+    #     allsrc = list(self.datadir.glob(self.src_prefix + "*"))
+    #     alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
+    #     allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
+    #     pairs = []
+    #     for src in allsrc:
+    #         suffix = src.name.split("_")[-1].split(".")[0]
+    #         tgt = self._find_tgt(suffix, alltgt)
+    #         vaftgt = self._find_tgt(suffix, allvaftgt)
+    #         pairs.append((src, tgt, vaftgt))
+    #     return pairs
 
     def _from_cache(self, path, decomp_func):
         """
