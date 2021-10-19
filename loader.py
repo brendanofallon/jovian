@@ -226,16 +226,32 @@ class PregenLoader:
         Training data is compressed and on disk, which makes it slow. To increase performance we
         load / decomp several batches in parallel, then train over each decompressed batch
         sequentially
+        :param batch_size: The desired number of samples in a minibatch. The actual number of samples in a minibatch is 64 * math.ceil(batch_size/64)
         """
+        src, tgt, vaftgt = [], [], []
+
+        def batch_tuple():
+            return (
+                torch.cat(src, dim=0).to(self.device).float(),
+                torch.cat(tgt, dim=0).to(self.device).long(),
+                torch.cat(vaftgt, dim=0).to(self.device),
+                None,
+            )
+                    
         for i in range(0, len(self.pathpairs), self.max_decomped):
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi(chain.from_iterable(paths), self.threads)
 
             for j in range(0, len(decomped), 3):
-                src, tgt, vaftgt = decomped[j:j+3]
-                yield src.to(self.device).float(), tgt.to(self.device).long(), vaftgt.to(self.device), None
+                src.append(decomped[j])
+                tgt.append(decomped[j+1])
+                vaftgt.append(decomped[j+2])
+                if len(src) >= math.ceil(batch_size / 64):
+                    yield batch_tuple()
+                    src, tgt, vaftgt = [], [], []
 
-
+        if len(src) > 0:
+            yield batch_tuple()
 
 
 class MultiLoader:
