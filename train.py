@@ -147,6 +147,7 @@ def train_epochs(epochs,
                  feats_per_read=8,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
+                 train_altpredictor=False,
                  statedict=None,
                  model_dest=None,
                  eval_batches=None,
@@ -163,6 +164,7 @@ def train_epochs(epochs,
                                     d_hid=transformer_dim, 
                                     n_encoder_layers=encoder_layers,
                                     altpredictor_sd=altpredictor_sd,
+                                    train_altpredictor=train_altpredictor,
                                     device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -178,7 +180,7 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "trainmatch", "valmatch", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "learning_rate", "epochtime"])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
@@ -194,6 +196,7 @@ def train_epochs(epochs,
         wandb.config.transformer_dim = transformer_dim
         wandb.config.encoder_layers = encoder_layers
         wandb.config.altpredictor = altpredictor_sd
+        wandb.config.train_altpredictor = train_altpredictor
         wandb.watch(model)
 
     valpaths = []
@@ -230,12 +233,15 @@ def train_epochs(epochs,
                 val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
+            if type(val_accuracy) == torch.Tensor:
+                val_accuracy = val_accuracy.item()
+
             if ENABLE_WANDB:
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
-                    "trainmatch": train_accuracy,
-                    "valmatch": val_accuracy.item(),
+                    "train_accuracy": train_accuracy,
+                    "val_accuarcy": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                 })
@@ -244,8 +250,8 @@ def train_epochs(epochs,
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
-                "trainmatch": train_accuracy,
-                "valmatch": val_accuracy.item(),
+                "train_accuracy": train_accuracy,
+                "val_accuracy": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
@@ -387,7 +393,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-    eval_batches = None #create_eval_batches(25, 200, 145, conf)
+
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=300,
