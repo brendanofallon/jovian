@@ -8,6 +8,7 @@ from pathlib import Path
 from string import ascii_letters, digits
 import gzip
 import lz4.frame
+import tempfile
 
 import pysam
 import torch
@@ -208,13 +209,25 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
 
+    metafile = tempfile.NamedTemporaryFile(
+        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
+    )
+    print(f"The following items are from {dl.csv}", file=metafile)
+
     logger.info(f"Saving tensors to {output_dir}/")
-    for i, (src, tgt, vaftgt, _) in enumerate(dataloader.iter_once(batch_size)):
+    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         logger.info(f"Saving batch {i} with uid {uid}")
         for data, prefix in zip([src, tgt, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
+        for idx, varinfo in enumerate(varsinfo):
+            print(f"Item {idx} in {uid}-{i} is from {varinfo}", file=metafile)
+        metafile.flush()
+
+    metafile.close()
+    return metafile.name
+
 
 def pregen(config, **kwargs):
     """
@@ -227,6 +240,7 @@ def pregen(config, **kwargs):
     samples_per_pos = kwargs.get('samples_per_pos', 10)
     vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
+    metadata = kwargs.get("metadata", "pregen_metadata.txt")
     processes = kwargs.get('threads', 1)
     if kwargs.get("sim"):
         batches = 50
@@ -242,23 +256,26 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
         dataloaders = [
-            loader.LazyLoader([(c['bam'], c['labels'])], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+            loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
         ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
-    if processes == 1:
-        for dl in dataloaders:
-            pregen_one_sample(dl, batch_size, output_dir)
-    else:
-        futures = []
-        with ProcessPoolExecutor(max_workers=processes) as executor:
+ 
+    with open(metadata, "wb") as metafh:
+        if processes == 1:
             for dl in dataloaders:
-                futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
+                sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
+                util.concat_metafile(sample_metafile, metafh)
+        else:
+            futures = []
+            with ProcessPoolExecutor(max_workers=processes) as executor:
+                for dl in dataloaders:
+                    futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
             for fut in futures:
-                fut.result()
-
+                sample_metafile = fut.result()
+                util.concat_metafile(sample_metafile, metafh)
 
     # output_dir = Path(kwargs.get('dir'))
     # output_dir.mkdir(parents=True, exist_ok=True)
