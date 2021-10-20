@@ -5,6 +5,7 @@ import lz4.frame
 import io
 from pathlib import Path
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,19 @@ logger = logging.getLogger(__name__)
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
+
+
+def concat_metafile(sample_metafile, dest_metafh):
+    """
+    Concate the given sample metadata file to destination metadata file. 
+    The sample metadata file is also removed as a side effect!
+
+    :param smaple_metafile: the path of sample metadata
+    :param dest_metafh: the file handle of destination metadata file.
+    """
+    with open(sample_metafile, 'rb') as sample_fh:
+        shutil.copyfileobj(sample_fh, dest_metafh)
+    os.unlink(sample_meta)
 
 
 def find_tgt(suffix, files):
