@@ -9,6 +9,7 @@ from string import ascii_letters, digits
 import gzip
 import lz4.frame
 import tempfile
+from datetime import datetime
 
 import pysam
 import torch
@@ -240,7 +241,8 @@ def pregen(config, **kwargs):
     samples_per_pos = kwargs.get('samples_per_pos', 10)
     vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
-    metadata = kwargs.get("metadata", "pregen_metadata.txt")
+    str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
+    metadata = kwargs.get("metadata", f"pregen_{str_time}.txt")
     processes = kwargs.get('threads', 1)
     if kwargs.get("sim"):
         batches = 50
