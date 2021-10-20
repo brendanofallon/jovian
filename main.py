@@ -212,7 +212,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
-    print(f"The following items are from {dl.csv}", file=metafile)
+    print(f"The following items are from {dataloader.csv}", file=metafile)
 
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
