@@ -241,8 +241,10 @@ def pregen(config, **kwargs):
     samples_per_pos = kwargs.get('samples_per_pos', 10)
     vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
-    str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
-    metadata = kwargs.get("metadata", f"pregen_{str_time}.txt")
+    metadata_file = kwargs.get("metadata_file", None)
+    if metadata_file is None:
+        str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
+        metadata_file = f"pregen_{str_time}.txt"
     processes = kwargs.get('threads', 1)
     if kwargs.get("sim"):
         batches = 50
@@ -265,7 +267,7 @@ def pregen(config, **kwargs):
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
  
-    with open(metadata, "wb") as metafh:
+    with open(metadata_file, "wb") as metafh:
         if processes == 1:
             for dl in dataloaders:
                 sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
@@ -411,6 +413,7 @@ def main():
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
+    genparser.add_argument("-mf", "--metadata-file", help="The metadata file that records each row in the encoded tensor files and the variant from which that row is derived. The name pregen_{time}.txt will be used if not specified.")
     genparser.set_defaults(func=pregen)
 
     printpileupparser = subparser.add_parser("print", help="Print a tensor pileup")
