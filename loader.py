@@ -226,17 +226,9 @@ class PregenLoader:
         Training data is compressed and on disk, which makes it slow. To increase performance we
         load / decomp several batches in parallel, then train over each decompressed batch
         sequentially
-        :param batch_size: The desired number of samples in a minibatch. The actual number of samples in a minibatch is 64 * math.ceil(batch_size/64)
+        :param batch_size: The number of samples in a minibatch.
         """
         src, tgt, vaftgt = [], [], []
-
-        def batch_tuple():
-            return (
-                torch.cat(src, dim=0).to(self.device).float(),
-                torch.cat(tgt, dim=0).to(self.device).long(),
-                torch.cat(vaftgt, dim=0).to(self.device),
-                None,
-            )
                     
         for i in range(0, len(self.pathpairs), self.max_decomped):
             paths = self.pathpairs[i:i+self.max_decomped]
@@ -246,13 +238,42 @@ class PregenLoader:
                 src.append(decomped[j])
                 tgt.append(decomped[j+1])
                 vaftgt.append(decomped[j+2])
-                if len(src) >= math.ceil(batch_size / 64):
-                    yield batch_tuple()
-                    src, tgt, vaftgt = [], [], []
+
+            total_size = sum([s.shape[0] for s in src])
+            if total_size < batch_size:
+                continue
+
+            src_t = torch.cat(src, dim=0)
+            tgt_t = torch.cat(tgt, dim=0)
+            vaftgt_t = torch.cat(vaftgt, dim=0)
+
+            nbatch = total_size // batch_size
+            remain = total_size % batch_size
+
+            for n in range(0, nbatch):
+                start = n * batch_size
+                end = (n + 1) * batch_size
+                yield (
+                    src_t[start:end].to(self.device).float(),
+                    tgt_t[start:end].to(self.device).long(),
+                    vaftgt_t[start:end].to(self.device), 
+                    None
+                ) 
+            if remain:
+                src = [src_t[nbatch * batch_size:]]
+                tgt = [tgt_t[nbatch * batch_size:]]
+                vaftgt = [vaftgt_t[nbatch*batch_size:]]
+            else:
+                src, tgt, vaftgt = [], [], []
 
         if len(src) > 0:
-            yield batch_tuple()
-
+            yield (
+                torch.cat(src, dim=0).to(self.device).float(),
+                torch.cat(tgt, dim=0).to(self.device).long(),
+                torch.cat(vaftgt, dim=0).to(self.device),
+                None
+            )
+                  
 
 class MultiLoader:
     """
