@@ -17,7 +17,7 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-ENABLE_WANDB=True
+ENABLE_WANDB=False
 
 if ENABLE_WANDB:
     import wandb
@@ -209,7 +209,8 @@ def train_epochs(epochs,
     try:
         if val_dir:
             logger.info(f"Using validation data in {val_dir}")
-            valpaths = load_train_data(val_dir)
+            valpaths = util.find_files(val_dir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt')
+            logger.info(f"Found {len(valpaths)} batches in {val_dir}")
         else:
             logger.info(f"No val. dir. provided retaining a few training samples for validation")
             valpaths = dataloader.retain_val_samples(fraction=0.05)
@@ -238,10 +239,8 @@ def train_epochs(epochs,
                 val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
-
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
-
 
             if ENABLE_WANDB:
                 wandb.log({
@@ -402,7 +401,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-    eval_batches = None #create_eval_batches(25, 200, 145, conf)
+
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=300,
@@ -411,7 +410,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
-                 eval_batches=eval_batches,
                  val_dir=kwargs.get('val_dir'),
                  altpredictor_sd=kwargs.get('altpredictor'),
                  )
