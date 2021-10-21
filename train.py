@@ -17,7 +17,7 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-ENABLE_WANDB=False
+ENABLE_WANDB=True
 
 if ENABLE_WANDB:
     import wandb
