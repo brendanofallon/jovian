@@ -241,8 +241,10 @@ class PregenLoader:
 
             total_size = sum([s.shape[0] for s in src])
             if total_size < batch_size:
+                # We need to decompress more data to make a batch
                 continue
 
+            # Make a big tensor.
             src_t = torch.cat(src, dim=0)
             tgt_t = torch.cat(tgt, dim=0)
             vaftgt_t = torch.cat(vaftgt, dim=0)
@@ -250,6 +252,7 @@ class PregenLoader:
             nbatch = total_size // batch_size
             remain = total_size % batch_size
 
+            # Slice the big tensors for batches
             for n in range(0, nbatch):
                 start = n * batch_size
                 end = (n + 1) * batch_size
@@ -259,7 +262,9 @@ class PregenLoader:
                     vaftgt_t[start:end].to(self.device), 
                     None
                 ) 
+
             if remain:
+                # The remaining data points will be in next batch. 
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
                 vaftgt = [vaftgt_t[nbatch * batch_size:]]
@@ -267,6 +272,7 @@ class PregenLoader:
                 src, tgt, vaftgt = [], [], []
 
         if len(src) > 0:
+            # We need to yield the last batch.
             yield (
                 torch.cat(src, dim=0).to(self.device).float(),
                 torch.cat(tgt, dim=0).to(self.device).long(),
