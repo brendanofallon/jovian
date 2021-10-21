@@ -262,7 +262,7 @@ class PregenLoader:
             if remain:
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
-                vaftgt = [vaftgt_t[nbatch*batch_size:]]
+                vaftgt = [vaftgt_t[nbatch * batch_size:]]
             else:
                 src, tgt, vaftgt = [], [], []
 
