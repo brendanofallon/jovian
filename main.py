@@ -213,7 +213,6 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
-    print(f"The following items are from {dataloader.csv}", file=metafile)
 
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
@@ -223,7 +222,10 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
         for idx, varinfo in enumerate(varsinfo):
-            print(f"Item {idx} in {uid}-{i} is from {varinfo}", file=metafile)
+            meta_str = "\t".join([
+                f"{idx}", f"{uid}-{i}", "\t".join(varinfo), dataloader.csv
+            ]) 
+            print(meta_str, file=metafile)
         metafile.flush()
 
     metafile.close()
@@ -266,8 +268,10 @@ def pregen(config, **kwargs):
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
- 
+
+    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "label"]
     with open(metadata_file, "wb") as metafh:
+        metafh.write(("\t".join(meta_headers) + "\n").encode())
         if processes == 1:
             for dl in dataloaders:
                 sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
