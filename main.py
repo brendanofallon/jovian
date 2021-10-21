@@ -27,7 +27,7 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
-from train import train
+from train import train, load_train_conf
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -318,14 +318,14 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     max_read_depth = 300
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
-    conf = load_train_conf(config)
+    conf = load_conf(config)
 
     reference = pysam.FastaFile(conf['reference'])
 
     altpredictor = None
 
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
-    model.load_state_dict(torch.load(statedict))
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE, train_altpredictor=True).to(DEVICE)
+    model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
     aln = pysam.AlignmentFile(bam)
