@@ -153,7 +153,8 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None,
                  val_dir=None,
-                 altpredictor_sd=None):
+                 altpredictor_sd=None,
+                 batch_size=64):
 
     attention_heads = 6
     transformer_dim = 300
@@ -172,7 +173,6 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 64
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
@@ -406,5 +406,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  train_altpredictor=kwargs.get('train_altpredictor', False),
                  val_dir=kwargs.get('val_dir'),
                  altpredictor_sd=kwargs.get('altpredictor'),
+                 batch_size=kwargs.get("batch_size"),
                  )
 
