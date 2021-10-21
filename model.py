@@ -195,8 +195,8 @@ class VarTransformerAltMask(nn.Module):
         self.fc1 = nn.Linear(feature_count, self.first_hidden_dim)
         self.fc2 = nn.Linear(read_depth * self.first_hidden_dim, self.embed_dim)
 
-        # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
-        self.pos_encoder = PositionalEncoding2D(self.first_hidden_dim, self.device)
+        self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        #self.pos_encoder = PositionalEncoding2D(self.first_hidden_dim, self.device)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
         self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
@@ -218,8 +218,8 @@ class VarTransformerAltMask(nn.Module):
 
         src = src * fullmask
         src = self.elu(self.fc1(src))
-        src = self.pos_encoder(src) # Should happen *before* any sort of flattening.. but after first linear layer??
         src = self.elu(self.fc2(src.flatten(start_dim=2)))
+        src = self.pos_encoder(src) # Should happen *before* any sort of flattening.. but after first linear layer??
         output = self.transformer_encoder(src)
         output = self.decoder(output)
 
