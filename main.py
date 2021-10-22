@@ -211,7 +211,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     vaf_prefix = "vaftgt"
 
     metafile = tempfile.NamedTemporaryFile(
-        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".csv"
+        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
 
     logger.info(f"Saving tensors to {output_dir}/")
@@ -269,7 +269,7 @@ def pregen(config, **kwargs):
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
 
-    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "label"]
+    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "vaf", "label"]
     with open(metadata_file, "wb") as metafh:
         metafh.write(("\t".join(meta_headers) + "\n").encode())
         if processes == 1:
