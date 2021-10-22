@@ -540,7 +540,7 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
         allsrc.append(src)
         alltgt.append(tgt)
         alltgtvaf.append(vaf)
-        varsinfo.append([f"{row.chrom}", f"{row.pos}", row.ref, row.alt])
+        varsinfo.append([f"{row.chrom}", f"{row.pos}", row.ref, row.alt, f"{vaf}"])
         count += 1
         if count % 100 == 0:
             logger.info(f"Loaded {count} tensors from {csv}")
