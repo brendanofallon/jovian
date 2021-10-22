@@ -108,6 +108,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             logger.warning(f"Loss is NAN!!")
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
+    logger.info(f"Trained {batch+1} batches in total.")
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
@@ -152,7 +153,8 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None,
                  val_dir=None,
-                 altpredictor_sd=None):
+                 altpredictor_sd=None,
+                 batch_size=64):
 
     attention_heads = 6
     transformer_dim = 300
@@ -175,9 +177,6 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict))
     model.train()
-    batch_size = 64
-    if hasattr(torch, "cuda") and torch.cuda.is_available():
-        batch_size *= torch.cuda.device_count()
 
     criterion = nn.CrossEntropyLoss()
     vaf_crit = nn.MSELoss()
@@ -410,7 +409,9 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
+                 train_altpredictor=kwargs.get('train_altpredictor', False),
                  val_dir=kwargs.get('val_dir'),
                  altpredictor_sd=kwargs.get('altpredictor'),
+                 batch_size=kwargs.get("batch_size"),
                  )
 
