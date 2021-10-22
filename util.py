@@ -3,6 +3,7 @@ import numpy as np
 import gzip
 import lz4.frame
 import io
+from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,39 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+
+def find_tgt(suffix, files):
+    found = None
+    for tgt in files:
+        tsuf = tgt.name.split("_")[-1].split(".")[0]
+        if tsuf == suffix:
+            if found:
+                raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
+            found = tgt
+            break
+    if found is None:
+        raise ValueError(f"Could not find matching tgt file for {suffix}")
+    return found
+
+
+def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt'):
+    """
+    Examine files in datadir and match up all src / tgt / vaftgt files and store them as tuples in a list
+    :returns : List of (src, tgt, vaftgt) tuples of matched files
+    """
+    datadir = Path(datadir)
+    allsrc = list(datadir.glob(src_prefix + "*"))
+    alltgt = list(datadir.glob(tgt_prefix + "*"))
+    allvaftgt = list(datadir.glob(vaftgt_prefix + "*"))
+    pairs = []
+    for src in allsrc:
+        suffix = src.name.split("_")[-1].split(".")[0]
+        tgt = find_tgt(suffix, alltgt)
+        alltgt.remove(tgt)
+        vaftgt = find_tgt(suffix, allvaftgt)
+        allvaftgt.remove(vaftgt)
+        pairs.append((src, tgt, vaftgt))
+    return pairs
 
 def tensor_from_lz4(path, device):
     return torch.load(io.BytesIO(lz4.frame.decompress(path)), map_location=device)

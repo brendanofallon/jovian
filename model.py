@@ -133,16 +133,20 @@ class AltPredictor(nn.Module):
 
 class VarTransformerAltMask(nn.Module):
 
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, device='cpu'):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, train_altpredictor=False, device='cpu'):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * 20
+        self.train_altpredictor = train_altpredictor
         self.altpredictor = AltPredictor(read_depth, feature_count, device)
         if altpredictor_sd is not None:
-            logger.info(f"Loading altpredictor statedict from {altpredictor_sd}")
+            logger.info(f"Loading altpredictor statedict from {altpredictor_sd}, training={train_altpredictor}")
             self.altpredictor.load_state_dict(torch.load(altpredictor_sd))
         else:
-            logger.info("Not loading altpredictor params, initializing randomly")
+            logger.info(f"Not loading altpredictor params, initializing randomly, training={train_altpredictor}")
+
+        if train_altpredictor == False and altpredictor_sd is None:
+            raise ValueError("Turning off training for altpredictor but NOT supplying a state_dict for it seems crazy (the params will be randomly initialized but never trained)")
 
         self.fc1 = nn.Linear(read_depth * feature_count, self.embed_dim)
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
@@ -152,7 +156,12 @@ class VarTransformerAltMask(nn.Module):
         self.elu = torch.nn.ELU()
 
     def forward(self, src):
-        altmask = self.altpredictor(src).to(self.device)
+        if self.train_altpredictor:
+            altmask = self.altpredictor(src).to(self.device)
+        else:
+            with torch.no_grad():
+                altmask = self.altpredictor(src).to(self.device)
+                
         #amx = 0.95 / altmask.max(dim=1)[0]
         #amin = altmask.min(dim=1)[0].unsqueeze(1).expand((-1, altmask.shape[1]))
         #altmask = (altmask - amin) * amx.unsqueeze(1).expand(

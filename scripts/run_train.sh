@@ -22,8 +22,8 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/onc_giabs_capturewide/chr20_21/pregen_chr20_21/
-VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/onc_giabs_capturewide/all_chr_except_20_21/pregen_all_chr_except_20_21/
+VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_no_chr20_21_subsample/
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/onc_giabs_capturewide/all_chr_except_20_21/pregen_all_chr_except_20_21/
 
 
 ALTPREDICTOR=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/altpredictor_pleasant-dew-54-299.sd
@@ -41,7 +41,7 @@ $PYTHON $ds2s train \
     -ap $ALTPREDICTOR \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
-    -o /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/ninefeats_nochr2021_pleasant-dew-ap.model \
+    -o /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/ninefeats_nochr2021_pleasant-dew-ap_notrain_ap.model \
     --threads 16 \
-    --max-decomp-batches 20
+    --max-decomp-batches 60
 

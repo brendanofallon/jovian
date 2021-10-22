@@ -145,7 +145,7 @@ class PregenLoader:
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
-        self.pathpairs = self._find_files()
+        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -168,32 +168,32 @@ class PregenLoader:
         logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
-    def _find_tgt(self, suffix, files):
-        found = None
-        for tgt in files:
-            tsuf = tgt.name.split("_")[-1].split(".")[0]
-            if tsuf == suffix:
-                if found:
-                    raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-                found = tgt
-        if found is None:
-            raise ValueError(f"Could not find matching tgt file for {suffix}")
-        return found
-
-    def _find_files(self):
-        """
-        Match up all src / tgt / vaftgt files and store them as tuples in a list
-        """
-        allsrc = list(self.datadir.glob(self.src_prefix + "*"))
-        alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
-        allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
-        pairs = []
-        for src in allsrc:
-            suffix = src.name.split("_")[-1].split(".")[0]
-            tgt = self._find_tgt(suffix, alltgt)
-            vaftgt = self._find_tgt(suffix, allvaftgt)
-            pairs.append((src, tgt, vaftgt))
-        return pairs
+    # def _find_tgt(self, suffix, files):
+    #     found = None
+    #     for tgt in files:
+    #         tsuf = tgt.name.split("_")[-1].split(".")[0]
+    #         if tsuf == suffix:
+    #             if found:
+    #                 raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
+    #             found = tgt
+    #     if found is None:
+    #         raise ValueError(f"Could not find matching tgt file for {suffix}")
+    #     return found
+    #
+    # def _find_files(self):
+    #     """
+    #     Match up all src / tgt / vaftgt files and store them as tuples in a list
+    #     """
+    #     allsrc = list(self.datadir.glob(self.src_prefix + "*"))
+    #     alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
+    #     allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
+    #     pairs = []
+    #     for src in allsrc:
+    #         suffix = src.name.split("_")[-1].split(".")[0]
+    #         tgt = self._find_tgt(suffix, alltgt)
+    #         vaftgt = self._find_tgt(suffix, allvaftgt)
+    #         pairs.append((src, tgt, vaftgt))
+    #     return pairs
 
     def _from_cache(self, path, decomp_func):
         """
@@ -226,17 +226,60 @@ class PregenLoader:
         Training data is compressed and on disk, which makes it slow. To increase performance we
         load / decomp several batches in parallel, then train over each decompressed batch
         sequentially
+        :param batch_size: The number of samples in a minibatch.
         """
+        src, tgt, vaftgt = [], [], []
+                    
         for i in range(0, len(self.pathpairs), self.max_decomped):
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi(chain.from_iterable(paths), self.threads)
 
             for j in range(0, len(decomped), 3):
-                src, tgt, vaftgt = decomped[j:j+3]
-                yield src.to(self.device).float(), tgt.to(self.device).long(), vaftgt.to(self.device), None
+                src.append(decomped[j])
+                tgt.append(decomped[j+1])
+                vaftgt.append(decomped[j+2])
 
+            total_size = sum([s.shape[0] for s in src])
+            if total_size < batch_size:
+                # We need to decompress more data to make a batch
+                continue
 
+            # Make a big tensor.
+            src_t = torch.cat(src, dim=0)
+            tgt_t = torch.cat(tgt, dim=0)
+            vaftgt_t = torch.cat(vaftgt, dim=0)
 
+            nbatch = total_size // batch_size
+            remain = total_size % batch_size
+
+            # Slice the big tensors for batches
+            for n in range(0, nbatch):
+                start = n * batch_size
+                end = (n + 1) * batch_size
+                yield (
+                    src_t[start:end].to(self.device).float(),
+                    tgt_t[start:end].to(self.device).long(),
+                    vaftgt_t[start:end].to(self.device), 
+                    None
+                ) 
+
+            if remain:
+                # The remaining data points will be in next batch. 
+                src = [src_t[nbatch * batch_size:]]
+                tgt = [tgt_t[nbatch * batch_size:]]
+                vaftgt = [vaftgt_t[nbatch * batch_size:]]
+            else:
+                src, tgt, vaftgt = [], [], []
+
+        if len(src) > 0:
+            # We need to yield the last batch.
+            yield (
+                torch.cat(src, dim=0).to(self.device).float(),
+                torch.cat(tgt, dim=0).to(self.device).long(),
+                torch.cat(vaftgt, dim=0).to(self.device),
+                None
+            )
+                  
 
 class MultiLoader:
     """
