@@ -29,7 +29,7 @@ def concat_metafile(sample_metafile, dest_metafh):
     """
     with open(sample_metafile, 'rb') as sample_fh:
         shutil.copyfileobj(sample_fh, dest_metafh)
-    os.unlink(sample_meta)
+    os.unlink(sample_metafile)
 
 
 def find_tgt(suffix, files):
