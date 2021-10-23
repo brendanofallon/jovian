@@ -23,7 +23,7 @@ if ENABLE_WANDB:
     import wandb
 
 
-DEVICE = torch.device("cuda:0") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
 class TrainLogger:
@@ -167,7 +167,11 @@ def train_epochs(epochs,
                                     n_encoder_layers=encoder_layers,
                                     altpredictor_sd=altpredictor_sd,
                                     train_altpredictor=train_altpredictor,
-                                    device=DEVICE).to(DEVICE)
+                                    device=DEVICE)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
+    model = model.to(DEVICE)
+
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -266,8 +270,8 @@ def train_epochs(epochs,
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
-                torch.save(model.state_dict(), checkpoint_name)
-
+                m = model.module if isinstance(model, nn.DataParallel) else model
+                torch.save(m.state_dict(), checkpoint_name)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
@@ -275,7 +279,8 @@ def train_epochs(epochs,
 
     if model_dest is not None:
         logger.info(f"Saving model state dict to {model_dest}")
-        torch.save(model.to('cpu').state_dict(), model_dest)
+        m = model.module if isinstance(model, nn.DataParallel) else model
+        torch.save(m.to('cpu').state_dict(), model_dest)
 
 
 def load_train_conf(confyaml):
@@ -373,7 +378,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
     """
     logger.info(f"Found torch device: {DEVICE}")
     if 'cuda' in str(DEVICE):
-        logger.info(f"CUDA device name: {torch.cuda.get_device_name(DEVICE)}")
+        for idev in range(torch.cuda.device_count()):
+            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
  
     conf = load_train_conf(config)
     # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
