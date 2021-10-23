@@ -108,15 +108,21 @@ class WeightedLoader:
             yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
 
 
-def decomp_single(path):
-    if str(path).endswith('.lz4'):
+def decomp_single(item):
+    """
+    Item can be either a path or bytes, if path then it is read as binary
+    Either way, we decompress with lz4 and return a torch.Tensor on the cpu
+    """
+    if type(item) == str:
         with open(path, 'rb') as fh:
-            return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
+            data = fh.read()
     else:
-        return torch.load(path, map_location='cpu')
+            data = item
+
+    return torch.load(io.BytesIO(lz4.frame.decompress(data)), map_location='cpu')
 
 
-def decompress_multi(paths, threads):
+def decompress_multi(items, threads):
     """
     Read & decompress all of the items in the paths with lz4, then load them into Tensors
     but keep them on the CPU
@@ -124,7 +130,7 @@ def decompress_multi(paths, threads):
     """
     start = datetime.now()
     with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, paths)
+        result = pool.map(decomp_single, items)
         elapsed = datetime.now() - start
         logger.info(f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds()/len(result):.3f} secs per item)")
         return result
@@ -132,23 +138,25 @@ def decompress_multi(paths, threads):
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
+    def __init__(self, device, datadir, threads, max_cache_size=1000, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
         """
         Create a new loader that reads tensors from a 'pre-gen' directory
         :param device: torch.device
+        :param max_cache_size: Max number of (compressed) files to store in RAM
         :param datadir: Directory to read data from
         :param threads: Max threads to use for decompressing data
         :param max_decomped_batches: Maximum number of batches to decompress at once. Increase this on machines with tons of RAM
         """
         self.device = device
         self.datadir = Path(datadir)
+        self.cache = util.SampleCache(max_cache_size=max_cache_size)
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
         self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
-        logger.info(f"Creating PreGen data loader with {self.threads} threads")
+        logger.info(f"Creating PreGen data loader with {self.threads} threads, max cache size: {max_cache_size}")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -168,57 +176,6 @@ class PregenLoader:
         logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
-    # def _find_tgt(self, suffix, files):
-    #     found = None
-    #     for tgt in files:
-    #         tsuf = tgt.name.split("_")[-1].split(".")[0]
-    #         if tsuf == suffix:
-    #             if found:
-    #                 raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-    #             found = tgt
-    #     if found is None:
-    #         raise ValueError(f"Could not find matching tgt file for {suffix}")
-    #     return found
-    #
-    # def _find_files(self):
-    #     """
-    #     Match up all src / tgt / vaftgt files and store them as tuples in a list
-    #     """
-    #     allsrc = list(self.datadir.glob(self.src_prefix + "*"))
-    #     alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
-    #     allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
-    #     pairs = []
-    #     for src in allsrc:
-    #         suffix = src.name.split("_")[-1].split(".")[0]
-    #         tgt = self._find_tgt(suffix, alltgt)
-    #         vaftgt = self._find_tgt(suffix, allvaftgt)
-    #         pairs.append((src, tgt, vaftgt))
-    #     return pairs
-
-    def _from_cache(self, path, decomp_func):
-        """
-        Attempt to retrieve the item with the given path from the cache, if it's not in the cache then add it
-        only if the cache size is less than self.max_cache_size
-        """
-        if path in self.cache:
-            return torch.load(io.BytesIO(decomp_func(self.cache[path])), map_location=self.device)
-        else:
-            with open(path, 'rb') as fh:
-                data = fh.read()
-            if len(self.cache) < self.max_cache_size:
-                self.cache[path] = data
-            return torch.load(io.BytesIO(decomp_func(data)), map_location=self.device)
-
-    # def item(self, path):
-    #     if str(path).endswith('.gz'):
-    #         decomp_func = gzip.decompress
-    #     elif str(path).endswith('.lz4'):
-    #         decomp_func = lz4.frame.decompress
-    #     elif str(path).endswith('.blp'):
-    #         decomp_func = blosc.decompress
-    #     else:
-    #         decomp_func = lambda x: x
-    #     return self._from_cache(path, decomp_func)
 
     def iter_once(self, batch_size):
         """
@@ -232,7 +189,14 @@ class PregenLoader:
                     
         for i in range(0, len(self.pathpairs), self.max_decomped):
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_multi(chain.from_iterable(paths), self.threads)
+            start = datetime.now()
+            bytes = []
+            for sample_paths in paths:
+                for path in sample_paths:
+                    bytes.append(self.cache[path])
+            elapsed = datetime.now() - start
+            logger.info(f"Loaded {len(bytes)} samples in {elapsed.total_seconds():.3f} seconds cache size: {len(self.cache)}")
+            decomped = decompress_multi(bytes, self.threads)
 
             for j in range(0, len(decomped), 3):
                 src.append(decomped[j])

@@ -390,6 +390,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
         dataloader = loader.PregenLoader(DEVICE,
                                          kwargs.get("datadir"),
                                          threads=kwargs.get('threads'),
+                                         max_cache_size=kwargs.get('max_cache_size', 1000),
                                          max_decomped_batches=kwargs.get('max_decomp_batches'))
     else:
         logger.info(f"Using on-the-fly training data from sim loader")

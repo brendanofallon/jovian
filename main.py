@@ -444,6 +444,7 @@ def main():
     trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
     trainparser.add_argument("-ap", "--altpredictor", help="The file to load altpredictor module from")
     trainparser.add_argument("-tap", "--train-altpredictor", help="Train altpredictor module", action='store_true')
+    trainparser.add_argument("-mc", "--max-cache-size", help="Max number of train data files to store in RAM", type=int, default=1000)
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)

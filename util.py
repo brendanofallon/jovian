@@ -19,6 +19,39 @@ INDEX_TO_BASE = [
 ]
 
 
+class SampleCache:
+    """
+    Stores raw (potentially compressed) bytes read from files in dictionary keyed by sample name
+    Doesn't decompress anything, this is just to help store stuff in RAM to save some IO traffic
+    """
+
+    def __init__(self, max_cache_size):
+        self.max_cache_size = max_cache_size
+        self.cache = {}
+
+    def get(self, key):
+        if key in self.cache:
+            data = self.cache[key]
+        elif len(self.cache) < self.max_cache_size:
+            with open(key, "rb") as fh:
+                self.cache[key] = fh.read()
+            data = self.cache[key]
+
+        return data
+
+    def __len__(self):
+        return len(self.cache)
+
+    def __getitem__(self, key):
+        return self.get(key)
+
+    def __contains__(self, key):
+        return key in self.cache
+
+
+
+
+
 def concat_metafile(sample_metafile, dest_metafh):
     """
     Concate the given sample metadata file to destination metadata file. 
@@ -64,6 +97,7 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
         allvaftgt.remove(vaftgt)
         pairs.append((src, tgt, vaftgt))
     return pairs
+
 
 def tensor_from_lz4(path, device):
     return torch.load(io.BytesIO(lz4.frame.decompress(path)), map_location=device)
