@@ -147,12 +147,10 @@ def train_epochs(epochs,
                  feats_per_read=8,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
-                 train_altpredictor=False,
                  statedict=None,
                  model_dest=None,
                  eval_batches=None,
-                 val_dir=None,
-                 altpredictor_sd=None):
+                 val_dir=None):
 
     attention_heads = 6
     transformer_dim = 300
@@ -163,8 +161,6 @@ def train_epochs(epochs,
                                     nhead=attention_heads, 
                                     d_hid=transformer_dim, 
                                     n_encoder_layers=encoder_layers,
-                                    altpredictor_sd=altpredictor_sd,
-                                    train_altpredictor=train_altpredictor,
                                     device=DEVICE).to(DEVICE)
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -195,8 +191,6 @@ def train_epochs(epochs,
         wandb.config.attn_heads = attention_heads
         wandb.config.transformer_dim = transformer_dim
         wandb.config.encoder_layers = encoder_layers
-        wandb.config.altpredictor = altpredictor_sd
-        wandb.config.train_altpredictor = train_altpredictor
         wandb.watch(model)
 
     valpaths = []
@@ -223,8 +217,7 @@ def train_epochs(epochs,
                                                   vaf_crit,
                                                   dataloader,
                                                   batch_size=batch_size,
-                                                  max_alt_reads=max_read_depth,
-                                                  altpredictor=None)
+                                                  max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
 
             if valpaths:
@@ -403,6 +396,5 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
-                 altpredictor_sd=kwargs.get('altpredictor'),
                  )
 

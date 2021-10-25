@@ -128,7 +128,7 @@ class AltPredictor(nn.Module):
 
 class VarTransformerAltMask(nn.Module):
 
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, train_altpredictor=False, device='cpu'):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * 20

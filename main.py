@@ -416,8 +416,6 @@ def main():
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
     trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
-    trainparser.add_argument("-ap", "--altpredictor", help="Max number of threads to use for decompression (torch may use more)", required=False)
-    trainparser.add_argument("-tap", "--train-altpredictor", help="Train altpredictor module", action='store_true')
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.set_defaults(func=train)
