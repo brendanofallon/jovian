@@ -16,7 +16,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="altmask_feats_in_mainmodel"
+GIT_BRANCH="transforming_loaders"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -35,7 +35,7 @@ LEARNING_RATE=0.0005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="test_altmask_in_main"
+RUN_NAME="shorten_seqlen_150"
 
 set -x
 
