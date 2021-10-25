@@ -134,11 +134,6 @@ class VarTransformerAltMask(nn.Module):
         self.embed_dim = nhead * 20
         self.conv_out_channels = 10
         self.fc1_hidden = 12
-        if altpredictor_sd is not None:
-            logger.info(f"Loading altpredictor statedict from {altpredictor_sd}, training={train_altpredictor}")
-            self.altpredictor.load_state_dict(torch.load(altpredictor_sd))
-        else:
-            logger.info(f"Not loading altpredictor params, initializing randomly, training={train_altpredictor}")
 
         self.conv1 = nn.Conv2d(in_channels=feature_count + 1,
                                out_channels=self.conv_out_channels,
