@@ -404,7 +404,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
-                 train_altpredictor=kwargs.get('train_altpredictor', False),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
                  )

@@ -26,7 +26,7 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/onc_giabs_capturewide/all_chr_except_20_21/pregen_all_chr_except_20_21/
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
 
 
 ALTPREDICTOR=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/altpredictor_pleasant-dew-54-299.sd
@@ -35,7 +35,7 @@ LEARNING_RATE=0.0005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="shorten_seqlen_150"
+RUN_NAME="test-shorten_seqlen_150"
 
 set -x
 
