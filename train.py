@@ -17,7 +17,7 @@ import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
 
-ENABLE_WANDB=False
+ENABLE_WANDB=True
 
 if ENABLE_WANDB:
     import wandb
@@ -148,12 +148,10 @@ def train_epochs(epochs,
                  feats_per_read=8,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
-                 train_altpredictor=False,
                  statedict=None,
                  model_dest=None,
                  eval_batches=None,
                  val_dir=None,
-                 altpredictor_sd=None,
                  batch_size=64):
 
     attention_heads = 6
@@ -165,8 +163,6 @@ def train_epochs(epochs,
                                     nhead=attention_heads, 
                                     d_hid=transformer_dim, 
                                     n_encoder_layers=encoder_layers,
-                                    altpredictor_sd=altpredictor_sd,
-                                    train_altpredictor=train_altpredictor,
                                     device=DEVICE)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
@@ -200,8 +196,6 @@ def train_epochs(epochs,
         wandb.config.attn_heads = attention_heads
         wandb.config.transformer_dim = transformer_dim
         wandb.config.encoder_layers = encoder_layers
-        wandb.config.altpredictor = altpredictor_sd
-        wandb.config.train_altpredictor = train_altpredictor
         wandb.watch(model)
 
     valpaths = []
@@ -228,8 +222,7 @@ def train_epochs(epochs,
                                                   vaf_crit,
                                                   dataloader,
                                                   batch_size=batch_size,
-                                                  max_alt_reads=max_read_depth,
-                                                  altpredictor=None)
+                                                  max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
 
             if valpaths:
@@ -413,7 +406,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  train_altpredictor=kwargs.get('train_altpredictor', False),
                  val_dir=kwargs.get('val_dir'),
-                 altpredictor_sd=kwargs.get('altpredictor'),
                  batch_size=kwargs.get("batch_size"),
                  )
 
