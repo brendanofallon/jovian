@@ -387,10 +387,12 @@ def train(config, output_model, input_model, epochs, **kwargs):
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
     if kwargs.get("datadir") is not None:
         logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
-        dataloader = loader.PregenLoader(DEVICE,
+        pregenloader = loader.PregenLoader(DEVICE,
                                          kwargs.get("datadir"),
                                          threads=kwargs.get('threads'),
                                          max_decomped_batches=kwargs.get('max_decomp_batches'))
+        dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
+
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
         dataloader = loader.BWASimLoader(DEVICE,

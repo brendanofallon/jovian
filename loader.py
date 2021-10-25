@@ -168,58 +168,6 @@ class PregenLoader:
         logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
-    # def _find_tgt(self, suffix, files):
-    #     found = None
-    #     for tgt in files:
-    #         tsuf = tgt.name.split("_")[-1].split(".")[0]
-    #         if tsuf == suffix:
-    #             if found:
-    #                 raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-    #             found = tgt
-    #     if found is None:
-    #         raise ValueError(f"Could not find matching tgt file for {suffix}")
-    #     return found
-    #
-    # def _find_files(self):
-    #     """
-    #     Match up all src / tgt / vaftgt files and store them as tuples in a list
-    #     """
-    #     allsrc = list(self.datadir.glob(self.src_prefix + "*"))
-    #     alltgt = list(self.datadir.glob(self.tgt_prefix + "*"))
-    #     allvaftgt = list(self.datadir.glob(self.vaftgt_prefix + "*"))
-    #     pairs = []
-    #     for src in allsrc:
-    #         suffix = src.name.split("_")[-1].split(".")[0]
-    #         tgt = self._find_tgt(suffix, alltgt)
-    #         vaftgt = self._find_tgt(suffix, allvaftgt)
-    #         pairs.append((src, tgt, vaftgt))
-    #     return pairs
-
-    def _from_cache(self, path, decomp_func):
-        """
-        Attempt to retrieve the item with the given path from the cache, if it's not in the cache then add it
-        only if the cache size is less than self.max_cache_size
-        """
-        if path in self.cache:
-            return torch.load(io.BytesIO(decomp_func(self.cache[path])), map_location=self.device)
-        else:
-            with open(path, 'rb') as fh:
-                data = fh.read()
-            if len(self.cache) < self.max_cache_size:
-                self.cache[path] = data
-            return torch.load(io.BytesIO(decomp_func(data)), map_location=self.device)
-
-    # def item(self, path):
-    #     if str(path).endswith('.gz'):
-    #         decomp_func = gzip.decompress
-    #     elif str(path).endswith('.lz4'):
-    #         decomp_func = lz4.frame.decompress
-    #     elif str(path).endswith('.blp'):
-    #         decomp_func = blosc.decompress
-    #     else:
-    #         decomp_func = lambda x: x
-    #     return self._from_cache(path, decomp_func)
-
     def iter_once(self, batch_size):
         """
         Make one pass over the training data, in this case all of the files in the 'data dir'
@@ -279,7 +227,27 @@ class PregenLoader:
                 torch.cat(vaftgt, dim=0).to(self.device),
                 None
             )
-                  
+
+
+class ShorteningLoader:
+    """
+    This loader shortens the sequence dimension (dimension 1 of src, 2 of tgt) to seq_len
+    It should be used to wrap another loader that actually does the loading
+    For instance:
+
+        loader = ShorteningLoader(PregenLoader(...), seq_len=100)
+
+    """
+    def __init__(self, wrapped_loader, seq_len):
+        self.wrapped_loader = wrapped_loader
+        self.seq_len = seq_len
+
+    def iter_once(self, batch_size):
+        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+            start = src.shape[1] // 2 - self.seq_len // 2
+            end = src.shape[1] // 2 + self.seq_len //2
+            yield src[:, start:end, :, :], tgt[:, :, start:end],  vaftgt, None
+
 
 class MultiLoader:
     """
