@@ -349,7 +349,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     altpredictor = None
 
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE, train_altpredictor=True).to(DEVICE)
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
@@ -442,8 +442,6 @@ def main():
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
     trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
-    trainparser.add_argument("-ap", "--altpredictor", help="The file to load altpredictor module from")
-    trainparser.add_argument("-tap", "--train-altpredictor", help="Train altpredictor module", action='store_true')
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
