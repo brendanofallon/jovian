@@ -60,25 +60,25 @@ class LazyLoader:
     Useful for 'pre-gen' where we just want to iterate over everything once and save it to a file
     """
 
-    def __init__(self, bamlabelpairs, reference, reads_per_pileup, samples_per_pos, vals_per_class):
-        self.bamlabels = bamlabelpairs
+    def __init__(self, bam, csv, reference, reads_per_pileup, samples_per_pos, vals_per_class):
+        self.bam = bam
+        self.csv = csv
         self.reference = reference
         self.reads_per_pileup = reads_per_pileup
         self.samples_per_pos = samples_per_pos
         self.vals_per_class = vals_per_class
 
     def iter_once(self, batch_size):
-        for bam, labels in self.bamlabels:
-            logger.info(f"Encoding tensors from {labels}")
-            for src, tgt, vaftgt in encode_chunks(bam,
+        logger.info(f"Encoding tensors from {self.bam} and {self.csv}")
+        for src, tgt, vaftgt, varsinfo in encode_chunks(self.bam,
                                           self.reference,
-                                          labels,
+                                          self.csv,
                                           batch_size,
                                           self.reads_per_pileup,
                                           self.samples_per_pos,
                                           self.vals_per_class,
                                           max_to_load=1e9):
-                yield src, tgt, vaftgt, None
+                yield src, tgt, vaftgt, varsinfo
 
 
 class WeightedLoader:
@@ -226,17 +226,60 @@ class PregenLoader:
         Training data is compressed and on disk, which makes it slow. To increase performance we
         load / decomp several batches in parallel, then train over each decompressed batch
         sequentially
+        :param batch_size: The number of samples in a minibatch.
         """
+        src, tgt, vaftgt = [], [], []
+                    
         for i in range(0, len(self.pathpairs), self.max_decomped):
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi(chain.from_iterable(paths), self.threads)
 
             for j in range(0, len(decomped), 3):
-                src, tgt, vaftgt = decomped[j:j+3]
-                yield src.to(self.device).float(), tgt.to(self.device).long(), vaftgt.to(self.device), None
+                src.append(decomped[j])
+                tgt.append(decomped[j+1])
+                vaftgt.append(decomped[j+2])
 
+            total_size = sum([s.shape[0] for s in src])
+            if total_size < batch_size:
+                # We need to decompress more data to make a batch
+                continue
 
+            # Make a big tensor.
+            src_t = torch.cat(src, dim=0)
+            tgt_t = torch.cat(tgt, dim=0)
+            vaftgt_t = torch.cat(vaftgt, dim=0)
 
+            nbatch = total_size // batch_size
+            remain = total_size % batch_size
+
+            # Slice the big tensors for batches
+            for n in range(0, nbatch):
+                start = n * batch_size
+                end = (n + 1) * batch_size
+                yield (
+                    src_t[start:end].to(self.device).float(),
+                    tgt_t[start:end].to(self.device).long(),
+                    vaftgt_t[start:end].to(self.device), 
+                    None
+                ) 
+
+            if remain:
+                # The remaining data points will be in next batch. 
+                src = [src_t[nbatch * batch_size:]]
+                tgt = [tgt_t[nbatch * batch_size:]]
+                vaftgt = [vaftgt_t[nbatch * batch_size:]]
+            else:
+                src, tgt, vaftgt = [], [], []
+
+        if len(src) > 0:
+            # We need to yield the last batch.
+            yield (
+                torch.cat(src, dim=0).to(self.device).float(),
+                torch.cat(tgt, dim=0).to(self.device).long(),
+                torch.cat(vaftgt, dim=0).to(self.device),
+                None
+            )
+                  
 
 class MultiLoader:
     """
@@ -461,7 +504,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
                 if minseqlen != encoded.shape[0]:
                     encoded = encoded[0:minseqlen, :, :]
 
-                yield encoded, tgt, row.status, row.vtype, row.exp_vaf
+                yield encoded, tgt, row
 
         except Exception as ex:
             logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
@@ -484,10 +527,12 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     allsrc = []
     alltgt = []
     alltgtvaf = []
+    varsinfo = []
     count = 0
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
-    for enc, tgt, status, vtype, vaf in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
+    for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
+        status, vtype, vaf = row.status, row.vtype, row.exp_vaf
         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
@@ -495,22 +540,25 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
         allsrc.append(src)
         alltgt.append(tgt)
         alltgtvaf.append(vaf)
+        varsinfo.append([f"{row.chrom}", f"{row.pos}", row.ref, row.alt, f"{vaf}"])
         count += 1
         if count % 100 == 0:
             logger.info(f"Loaded {count} tensors from {csv}")
         if count == max_to_load:
             logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf)
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf), varsinfo
             allsrc = []
             alltgt = []
             alltgtvaf = []
+            varsinfo = []
 
     if len(allsrc):
-        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf)
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+
     logger.info(f"Done loading {count} tensors from {csv}")
 
 
@@ -523,7 +571,8 @@ def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_t
     logger.info(f"Creating new data loader from {bampath}")
     counter = defaultdict(int)
     classes = []
-    for enc, tgt, status, vtype in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+    for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+        status, vtype = row.status, row.vtype
         label_class = "-".join((status, vtype))
         classes.append(label_class)
         counter[label_class] += 1
