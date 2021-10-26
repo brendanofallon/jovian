@@ -35,7 +35,7 @@ LEARNING_RATE=0.0005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="test-shorten_seqlen_150"
+RUN_NAME="test-shorten_seqlen_150-2"
 
 set -x
 
