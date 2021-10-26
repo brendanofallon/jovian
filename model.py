@@ -116,11 +116,6 @@ class AltPredictor(nn.Module):
 #         print(f"z: {z.shape}")
        
         cx = self.elu(self.conv1(z.transpose(3,1))).transpose(1,3)  # Features must be in second dimension (we use it as 'channels')
-        #pad = torch.zeros((cx.shape[0], x.shape[1] - cx.shape[1], cx.shape[2], cx.shape[3])).to(self.device)
-        #logger.info(f"Pad shape: {pad.shape}")
-        #logger.info(f"Shape of cx before cat: {cx.shape}")
-        #cx = torch.cat((cx, pad), dim=1)
-        #logger.info(f"Shape of cx after cat: {cx.shape}")
         cxz = torch.cat((cx, z0), dim=3).to(self.device)
 
         
