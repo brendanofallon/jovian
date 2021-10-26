@@ -154,6 +154,7 @@ def train_epochs(epochs,
                  val_dir=None,
                  batch_size=64):
 
+
     attention_heads = 8
     transformer_dim = 400
     encoder_layers = 3

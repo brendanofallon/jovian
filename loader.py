@@ -11,10 +11,6 @@ import gzip
 import lz4.frame
 from datetime import datetime
 
-try:
-    import blosc
-except ImportError:
-    logger.warning("Could not load blosc package, but its experimental and you probably dont need it anyway")
 
 import io
 
