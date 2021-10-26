@@ -133,22 +133,21 @@ class AltPredictor(nn.Module):
 
 class VarTransformerAltMask(nn.Module):
 
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, altpredictor_sd=None, train_altpredictor=False, device='cpu'):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * 20
-        self.train_altpredictor = train_altpredictor
-        self.altpredictor = AltPredictor(read_depth, feature_count, device)
-        if altpredictor_sd is not None:
-            logger.info(f"Loading altpredictor statedict from {altpredictor_sd}, training={train_altpredictor}")
-            self.altpredictor.load_state_dict(torch.load(altpredictor_sd))
-        else:
-            logger.info(f"Not loading altpredictor params, initializing randomly, training={train_altpredictor}")
+        self.conv_out_channels = 10
+        self.fc1_hidden = 12
 
-        if train_altpredictor == False and altpredictor_sd is None:
-            raise ValueError("Turning off training for altpredictor but NOT supplying a state_dict for it seems crazy (the params will be randomly initialized but never trained)")
+        self.conv1 = nn.Conv2d(in_channels=feature_count + 1,
+                               out_channels=self.conv_out_channels,
+                               kernel_size=(1, 10),
+                               padding='same')
 
-        self.fc1 = nn.Linear(read_depth * feature_count, self.embed_dim)
+        self.fc1 = nn.Linear(feature_count + 1 + self.conv_out_channels, self.fc1_hidden)
+        self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
+
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
@@ -156,30 +155,20 @@ class VarTransformerAltMask(nn.Module):
         self.elu = torch.nn.ELU()
 
     def forward(self, src):
-        if self.train_altpredictor:
-            altmask = self.altpredictor(src).to(self.device)
-        else:
-            with torch.no_grad():
-                altmask = self.altpredictor(src).to(self.device)
-                
-        #amx = 0.95 / altmask.max(dim=1)[0]
-        #amin = altmask.min(dim=1)[0].unsqueeze(1).expand((-1, altmask.shape[1]))
-        #altmask = (altmask - amin) * amx.unsqueeze(1).expand(
-        #    (-1, altmask.shape[1])) + amin
 
-        # Force the first read in each batch to have weight = 1, because this is the reference read but we _dont_ want to mask it
-        predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(self.device), altmask[:, 1:]), dim=1)
-        predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-        aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-        fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                              src.shape[3]).transpose(1, 2).to(self.device)
+        # r contains a 1 if the read base matches the referenc base, 0 otherwise
+        r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
+        src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
 
-        src = src * fullmask
-        src = src.flatten(start_dim=2)
+        conv_out = self.elu(self.conv1(src.transpose(3,1))).transpose(1,3)
+        src = torch.cat((src, conv_out), dim=3)
+
         src = self.elu(self.fc1(src))
+        src = src.flatten(start_dim=2)
+        src = self.elu(self.fc2(src))
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src)
         output = self.decoder(output)
 
-        pred_vaf = altmask.mean(dim=1)
-        return output, pred_vaf
+        # pred_vaf = altmask.mean(dim=1)
+        return output, 0
