@@ -29,7 +29,7 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, AltPredictor, VarTransformerAltMask
-from train import train
+from train import train, load_train_conf
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -343,14 +343,14 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     max_read_depth = 300
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
-    conf = load_train_conf(config)
+    conf = load_conf(config)
 
     reference = pysam.FastaFile(conf['reference'])
 
     altpredictor = None
 
     model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
-    model.load_state_dict(torch.load(statedict))
+    model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
     aln = pysam.AlignmentFile(bam)
@@ -442,8 +442,6 @@ def main():
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
     trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
-    trainparser.add_argument("-ap", "--altpredictor", help="The file to load altpredictor module from")
-    trainparser.add_argument("-tap", "--train-altpredictor", help="Train altpredictor module", action='store_true')
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
