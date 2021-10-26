@@ -384,8 +384,11 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                          kwargs.get("datadir"),
                                          threads=kwargs.get('threads'),
                                          max_decomped_batches=kwargs.get('max_decomp_batches'))
-        dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
-
+        
+        dataloader = pregenloader
+        # If you want to use augmenting loaders you can do this....
+        #dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
+        
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
         dataloader = loader.BWASimLoader(DEVICE,
