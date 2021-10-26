@@ -35,7 +35,7 @@ LEARNING_RATE=0.0005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="altmask_feats_in_mainmodel-0"
+RUN_NAME="test_altmask_in_main"
 
 set -x
 
