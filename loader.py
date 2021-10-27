@@ -205,16 +205,6 @@ class PregenLoader:
                 self.cache[path] = data
             return torch.load(io.BytesIO(decomp_func(data)), map_location=self.device)
 
-    # def item(self, path):
-    #     if str(path).endswith('.gz'):
-    #         decomp_func = gzip.decompress
-    #     elif str(path).endswith('.lz4'):
-    #         decomp_func = lz4.frame.decompress
-    #     elif str(path).endswith('.blp'):
-    #         decomp_func = blosc.decompress
-    #     else:
-    #         decomp_func = lambda x: x
-    #     return self._from_cache(path, decomp_func)
 
     def iter_once(self, batch_size):
         """
