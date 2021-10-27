@@ -157,7 +157,7 @@ def train_epochs(epochs,
 
     attention_heads = 8
     transformer_dim = 400
-    encoder_layers = 4
+    encoder_layers = 3
     model = VarTransformerAltMask(read_depth=max_read_depth, 
                                     feature_count=feats_per_read, 
                                     out_dim=4, 
@@ -168,7 +168,6 @@ def train_epochs(epochs,
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
-
 
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
@@ -382,10 +381,15 @@ def train(config, output_model, input_model, epochs, **kwargs):
     # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
     if kwargs.get("datadir") is not None:
         logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
-        dataloader = loader.PregenLoader(DEVICE,
+        pregenloader = loader.PregenLoader(DEVICE,
                                          kwargs.get("datadir"),
                                          threads=kwargs.get('threads'),
                                          max_decomped_batches=kwargs.get('max_decomp_batches'))
+        
+        dataloader = pregenloader
+        # If you want to use augmenting loaders you can do this....
+        #dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
+        
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
         dataloader = loader.BWASimLoader(DEVICE,
