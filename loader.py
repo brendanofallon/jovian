@@ -246,6 +246,32 @@ class ShorteningLoader:
             yield src[:, start:end, :, :], tgt[:, :, start:end],  vaftgt, None
 
 
+class DownsamplingLoader:
+    """
+    This loader downsamples the reads (dimension 2 of src) by setting entire read to 0.
+    The number of reads to be downsampled is obtained from the binomial distribution
+    where each reads has a prob p=0.01 of getting dropped out.
+    This loader should be used by wrapping another loader that actually does the loading
+    For instance:
+
+        loader = DownsamplingLoader(PregenLoader(...), prob_of_read_being_dropped=0.01)
+
+    """
+    def __init__(self, wrapped_loader, prob_of_read_being_dropped):
+        self.wrapped_loader = wrapped_loader
+        self.prob_of_read_being_dropped = prob_of_read_being_dropped
+
+    def iter_once(self, batch_size):
+        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+            num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(1)[0]
+            logger.info(f"{num_reads_to_drop} reads to be dropped out of total {src.shape[2]} reads")
+            read_index_to_drop = random.sample(list(range(src.shape[2])), num_reads_to_drop)
+            logger.info(f"Reads at index {read_index_to_drop} are being dropped.")
+            for i in read_index_to_drop:
+                src[:, :, i, :] = 0
+            yield src, tgt, vaftgt, None
+
+
 class MultiLoader:
     """
     Combines multiple loaders into a single loader

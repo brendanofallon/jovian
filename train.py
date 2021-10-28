@@ -389,6 +389,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
         dataloader = pregenloader
         # If you want to use augmenting loaders you can do this....
         #dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
+        #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
         
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
