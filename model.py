@@ -144,14 +144,14 @@ class VarTransformerAltMask(nn.Module):
         self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
 
         self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
-        encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
+        encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout, batch_first=True, activation='gelu')
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
         self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
         self.elu = torch.nn.ELU()
 
     def forward(self, src):
 
-        # r contains a 1 if the read base matches the referenc base, 0 otherwise
+        # r contains a 1 if the read base matches the reference base, 0 otherwise
         r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
         src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
 
