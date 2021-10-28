@@ -28,7 +28,7 @@ import util
 import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, AltPredictor, VarTransformerAltMask
+from model import VarTransformer, VarTransformerAltMask
 from train import train, load_train_conf
 
 
