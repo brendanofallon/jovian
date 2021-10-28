@@ -164,6 +164,7 @@ class PregenLoader:
         logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
+
     def iter_once(self, batch_size):
         """
         Make one pass over the training data, in this case all of the files in the 'data dir'
