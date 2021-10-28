@@ -254,7 +254,7 @@ class ShufflingLoader:
         loader = ShufflingLoader(PregenLoader(...))
 
     """
-    def __init__(self, wrapped_loader, seq_len):
+    def __init__(self, wrapped_loader):
         self.wrapped_loader = wrapped_loader
 
     def iter_once(self, batch_size):
