@@ -245,6 +245,24 @@ class ShorteningLoader:
             yield src[:, start:end, :, :], tgt[:, :, start:end],  vaftgt, None
 
 
+class ShufflingLoader:
+    """
+    This loader shuffles the reads (dimension 2 of src).
+    It should be used to wrap another loader that actually does the loading
+    For instance:
+
+        loader = ShufflingLoader(PregenLoader(...))
+
+    """
+    def __init__(self, wrapped_loader, seq_len):
+        self.wrapped_loader = wrapped_loader
+
+    def iter_once(self, batch_size):
+        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+            src = src[:, :, torch.randperm(src.shape[2]), :]
+            yield src, tgt, vaftgt, None
+
+
 class MultiLoader:
     """
     Combines multiple loaders into a single loader

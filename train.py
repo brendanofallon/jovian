@@ -387,8 +387,11 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                          max_decomped_batches=kwargs.get('max_decomp_batches'))
         
         dataloader = pregenloader
-        # If you want to use augmenting loaders you can do this....
-        #dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
+        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
+        if kwargs.get("data_augmentation"):
+            dataloader = loader.ShorteningLoader(pregenloader, seq_len=150)
+            dataloader = loader.ShufflingLoader(pregenloader)
+
         
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
