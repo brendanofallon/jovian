@@ -349,7 +349,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     altpredictor = None
 
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=8, d_hid=400, n_encoder_layers=4, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
