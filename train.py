@@ -15,7 +15,7 @@ import loader
 import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, AltPredictor, VarTransformerAltMask
+from model import VarTransformer, VarTransformerAltMask
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -94,19 +94,19 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
-        loss.backward()
+        loss.backward(retain_graph=True)
 
-        #if vaf_criterion is not None and np.random.rand() < 0.10:
-        #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
-        #    vafloss.backward()
-        #    vafloss_sum += vafloss.detach().item()
+        if vaf_criterion is not None:
+           vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
+           vafloss.backward()
+           vafloss_sum += vafloss.detach().item()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
         epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
-        #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
+        # logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
     logger.info(f"Trained {batch+1} batches in total.")
     return epoch_loss_sum, midmatch.item(), vafloss_sum

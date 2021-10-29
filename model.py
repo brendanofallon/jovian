@@ -42,11 +42,13 @@ class TwoHapDecoder(nn.Module):
 
     def forward(self, x):
         x = self.elu(self.fc1(x))
+        x_vaf = torch.sigmoid(self.fc_vaf(x).mean(dim=1))
+
         x1 = self.softmax(self.fc2(x))
         # VAF stuff is VERY experimental - x has shape [batch, seqlen (in general this is variable), 4] - no linear
         # layer can be operate over the seq_dim since it can change from run to run, so instead we just sum it?? (Mean works better than sum)
-        # x_vaf = torch.sigmoid(self.fc_vaf(x).mean(dim=1))
-        return x1
+
+        return x1, x_vaf
 
 
 class VarTransformer(nn.Module):
@@ -70,60 +72,6 @@ class VarTransformer(nn.Module):
         output = self.transformer_encoder(src)
         output = self.decoder(output)
         return output
-
-
-class AltPredictor(nn.Module):
-    
-    def __init__(self, readnum, feats, device):
-        super().__init__()
-        self.device = device
-        self.g_hidden = 20
-        self.g_output = 10
-        self.l_hidden = 10
-        self.l_output = 10
-        self.conv_output = 10
-        self.f_hidden = 10
-        
-        self.g1 = nn.Linear(feats + 1, self.g_hidden)
-        self.g2 = nn.Linear(self.g_hidden, self.g_output)
-        self.l1 = nn.Linear(feats + 1 + self.g_output, self.l_hidden)
-        self.l2 = nn.Linear(self.l_hidden, self.l_output)
-        self.conv1 = nn.Conv2d(in_channels=feats +1 +self.l_output +self.g_output, out_channels=self.conv_output, kernel_size=(1,10), padding='same')
-        self.fc1 = nn.Linear(self.conv_output + feats +1, self.f_hidden)
-        self.fc2 = nn.Linear(self.f_hidden, 1)
-        self.elu = torch.nn.ELU()
-
-    def forward(self, x, emit=False):
-        x = x.float().to(self.device)
-        # r is 1 if base is a match with the ref sequence, otherwise 0
-        r = (x[:, :, :, 0:4] * x[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
-        z0 = torch.cat((r.unsqueeze(-1), x[:, :, :, :]), dim=3).to(self.device)
-#         z = torch.cat((x[:, :, 0:1, 0:4].expand(-1, -1, x.shape[2], -1), x), dim=3).to(device)
-
-        # Compute the mean of each raw feature usage across reads at every position, and join this with the features list for everything
-        b1 = self.elu(self.g1(z0)) 
-        b2 = self.elu(self.g2(b1)).mean(dim=2)
-
-#         b = z0.mean(dim=2)
-#         b[:, :, 0:4] = b[:, :, 0:4] / (b[:, :, 0:4].sum(dim=-1).unsqueeze(-1) + 0.001)
-        bx = torch.cat((b2.unsqueeze(2).expand(-1, -1, x.shape[2], -1), z0), dim=3).to(self.device)
-       
-        # Take the features for every read pos, then compute read-level features by taking a mean of the features across the reads
-        y = self.elu(self.l1(bx))
-        y = self.elu(self.l2(y))
-        ymean = y.mean(dim=2).unsqueeze(2)
-        z = torch.cat((ymean.expand(-1, -1, x.shape[2], -1), bx), dim=3).to(self.device)
-#         print(f"z: {z.shape}")
-       
-        cx = self.elu(self.conv1(z.transpose(3,1))).transpose(1,3)  # Features must be in second dimension (we use it as 'channels')
-        cxz = torch.cat((cx, z0), dim=3).to(self.device)
-
-        
-        x = self.elu(self.fc1(cxz)).squeeze(-1)
-        x = 6 * self.elu(self.fc2(x) ) # Important that this is an ELU and not ReLU activation since it must be able to produce negative values, and the factor of 4 makes them even more negative which translates into something closer to zero after sigmoid()
-        x = torch.sigmoid(x.max(dim=1)[0]).squeeze(-1)
-        return x
-
 
 
 class VarTransformerAltMask(nn.Module):
@@ -163,7 +111,6 @@ class VarTransformerAltMask(nn.Module):
         src = self.elu(self.fc2(src))
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src)
-        output = self.decoder(output)
+        output, pred_vaf = self.decoder(output)
 
-        # pred_vaf = altmask.mean(dim=1)
-        return output, 0
+        return output, pred_vaf
