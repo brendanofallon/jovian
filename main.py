@@ -313,6 +313,7 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
 
+    window_width = 100
 
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
@@ -324,14 +325,17 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
     padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
 
-
+    focal_min = padded_reads.shape[1] // 2 - window_width // 2 + 50
+    focal_max = padded_reads.shape[1] // 2 + window_width // 2 + 50
+    trimmed_reads = padded_reads[:, focal_min:focal_max, :, :]
+    refseq = refseq[focal_min:focal_max]
     #masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(padded_reads.float().to(DEVICE))
+    seq_preds, _ = model(trimmed_reads.float().to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
 
     variants = [v for v in vcf.aln_to_vars(refseq,
                              pred1str,
-                             offset=minref)]
+                             offset=minref + focal_min)]
     return variants, seq_preds.squeeze(0)
 
 
@@ -349,7 +353,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     altpredictor = None
 
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=8, d_hid=400, n_encoder_layers=4, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
@@ -382,7 +386,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
             true_altseq = refseq
 
         tps, fps, fns = eval_prediction(refseq, true_altseq, seq_preds,
-                                        midwidth=150)
+                                        midwidth=min(refwidth, 150))
         print(f"{row.chrom}:{row.pos} {row.ref} -> {row.alt}\t{row.status} VAF: {row.ngs_vaf:.4f} TP: {len(tps)} FP: {len(fps)} FN: {len(fns)}")
         # print(f"TPs: {tps}")
         # print(f"FPs: {fps}")
