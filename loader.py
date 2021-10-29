@@ -282,13 +282,12 @@ class DownsamplingLoader:
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+            num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
             for idx in range(src.shape[0]):
-                num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(1)[0]
-                logger.debug(f"{num_reads_to_drop} reads to be dropped out of total {src.shape[2]} reads in batch {idx}")
-                read_index_to_drop = random.sample(list(range(src.shape[2])), num_reads_to_drop)
+                logger.debug(f"{num_reads_to_drop[idx]} reads to be dropped out of total {src.shape[2]} reads in batch: {idx}")
+                read_index_to_drop = random.sample(list(range(src.shape[2])), num_reads_to_drop[idx])
                 logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped.")
-                for read_id in read_index_to_drop:
-                    src[idx, :, read_id, :] = 0
+                src[idx, :, read_index_to_drop, :] = 0
             yield src, tgt, vaftgt, None
 
 
