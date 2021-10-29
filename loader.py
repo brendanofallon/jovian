@@ -248,7 +248,7 @@ class ShorteningLoader:
 
 class ShufflingLoader:
     """
-    This loader shuffles the reads (dimension 2 of src).
+    This loader shuffles the reads (dimension 2 of src), excluding the 0th element i.e. ref read.
     It should be used to wrap another loader that actually does the loading
     For instance:
 
@@ -260,13 +260,14 @@ class ShufflingLoader:
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
-            src = src[:, :, torch.randperm(src.shape[2]), :]
+            src = src[:, :, torch.randperm(src.shape[2])[1:], :]
             yield src, tgt, vaftgt, None
 
 
 class DownsamplingLoader:
     """
-    This loader downsamples the reads (dimension 2 of src) by setting entire read to 0.
+    This loader downsamples the reads (dimension 2 of src) by setting entire read to 0,
+    excluding the 0th element i.e. ref read.
     The number of reads to be downsampled is obtained from the binomial distribution
     where each reads has a prob p=0.01 of getting dropped out.
     This loader should be used by wrapping another loader that actually does the loading
@@ -285,8 +286,8 @@ class DownsamplingLoader:
             num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
             for idx in range(src.shape[0]):
                 logger.debug(f"{num_reads_to_drop[idx]} reads to be dropped out of total {src.shape[2]} reads in batch: {idx}")
-                read_index_to_drop = random.sample(list(range(src.shape[2])), num_reads_to_drop[idx])
-                logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped.")
+                read_index_to_drop = random.sample(list(range(src.shape[2])[1:]), num_reads_to_drop[idx])
+                logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped, excluding ref read at 0th position.")
                 src[idx, :, read_index_to_drop, :] = 0
             yield src, tgt, vaftgt, None
 
