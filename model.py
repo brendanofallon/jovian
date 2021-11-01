@@ -9,6 +9,7 @@ import math
 
 logger = logging.getLogger(__name__)
 
+
 class PositionalEncoding2D(nn.Module):
 
     def __init__(self, channels, device):
