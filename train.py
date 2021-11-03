@@ -152,6 +152,7 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None,
                  val_dir=None,
+                 wandb_run_name=None,
                  batch_size=64):
 
 
@@ -190,6 +191,9 @@ def train_epochs(epochs,
     if ENABLE_WANDB:
         import wandb
         wandb.init(project='variant-transformer', entity='arup-rnd')
+        if wandb_run_name:
+            wandb.run.name = f"wandb_run_name_{wandb.run.id}"
+            wandb.run.save()
         wandb.config.learning_rate = init_learning_rate
         wandb.config.feats_per_read = feats_per_read
         wandb.config.batch_size = batch_size
@@ -198,6 +202,7 @@ def train_epochs(epochs,
         wandb.config.transformer_dim = transformer_dim
         wandb.config.encoder_layers = encoder_layers
         wandb.watch(model)
+        logger.info(f"Created Weights & Biases run with name {wandb.run.name}")
 
     valpaths = []
     try:
@@ -414,5 +419,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
+                 wandb_run_name=kwargs.get("wandb_run_name")
                  )
 

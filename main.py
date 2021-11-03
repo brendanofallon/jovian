@@ -10,6 +10,7 @@ import gzip
 import lz4.frame
 import tempfile
 from datetime import datetime
+import re
 
 import pysam
 import torch
@@ -239,7 +240,7 @@ def pregen(config, **kwargs):
     """
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 300)
+    reads_per_pileup = kwargs.get('read_depth', 100)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
     vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
@@ -405,6 +406,13 @@ def print_pileup(path, idx, target=None, **kwargs):
     print(s)
 
 
+def alphanumeric_no_spaces(name):
+    if not re.match(r"[a-zA-Z0-9_-]+", name):
+        return name
+    else:
+        raise argparse.ArgumentTypeError(f"{name} is not an alphanumeric plus '_' or '-' without spaces")
+
+
 def main():
     parser = argparse.ArgumentParser()
     subparser = parser.add_subparsers()
@@ -446,6 +454,8 @@ def main():
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
     trainparser.add_argument("-da", "--data-augmentation", action="store_true", help="Specify --data-augmentation to perform data augmentation via diff loaders, default is false", default=False)
+    trainparser.add_argument("-rn", "--wandb-run-name", type=alphanumeric_no_spaces, default=None,
+                             help="Weights & Biases run name, must be alphanumeric plus '_' or '-'")
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")
