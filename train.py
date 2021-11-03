@@ -157,7 +157,7 @@ def train_epochs(epochs,
 
     attention_heads = 8
     transformer_dim = 400
-    encoder_layers = 3
+    encoder_layers = 4
     model = VarTransformerAltMask(read_depth=max_read_depth, 
                                     feature_count=feats_per_read, 
                                     out_dim=4, 
