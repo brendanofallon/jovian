@@ -406,7 +406,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
 
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=300,
+                 max_read_depth=100,
                  feats_per_read=9,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
