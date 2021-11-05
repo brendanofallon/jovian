@@ -15,7 +15,7 @@ import loader
 import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, AltPredictor, VarTransformerAltMask
+from model import VarTransformer, VarTransformerAltMask
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -157,7 +157,7 @@ def train_epochs(epochs,
 
     attention_heads = 8
     transformer_dim = 400
-    encoder_layers = 3
+    encoder_layers = 4
     model = VarTransformerAltMask(read_depth=max_read_depth, 
                                     feature_count=feats_per_read, 
                                     out_dim=4, 
