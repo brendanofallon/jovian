@@ -128,7 +128,7 @@ def decompress_multi(paths, threads):
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
+    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
         """
         Create a new loader that reads tensors from a 'pre-gen' directory
         :param device: torch.device
@@ -137,11 +137,17 @@ class PregenLoader:
         :param max_decomped_batches: Maximum number of batches to decompress at once. Increase this on machines with tons of RAM
         """
         self.device = device
-        self.datadir = Path(datadir)
+
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
-        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
+        if pathpairs:
+            if datadir:
+                raise ValueError("Got pathpairs AND datadir, expecting just one or the other")
+            self.pathpairs = pathpairs
+        else:
+            self.datadir = Path(datadir)
+            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -224,6 +230,22 @@ class PregenLoader:
                 torch.cat(vaftgt, dim=0).to(self.device),
                 None
             )
+
+
+class NormalizingLoader:
+    """
+    This loader standardizes the input training data to have (approximately) zero mean and 1 standard deviation
+    Note that if you use this for training you MUST also use this for validation + inference
+    """
+    def __init__(self, wrapped_loader):
+        self.wrapped_loader = wrapped_loader
+        self.means = torch.tensor([0.14, 0.105, 0.11, 0.12, 1.75, 0.48, 0.48, 0.225, 0.0225], dtype=torch.float)
+        self.stds = torch.tensor([0.34, 0.31, 0.32, 0.32, 1.9, 0.5, 0.5, 0.42, 0.14], dtype=torch.float)
+
+    def iter_once(self, batch_size):
+        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+            yield (src - self.means) / self.stds,  tgt, vaftgt, None
+
 
 
 class ShorteningLoader:

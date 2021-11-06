@@ -57,10 +57,7 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
-
-
-
-def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
+def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
     :param model: Model to train
@@ -112,11 +109,11 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     return epoch_loss_sum, midmatch.item(), vafloss_sum
 
 
-def calc_val_accuracy(valpaths, model):
+def calc_val_accuracy(loader, model, batch_size=64):
     """
     Compute accuracy (fraction of predicted bases that match actual bases)
     across all samples in valpaths, using the given model, and return it
-    :param valpaths: List of paths to (src, tgt) saved tensors
+    :param loader: Loader for the data
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
     width = 20
@@ -124,10 +121,7 @@ def calc_val_accuracy(valpaths, model):
         match_sum = 0
         count = 0
         vaf_mse_sum = 0
-        for srcpath, tgtpath, vaftgtpath in valpaths:
-            src = util.tensor_from_file(srcpath, DEVICE).float()
-            tgt = util.tensor_from_file(tgtpath, DEVICE).long()
-            vaf = util.tensor_from_file(vaftgtpath, DEVICE)
+        for src, tgt, vaf, _ in loader.iter_once(batch_size):
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
@@ -199,20 +193,20 @@ def train_epochs(epochs,
         wandb.config.encoder_layers = encoder_layers
         wandb.watch(model)
 
-    valpaths = []
-    try:
-        if val_dir:
-            logger.info(f"Using validation data in {val_dir}")
-            valpaths = util.find_files(val_dir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt')
-            logger.info(f"Found {len(valpaths)} batches in {val_dir}")
-        else:
-            logger.info(f"No val. dir. provided retaining a few training samples for validation")
-            valpaths = dataloader.retain_val_samples(fraction=0.05)
-            logger.info(f"Pulled {len(valpaths)} samples to use for validation")
+    val_loader = None
 
-    except Exception as ex:
-        logger.warning(f"Error loading validation samples, will not have any validation data for this run {ex}")
-        valpaths = []
+    if val_dir:
+        logger.info(f"Using validation data in {val_dir}")
+        valpaths = util.find_files(val_dir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt')
+        logger.info(f"Found {len(valpaths)} batches in {val_dir}")
+    else:
+        logger.info(f"No val. dir. provided retaining a few training samples for validation")
+        valpaths = dataloader.retain_val_samples(fraction=0.05)
+        logger.info(f"Pulled {len(valpaths)} samples to use for validation")
+
+    val_loader = loader.NormalizingLoader(
+                    loader.PregenLoader(DEVICE, datadir=None, threads=2, pathpairs=valpaths)
+                )
     
     try:
         for epoch in range(epochs):
@@ -222,14 +216,12 @@ def train_epochs(epochs,
                                                   criterion,
                                                   vaf_crit,
                                                   dataloader,
-                                                  batch_size=batch_size,
-                                                  max_alt_reads=max_read_depth)
+                                                  batch_size=batch_size)
             elapsed = datetime.now() - starttime
 
-            if valpaths:
-                val_accuracy, val_vaf_mse = calc_val_accuracy(valpaths, model)
-            else:
-                val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
+
+            val_accuracy, val_vaf_mse = calc_val_accuracy(val_loader, model)
+
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
             if type(val_accuracy) == torch.Tensor:
@@ -403,6 +395,9 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
+
+
+    dataloader = loader.NormalizingLoader(dataloader)
 
     train_epochs(epochs,
                  dataloader,
