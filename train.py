@@ -88,18 +88,18 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
 
         with torch.no_grad():
-            width = 20
+            width = 100
             mid = seq_preds.shape[1] // 2
             midmatch = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
 
-        loss.backward()
+        loss.backward(retain_graph=True)
 
-        #if vaf_criterion is not None and np.random.rand() < 0.10:
-        #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
-        #    vafloss.backward()
-        #    vafloss_sum += vafloss.detach().item()
+        if vaf_criterion is not None:
+           vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
+           vafloss.backward()
+           vafloss_sum += vafloss.detach().item()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
@@ -234,6 +234,8 @@ def train_epochs(epochs,
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
+            if type(val_vaf_mse) == torch.Tensor:
+                val_vaf_mse = val_vaf_mse.item()
 
             if ENABLE_WANDB:
                 wandb.log({
@@ -242,6 +244,7 @@ def train_epochs(epochs,
                     "train_accuracy": train_accuracy,
                     "val_accuarcy": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
+                    "val_vaf_mse": val_vaf_mse,
                     "epochtime": elapsed.total_seconds(),
                 })
 
