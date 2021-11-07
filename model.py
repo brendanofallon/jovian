@@ -165,4 +165,4 @@ class VarTransformerAltMask(nn.Module):
         output = self.decoder(output)
 
         # pred_vaf = altmask.mean(dim=1)
-        return output, 0
+        return output
