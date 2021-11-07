@@ -81,8 +81,8 @@ class TwoHapDecoder(nn.Module):
 
     def __init__(self, in_dim, out_dim, read_depth=300):
         super().__init__()
-        self.fc1 = nn.Linear(in_dim, 400)
-        self.fc2 = nn.Linear(400, out_dim)
+        self.fc1 = nn.Linear(in_dim, 256)
+        self.fc2 = nn.Linear(256, out_dim)
         self.fc_vaf = nn.Linear(in_dim, 1)
         self.fc_vaf2 = nn.Linear(read_depth, 1)
         self.elu = nn.ELU()
