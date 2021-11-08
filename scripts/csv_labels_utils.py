@@ -32,9 +32,12 @@ def get_vtype(row):
 def add_vtype_col(
         input_csv,
         output_csv,
+        **kwargs,
 ):
     logger.info(f"adding vtype column to labels.csv {input_csv}")
     df_csv = pd.read_csv(input_csv, dtype=dict(chrom=str))
+    df_csv["vtype"] = df_csv.apply(get_vtype, axis=1)
+    df_csv.to_csv(output_csv, index=False)
 
 
 def split_csv(
@@ -42,6 +45,7 @@ def split_csv(
         output_csv_1,
         output_csv_2,
         chrs,
+        **kwargs,
 ):
     logger.info(f"splitting off chrs {', '.join(chrs)} from labels.csv {input_csv}")
     df_csv = pd.read_csv(input_csv, dtype=dict(chrom=str))
@@ -113,7 +117,6 @@ def limit_chrs(pr_in, include_chrs=[], exclude_chrs=[]):
         ))
         pr_out = pr_in.subtract(pr_exclude_chrs)
     return pr_out
-
 
 
 
