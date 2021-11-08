@@ -229,8 +229,4 @@ def main(cmd_ln):
 
 
 if __name__ == "__main__":
-    main(**vars(sys.argv[1:]))
-    #bed_path = "/mnt/rd_share/RD_RW/jacob/variant_transformer/guber_run_standards/germline_master_roi_v3.bed"
-    #csv_path = "/mnt/rd_share/RD_RW/jacob/variant_transformer/guber_run_standards/csvs_final/guber_runstd_labels_nochr20or21/21263124992_GCON_5db4a1ac_nochr20or21.csv"
-    #bed_path = "/Reference/aws/prd/Bed/Production_Bed_Files/2.0/Panel/exome_IDT_UTR_20pad_nolowcov_v1.bed"
-    #csv_path = "/mnt/rd_share/RD_RW/jacob/variant_transformer/exome_av/csvs_final/exome_av_labels_nochr20or21/98002200385_EXO_23e3f2a1_nochr20or21.csv"
+    main(sys.argv[1:])
