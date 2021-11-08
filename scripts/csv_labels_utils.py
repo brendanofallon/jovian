@@ -120,16 +120,17 @@ def limit_chrs(pr_in, include_chrs=[], exclude_chrs=[]):
 def add_true_negatives(
         input_csv,
         output_csv,
-        bed_paths,
+        beds,
         include_chrs=[],
         exclude_chrs=[],
         variant_distance=200,
         max_tn_window=500,
         min_tn_window=200,
-        tn_count=5000,
+        tn_count=1000,
         human_ref=DEFAULT_HUMAN_REF,
         rand_seed=None,
         cpus=1,
+        **kwargs,
 ):
     logger.info(f"cpus = {cpus}")
 
@@ -140,9 +141,9 @@ def add_true_negatives(
     df_csv["Start End".split()] = df_csv.apply(get_start_end, result_type="expand", axis=1)
     pr_csv = pr.PyRanges(df_csv)
     logger.info(f"bed regions for TNs are intersection of the following beds:")
-    for bed in bed_paths:
+    for bed in beds:
         logger.info(bed)
-    pr_bed = build_intersect_pr_beds(bed_paths)
+    pr_bed = build_intersect_pr_beds(beds)
     # remove areas around existing variants from possible TN locations
     logger.info(f"TN min distance from existing calls is {variant_distance}")
     pr_windows = pr_bed.subtract(pr_csv.slack(variant_distance), nb_cpu=cpus)
@@ -152,7 +153,7 @@ def add_true_negatives(
     # drop very small windows and excluded windows
     logger.info(f"window min size for randomly chosen TN locations is {min_tn_window} bp")
     pr_windows.interval_len = pr_windows.lengths()
-    pr_windows = pr_windows.apply(lambda df: df.query(f"interval_len > @min_tn_window"), nb_cpu=cpus)
+    pr_windows = pr_windows.apply(lambda df, min_tn_window=min_tn_window, **kwargs: df.query(f"interval_len > @min_tn_window"), nb_cpu=cpus, min_tn_window=min_tn_window)
     if exclude_chrs or include_chrs:
         logger.info(f"excluding new TN calls from chromosomes {exclude_chrs}")
         logger.info(f"only including new TN calls from chromosomes {include_chrs}")
@@ -170,7 +171,7 @@ def add_true_negatives(
     pr_windows = pr_windows.assign("ref", get_ref_base, nb_cpu=cpus, human_ref=human_ref)
     # build TN entries
     df_fn = pr_windows.df["Chromosome pos ref".split()].rename(columns=dict(Chromosome="chrom"))
-    df_fn.insert(0, "vtype", "snv")
+    df_fn.insert(0, "vtype", "true_neg")
     df_fn.insert(4, "alt", df_fn.ref)
     df_fn.insert(5, "exp_vaf", 1.0)
     df_fn.insert(6, "ngs_gt", "0/0")
@@ -199,16 +200,16 @@ def main(cmd_ln):
     tn_parser.add_argument("-o", "--output-csv", required=True, help="output labels.csv file")
     tn_parser.add_argument("-b", "--beds", nargs="*", default=[],
                         help="bed files to choose TN (reference matching) labels")
-    tn_parser.add_argument("-h", "--human-ref", default=DEFAULT_HUMAN_REF, help="path to human ref fasta")
-    tn_parser.add_argument("-c", "--tn-count", default=1000, help="TN rows added to variant label csv")
-    tn_parser.add_argument("--include_chrs", nargs="*", default=[], help="only locate new TNs in these chromosomes")
-    tn_parser.add_argument("--exclude_chrs", nargs="*", default=[], help="exclude new TNs from these chromosomes")
-    tn_parser.add_argument("-bz", "--variant-buffer-zone", default=200, help="Buffer zone from tp-fp-fn variants")
-    tn_parser.add_argument("-wmax", "--tn-max-window", default=200,
-                        help="variant free bed regions broken into this max region size")
-    tn_parser.add_argument("-wmin", "--tn-min-window", default=200,
-                        help="variant free bed regions discarded if below this size")
-    tn_parser.add_argument("--rand_seed", default=None, type=int, help="optional rand seed for repeatable TN locations")
+    tn_parser.add_argument("-r", "--human-ref", default=DEFAULT_HUMAN_REF, help="path to human ref fasta")
+    tn_parser.add_argument("-c", "--tn-count", type=int, default=1000, help="TN rows added to variant label csv")
+    tn_parser.add_argument("--include-chrs", nargs="*", default=[], help="only locate new TNs in these chromosomes")
+    tn_parser.add_argument("--exclude-chrs", nargs="*", default=[], help="exclude new TNs from these chromosomes")
+    tn_parser.add_argument("-vd", "--variant-distance", default=200, help="Buffer zone from tp-fp-fn variants")
+    tn_parser.add_argument("-maxw", "--max-tn-window", default=500,
+                        help="variant free bed regions broken into this max region size, default 500")
+    tn_parser.add_argument("-minw", "--min-tn-window", default=200,
+                        help="variant free bed regions discarded if below this size, default 200")
+    tn_parser.add_argument("--rand-seed", default=None, type=int, help="optional rand seed for repeatable TN locations")
     tn_parser.add_argument("--cpus", default=1, help="may help for very large variant sets or hurt for small sets")
     tn_parser.set_defaults(func=add_true_negatives)
 
