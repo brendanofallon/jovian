@@ -149,16 +149,17 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     src_prefix = "src"
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
+    posflag_prefix = "posflag"
 
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
 
     logger.info(f"Saving tensors to {output_dir}/")
-    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+    for i, (src, tgt, vaftgt, varsinfo, posflag) in enumerate(dataloader.iter_once(batch_size)):
         logger.info(f"Saving batch {i} with uid {uid}")
-        for data, prefix in zip([src, tgt, vaftgt],
-                                [src_prefix, tgt_prefix, vaf_prefix]):
+        for data, prefix in zip([src, tgt, vaftgt, posflag],
+                                [src_prefix, tgt_prefix, vaf_prefix, posflag_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
         for idx, varinfo in enumerate(varsinfo):
@@ -373,7 +374,6 @@ def print_pileup(path, idx, target=None, **kwargs):
     logger.info(f"Loaded tensor with shape {src.shape}")
     s = util.to_pileup(src[idx, :, :, :])
     print(s)
-
 
 def main():
     parser = argparse.ArgumentParser()

@@ -46,7 +46,7 @@ def find_tgt(suffix, files):
     return found
 
 
-def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt'):
+def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt', posflag_prefix=None):
     """
     Examine files in datadir and match up all src / tgt / vaftgt files and store them as tuples in a list
     :returns : List of (src, tgt, vaftgt) tuples of matched files
@@ -55,6 +55,10 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
     allsrc = list(datadir.glob(src_prefix + "*"))
     alltgt = list(datadir.glob(tgt_prefix + "*"))
     allvaftgt = list(datadir.glob(vaftgt_prefix + "*"))
+    if posflag_prefix:
+        allposflag = list(datadir.glob(posflag_prefix + "*"))
+    else:
+        allposflag = []
     pairs = []
     for src in allsrc:
         suffix = src.name.split("_")[-1].split(".")[0]
@@ -62,7 +66,11 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
         alltgt.remove(tgt)
         vaftgt = find_tgt(suffix, allvaftgt)
         allvaftgt.remove(vaftgt)
-        pairs.append((src, tgt, vaftgt))
+        if allposflag:
+            posflags = find_tgt(suffix, allposflag)
+        else:
+            posflags = []
+        pairs.append((src, tgt, vaftgt, posflags))
     return pairs
 
 def tensor_from_lz4(path, device):

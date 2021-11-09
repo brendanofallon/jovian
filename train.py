@@ -74,7 +74,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     count = 0
     vafloss = torch.tensor([0])
-    for batch, (src, tgt_seq, tgtvaf, altmask) in enumerate(loader.iter_once(batch_size)):
+    for batch, (src, tgt_seq, tgtvaf, posflag) in enumerate(loader.iter_once(batch_size)):
         optimizer.zero_grad()
         
         seq_preds, vaf_preds = model(src)

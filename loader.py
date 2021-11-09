@@ -66,7 +66,7 @@ class LazyLoader:
 
     def iter_once(self, batch_size):
         logger.info(f"Encoding tensors from {self.bam} and {self.csv}")
-        for src, tgt, vaftgt, varsinfo in encode_chunks(self.bam,
+        for src, tgt, vaftgt, varsinfo, posflag in encode_chunks(self.bam,
                                           self.reference,
                                           self.csv,
                                           batch_size,
@@ -74,7 +74,7 @@ class LazyLoader:
                                           self.samples_per_pos,
                                           self.vals_per_class,
                                           max_to_load=1e9):
-                yield src, tgt, vaftgt, varsinfo
+                yield src, tgt, vaftgt, varsinfo, posflag
 
 
 class WeightedLoader:
@@ -141,7 +141,8 @@ class PregenLoader:
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
-        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
+        self.posflag_prefix = "posflag"
+        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix, self.posflag_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -173,16 +174,17 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        src, tgt, vaftgt = [], [], []
+        src, tgt, vaftgt, posflag = [], [], [], []
                     
         for i in range(0, len(self.pathpairs), self.max_decomped):
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi(chain.from_iterable(paths), self.threads)
 
-            for j in range(0, len(decomped), 3):
+            for j in range(0, len(decomped), 4):
                 src.append(decomped[j])
                 tgt.append(decomped[j+1])
                 vaftgt.append(decomped[j+2])
+                posflag.append(decomped[j+3])
 
             total_size = sum([s.shape[0] for s in src])
             if total_size < batch_size:
@@ -193,6 +195,7 @@ class PregenLoader:
             src_t = torch.cat(src, dim=0)
             tgt_t = torch.cat(tgt, dim=0)
             vaftgt_t = torch.cat(vaftgt, dim=0)
+            posflag_t = torch.cat(posflag, dim=0)
 
             nbatch = total_size // batch_size
             remain = total_size % batch_size
@@ -204,8 +207,8 @@ class PregenLoader:
                 yield (
                     src_t[start:end].to(self.device).float(),
                     tgt_t[start:end].to(self.device).long(),
-                    vaftgt_t[start:end].to(self.device), 
-                    None
+                    vaftgt_t[start:end].to(self.device),
+                    posflag_t[start:end].to(self.device),
                 ) 
 
             if remain:
@@ -213,8 +216,9 @@ class PregenLoader:
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
                 vaftgt = [vaftgt_t[nbatch * batch_size:]]
+                posflag = [posflag_t[nbatch * batch_size:]]
             else:
-                src, tgt, vaftgt = [], [], []
+                src, tgt, vaftgt, posflag = [], [], [], []
 
         if len(src) > 0:
             # We need to yield the last batch.
@@ -222,7 +226,7 @@ class PregenLoader:
                 torch.cat(src, dim=0).to(self.device).float(),
                 torch.cat(tgt, dim=0).to(self.device).long(),
                 torch.cat(vaftgt, dim=0).to(self.device),
-                None
+                torch.cat(posflag, dim=0).to(self.device),
             )
 
 
@@ -371,7 +375,7 @@ class SimLoader:
             yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
 
 
-def trim_pileuptensor(src, tgt, width):
+def trim_pileuptensor(src, tgt, posflag, width):
     """
     Trim or zero-pad the sequence dimension of src and target (first dimension of src, second of target)
     so they're equal to width
@@ -380,17 +384,20 @@ def trim_pileuptensor(src, tgt, width):
     :param width: Size to trim to
     """
     assert src.shape[0] == tgt.shape[-1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
+    assert tgt.shape == posflag.shape
     if src.shape[0] < width:
         z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2], dtype=src.dtype)
         src = torch.cat((src, z))
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1]).long()
         tgt = torch.cat((tgt, t), dim=1)
+        posflag = torch.cat((posflag, torch.zeros(tgt.shape[0], width - posflag.shape[1]).long()), dim=1)
     else:
         start = src.shape[0] // 2 - width // 2
         src = src[start:start+width, :, :]
         tgt = tgt[:, start:start+width]
+        posflag = posflag[start:start+width]
 
-    return src, tgt
+    return src, tgt, posflag
 
 
 def assign_class_indexes(rows):
@@ -500,7 +507,7 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
             altseq = row.alt
 
         try:
-            for encoded, refseq, altseq in encode_and_downsample(str(row.chrom),
+            for encoded, refseq, altseq, posflag in encode_and_downsample(str(row.chrom),
                                                                  row.pos,
                                                                  row.ref,
                                                                  altseq,
@@ -512,10 +519,11 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
 
                 minseqlen = min(len(refseq), len(altseq))
                 tgt = target_string_to_tensor(altseq[0:minseqlen])
+                posflag = posflag[0:minseqlen]
                 if minseqlen != encoded.shape[0]:
                     encoded = encoded[0:minseqlen, :, :]
 
-                yield encoded, tgt, row
+                yield encoded, tgt, row, posflag
 
         except Exception as ex:
             logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
@@ -538,37 +546,41 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     allsrc = []
     alltgt = []
     alltgtvaf = []
+    allposflag = []
     varsinfo = []
     count = 0
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
-    for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
+    for enc, tgt, row, posflag in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
         status, vtype, vaf = row.status, row.vtype, row.exp_vaf
-        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+        src, tgt, posflag = trim_pileuptensor(enc, tgt.unsqueeze(0), posflag.unsqueeze(0), seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+        assert posflag.shape[1] == seq_len, f"position flag tensor did not have length equal to seq len"
         allsrc.append(src)
         alltgt.append(tgt)
         alltgtvaf.append(vaf)
+        allposflag.append(posflag)
         varsinfo.append([f"{row.chrom}", f"{row.pos}", row.ref, row.alt, f"{vaf}"])
         count += 1
         if count % 100 == 0:
             logger.info(f"Loaded {count} tensors from {csv}")
         if count == max_to_load:
             logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo, torch.stack(allposflag).char()
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf), varsinfo, torch.stack(allposflag).char()
             allsrc = []
             alltgt = []
             alltgtvaf = []
             varsinfo = []
+            allposflag = []
 
     if len(allsrc):
-        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo, torch.stack(allposflag).char()
 
     logger.info(f"Done loading {count} tensors from {csv}")
 
@@ -587,9 +599,10 @@ def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_t
         label_class = "-".join((status, vtype))
         classes.append(label_class)
         counter[label_class] += 1
-        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+        src, tgt, posflag = trim_pileuptensor(enc, tgt.unsqueeze(0), posflag, seq_len)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+        assert posflag.shape
         allsrc.append(src)
         alltgt.append(tgt)
         count += 1

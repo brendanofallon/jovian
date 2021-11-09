@@ -361,11 +361,15 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
         refseq = fasta.fetch(chrom, minref, maxref)
         assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
         altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
+        posflag = torch.cat((torch.zeros(pos-minref), torch.ones(len(alt)), torch.zeros(len(refseq) - (pos-minref) - len(ref))), dim=0)
         if ref == alt:
             assert refseq == altseq, "Ref == alt allele, but ref sequence didn't match alt sequence!"
+        assert posflag.shape[0] == len(altseq)
         assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
 
         ref_encoded = string_to_tensor(refseq)
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
-        yield encoded_with_ref, refseq, altseq
+
+
+        yield encoded_with_ref, refseq, altseq, posflag
