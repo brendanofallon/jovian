@@ -15,7 +15,7 @@ import loader
 import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, VarTransformerAltMask
+from model import VarTransformer, VarTransformerAltMask, SmithWattermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -80,7 +80,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         seq_preds, vaf_preds = model(src)
 
         tgt_seq = tgt_seq.squeeze(1)
-        loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        loss = criterion(seq_preds, tgt_seq)
 
         count += 1
         if count % 100 == 0:
@@ -175,7 +176,8 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict))
     model.train()
 
-    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.CrossEntropyLoss()
+    criterion = SmithWattermanLoss(device=DEVICE)
     vaf_crit = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
