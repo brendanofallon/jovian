@@ -298,7 +298,7 @@ class SmithWatermanLoss(nn.Module):
         )
 
     def _rotate(self, x):
-        y, nmat, carry, ij = self._gen_rotation_mat(x.shape[1:])
+        y, nmat, carry, ij = self._gen_rotation_mat(x.shape)
         y[ij] = x
         return (
             (y, nmat),
@@ -376,11 +376,11 @@ def test():
 
     sw_func = sw_affine(batch=True)
     full_result = sw_func(
-        jnp.array(inputmat), jnp.array([10, 10]), -1, -5, 1.0
+        jnp.array(inputmat), jnp.array([[10, 10]]), -1, -5, 1.0
     )
 
     # inputmat = np.random.random((10, 10))
-    t = torch.tensor(inputmat, dtype=torch.float, requires_grad=True)
+    t = torch.tensor(inputmat[0, :, :], dtype=torch.float, requires_grad=True)
     swloss = SmithWatermanLoss(
         gap_open_penalty=-5, gap_extend_penalty=-1, temperature=1.0
     )
