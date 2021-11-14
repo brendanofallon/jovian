@@ -102,22 +102,23 @@ def build_intersect_pr_beds(bed_paths):
 def limit_chrs(pr_in, include_chrs=[], exclude_chrs=[]):
     if not include_chrs and not exclude_chrs:
         return pr_in
+    pr_out = pr_in.copy()
     if include_chrs:
         logger.info(f"only adding TNs to chromosomes {','.join(include_chrs)}")
         pr_include_chrs = pr.from_dict(dict(
             Chromosome=include_chrs,
             Start=[0] * len(include_chrs),
-            End=[1000000] * len(include_chrs)
+            End=[10**9] * len(include_chrs)
         ))
-        pr_out = pr_in.intersect(pr_include_chrs)
+        pr_out = pr_out.intersect(pr_include_chrs)
     if exclude_chrs:
         logger.info(f"not adding any TNs to chromosomes {','.join(exclude_chrs)}")
         pr_exclude_chrs = pr.from_dict(dict(
             Chromosome=exclude_chrs,
             Start=[0] * len(exclude_chrs),
-            End=[1000000] * len(exclude_chrs)
+            End=[10**9] * len(exclude_chrs)
         ))
-        pr_out = pr_in.subtract(pr_exclude_chrs)
+        pr_out = pr_out.subtract(pr_exclude_chrs)
     return pr_out
 
 
