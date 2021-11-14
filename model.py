@@ -126,7 +126,7 @@ class VarTransformerAltMask(nn.Module):
     def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
         super().__init__()
         self.device=device
-        self.embed_dim = nhead * 20
+        self.embed_dim = nhead * 30
         self.conv_out_channels = 10
         self.fc1_hidden = 12
 
@@ -166,19 +166,3 @@ class VarTransformerAltMask(nn.Module):
         return output, 0
 
 
-class SmithWattermanLoss(nn.Module):
-
-    def __init__(self, device, gap_open_penalty=-5, gap_extend_penalty=-1):
-        super().__init__()
-        self.device = device
-        self.gap_open_penalty = gap_open_penalty
-        self.gap_extend_penalty = gap_extend_penalty
-        sw_affine_func = jax.jit(sw.sw_affine(batch=True))
-        self.sw = jax2torch(sw_affine_func)
-
-    def forward(self, predictions, targets):
-        targs_onehot = nn.functional.one_hot(targets, num_classes=4).float().to(self.device)
-        inputs = torch.bmm(predictions, targs_onehot.transpose(1, 2))
-        lens = jnp.array([[predictions.shape[1], targets.shape[1]] for _ in range(predictions.shape[0])])
-        resultmat = self.sw(inputs, lens, self.gap_extend_penalty, self.gap_open_penalty)
-        return resultmat.diagonal(dim1=1, dim2=2).sum()
