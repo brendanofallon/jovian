@@ -15,7 +15,8 @@ import loader
 import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, VarTransformerAltMask, SmithWattermanLoss
+from model import VarTransformer, VarTransformerAltMask
+from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -177,8 +178,11 @@ def train_epochs(epochs,
     model.train()
 
     # criterion = nn.CrossEntropyLoss()
-    criterion = SmithWattermanLoss(device=DEVICE)
-    vaf_crit = nn.MSELoss()
+    criterion = SmithWatermanLoss(gap_open_penalty=-5,
+                                   gap_extend_penalty=-1,
+                                   temperature=1.0,
+                                   device=DEVICE)
+    vaf_crit = None #nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
 
