@@ -7,7 +7,6 @@ import torch.nn as nn
 import numpy as np
 import math
 
-import sw_functions as sw
 
 logger = logging.getLogger(__name__)
 
