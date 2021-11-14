@@ -4,10 +4,7 @@ import logging
 
 import torch
 import torch.nn as nn
-import jax
 import numpy as np
-import jax.numpy as jnp
-from jax2torch import jax2torch
 import math
 
 import sw_functions as sw
