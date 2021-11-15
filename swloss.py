@@ -4,6 +4,12 @@ import torch.nn as nn
 
 
 class SmithWatermanLoss(nn.Module):
+    """
+    A pure pytorch implementation of the differentiable Smith-Waterman alignment, following the
+    algorithm first developed by Petti et al. 2021 (http://repository.cshl.edu/id/eprint/40409/)
+    See also: https://github.com/spetti/SMURF
+    """
+
     def __init__(
         self,
         gap_open_penalty,

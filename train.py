@@ -71,7 +71,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     :param batch_size:
     :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
     """
-    epoch_loss_sum = 0
+    epoch_loss_sum = None
+    prev_epoch_loss = None
     vafloss_sum = 0
     count = 0
     vafloss = torch.tensor([0])
@@ -86,7 +87,11 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         count += 1
         if count % 100 == 0:
-            logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
+            if prev_epoch_loss:
+                lossdif = epoch_loss_sum - prev_epoch_loss
+            else:
+                lossdif = 0
+            logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f} epoch loss dif: {lossdif:.3f}")
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
 
         with torch.no_grad():
@@ -105,7 +110,11 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
-        epoch_loss_sum += loss.detach().item()
+        if epoch_loss_sum is None:
+            epoch_loss_sum = loss.detach().item()
+        else:
+            prev_epoch_loss = epoch_loss_sum
+            epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
