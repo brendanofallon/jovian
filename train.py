@@ -57,9 +57,6 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
-
-
-
 def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
@@ -114,16 +111,13 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
 def calc_val_accuracy(valpaths, model):
     """
-    Compute accuracy (fraction of predicted bases that match actual bases)
+    Compute accuracy (mean number of variant counts)
     across all samples in valpaths, using the given model, and return it
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
-    width = 20
     with torch.no_grad():
-        match_sum = 0
-        count = 0
-        vaf_mse_sum = 0
+        pred_vars = []
         for srcpath, tgtpath, vaftgtpath in valpaths:
             src = util.tensor_from_file(srcpath, DEVICE).float()
             tgt = util.tensor_from_file(tgtpath, DEVICE).long()
@@ -131,15 +125,17 @@ def calc_val_accuracy(valpaths, model):
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
-            mid = seq_preds.shape[1] // 2
-            midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
-                        ).float().mean()
-            match_sum += midmatch
-            count += 1
-
-            vaf_mse_sum += ((vaf - vaf_preds) * (vaf-vaf_preds)).mean().item()
-    return match_sum / count, vaf_mse_sum / count
+            count_vars_per_batch = 0
+            batch_size = 0
+            for b in range(src.shape[0]):
+                predstr = util.readstr(seq_preds[b, :, :])
+                tgtstr = util.tgt_str(tgt[b, :])
+                count_vars_per_batch += len(list(vcf.aln_to_vars(tgtstr, predstr)))
+                batch_size += 1
+                
+            pred_vars.append(count_vars_per_batch/batch_size)
+                
+    return mean(pred_vars)
 
 
 def train_epochs(epochs,
