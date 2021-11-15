@@ -181,7 +181,10 @@ def pregen(config, **kwargs):
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
-    vals_per_class = kwargs.get('vals_per_class', 1000)
+    default_vals_per_class = kwargs.get('vals_per_class', 1000)
+    vals_per_class = defaultdict(lambda: default_vals_per_class)
+    vals_per_class.update(conf['vals_per_class'])
+
     output_dir = Path(kwargs.get('dir'))
     metadata_file = kwargs.get("metadata_file", None)
     if metadata_file is None:
