@@ -117,6 +117,7 @@ def calc_val_accuracy(valpaths, model):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
+    width = 20
     with torch.no_grad():
         match_sum = 0
         count = 0
@@ -129,7 +130,7 @@ def calc_val_accuracy(valpaths, model):
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
-            # Compute accuracy
+            # Compute val accuracy
             mid = seq_preds.shape[1] // 2
             midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
