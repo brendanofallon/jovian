@@ -41,17 +41,34 @@ The pregenerated training tensors and 'labels' (true alt sequences) are stored i
 
 Depending on how may BAMs and how many labeled instances there are, this can take a really long time. Would be nice if it could be made multithreaded.
 
-The configuration file `conf.yaml` must have a path to the reference genome and a list of BAMs + labels, like this:
+The configuration file `conf.yaml` must have a path to the reference genome, the number of examples to choose from
+each class type (snv-TP, small_del_1-24-FP, etc), and a list of BAMs + labels, like this:
 
     reference: /path/to/reference/fasta
+
+    vals_per_class:
+        'snv-TP': 5000
+        'snv-FP': 500
+        'snv-FN': 500
+        'small_del_1-24-TP': 1000
+        'small_del_1-24-FP': 200
+        'small_del_1-24-FN': 100
+        'small_ins_1-24-TP': 1000
+        'small_ins_1-24-FP': 200
+        'small_ins_1-24-FN': 100
+
     data:
       - bam: /path/to/a/bam
         labels: /path/to/labels.csv
       - bam: /path/to/another/bam
         labels: /path/to/another/labels.csv
       .... more bams/ labels ...
+
 The 'labels.csv' contains a list of genomic regions, chrom/pos/ref/alt and 'TP/FN/FP' status. *This is the tp_fn_fp.csv file produced by the Caravel calc_ppa_ppv task*,
 no modifications needed. 
+
+The `--vals-per-class` argument to the pregen function is now interpreted as a default, so if a class in encountered that
+does not have a `vals_per_class` entry in the config, it will use the default number of samples
 
 ### Performing a training run
 
