@@ -5,12 +5,14 @@ from datetime import datetime
 import os
 
 import numpy as np
+from statistics import mean
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
 logger = logging.getLogger(__name__)
 
+import vcf
 import loader
 import bwasim
 import util
