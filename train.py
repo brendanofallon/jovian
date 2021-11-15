@@ -73,6 +73,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_loss_sum = 0
     vafloss_sum = 0
     count = 0
+    midmatch_narrow_sum = 0
+    midmatch_wide_sum = 0
     vafloss = torch.tensor([0])
     for batch, (src, tgt_seq, tgtvaf, altmask) in enumerate(loader.iter_once(batch_size)):
         optimizer.zero_grad()
@@ -90,9 +92,16 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         with torch.no_grad():
             width = 20
             mid = seq_preds.shape[1] // 2
-            midmatch = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+            midmatch_narrow = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
+            midmatch_narrow_sum += midmatch_narrow.item()
+            width = 200
+            mid = seq_preds.shape[1] // 2
+            midmatch_wide = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
+                         ).float().mean()
+            midmatch_wide_sum += midmatch_wide.item()
 
         loss.backward()
 
@@ -109,7 +118,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
     logger.info(f"Trained {batch+1} batches in total.")
-    return epoch_loss_sum, midmatch.item(), vafloss_sum
+    return epoch_loss_sum, midmatch_narrow_sum / batch, midmatch_wide_sum / batch
 
 
 def calc_val_accuracy(valpaths, model):
@@ -217,7 +226,7 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, train_accuracy, vafloss = train_epoch(model,
+            loss, train_narrow_acc, train_wide_acc = train_epoch(model,
                                                   optimizer,
                                                   criterion,
                                                   vaf_crit,
@@ -230,7 +239,7 @@ def train_epochs(epochs,
                 val_accuracy, val_vaf_mse = calc_val_accuracy(valpaths, model)
             else:
                 val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}  val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
@@ -239,7 +248,8 @@ def train_epochs(epochs,
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
-                    "train_accuracy": train_accuracy,
+                    "train_accuracy": train_narrow_acc,
+                    "train_wide_accuracy": train_wide_acc,
                     "val_accuarcy": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
@@ -249,14 +259,14 @@ def train_epochs(epochs,
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
-                "train_accuracy": train_accuracy,
+                "train_accuracy": train_narrow_acc,
                 "val_accuracy": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
 
             tensorboardWriter.add_scalar("loss/train", loss, epoch)
-            tensorboardWriter.add_scalar("match/train", train_accuracy, epoch)
+            tensorboardWriter.add_scalar("match/train", train_narrow_acc, epoch)
             tensorboardWriter.add_scalar("match/val", val_accuracy, epoch)
 
 
