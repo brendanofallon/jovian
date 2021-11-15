@@ -29,7 +29,7 @@ import util
 import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, AltPredictor, VarTransformerAltMask
+from model import VarTransformer, VarTransformerAltMask
 from train import train, load_train_conf
 
 
@@ -85,66 +85,6 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
         print(v)
 
 
-def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
-    """
-    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
-    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
-    objects, then compares variant objects
-    :param tgt:
-    :param predictions:
-    :param midwidth:
-    :return: Sets of TP, FP, and FN vars
-    """
-    midstart = len(refseqstr) // 2 - midwidth // 2
-    midend  =  len(refseqstr) // 2 + midwidth // 2
-    known_vars = []
-    for v in vcf.aln_to_vars(refseqstr, altseq):
-        if midstart < v.pos < midend:
-            known_vars.append(v)
-
-    pred_vars = []
-    for v in vcf.aln_to_vars(refseqstr, util.readstr(predictions)):
-        if midstart < v.pos < midend:
-            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
-            pred_vars.append(v)
-
-    tps = [] # True postive - real and detected variant
-    fns = [] # False negatives - real variant but not detected
-    fps = [] # False positives - detected but not a real variant
-    for true_var in known_vars:
-        if true_var in pred_vars:
-            tps.append(true_var)
-        else:
-            fns.append(true_var)
-
-    for detected_var in pred_vars:
-        if detected_var not in known_vars:
-            #logger.info(f"FP: {detected_var}")
-            fps.append(detected_var)
-
-    return tps, fps, fns
-
-
-
-def create_altmask(altmaskmodel, src):
-    """
-    Create a new tensor of the same dimension as src that weights individual reads by their probability
-    of supporting a variant.
-    :param altmaskmodel: A function that returns a pytorch Tensor with dimension [batch, read], containing
-                        a value 0-1 for each read
-    :param src: Encoded pileup of dimension [batch, seq pos, read, feature]
-    :returns: Tensor with same dimension as src, with values 0-1 in read dimension replicated into features
-    """
-    predicted_altmask = altmaskmodel(src.to(DEVICE))
-    amin = predicted_altmask.min(dim=1)[0].unsqueeze(1).expand((-1, predicted_altmask.shape[1]))
-    amx = 0.95 / (predicted_altmask - amin).max(dim=1)[0]
-    predicted_altmask = (predicted_altmask - amin) * amx.unsqueeze(1).expand((-1, predicted_altmask.shape[1])) # + amin
-    predicted_altmask = torch.cat((torch.ones(src.shape[0], 1).to(DEVICE), predicted_altmask[:, 1:]), dim=1)
-    predicted_altmask = predicted_altmask.clamp(0.001, 1.0)
-    aex = predicted_altmask.unsqueeze(-1).unsqueeze(-1)
-    fullmask = aex.expand(src.shape[0], src.shape[2], src.shape[1],
-                          src.shape[3]).transpose(1, 2).to(DEVICE)
-    return fullmask
 
 
 def eval_sim(statedict, config, **kwargs):
@@ -286,26 +226,49 @@ def pregen(config, **kwargs):
                 sample_metafile = fut.result()
                 util.concat_metafile(sample_metafile, metafh)
 
-    # output_dir = Path(kwargs.get('dir'))
-    # output_dir.mkdir(parents=True, exist_ok=True)
-    # src_prefix = "src"
-    # tgt_prefix = "tgt"
-    # vaf_prefix = "vaftgt"
-    # existing_tgt = list(output_dir.glob(tgt_prefix + "*"))
-    # startval = kwargs.get('start_from', 0)
-    # if existing_tgt:
-    #     idxs = [int(t.name.replace(".pt", "").split("_")[-1]) for t in existing_tgt]
-    #     startval = max(max(idxs), startval)
-    #     logger.info(f"Found existing data in directory {output_dir}, starting indexes at {startval}")
-    # logger.info(f"Saving tensors to {output_dir}/..")
-    # for i, (src, tgt, vaftgt, _) in enumerate(dataloader.iter_once(batch_size), start=startval):
-    #     logger.info(f"Saving batch {i}")
-    #     torch.save(src, output_dir / f"{src_prefix}_{i}.pt")
-    #     torch.save(tgt, output_dir / f"{tgt_prefix}_{i}.pt")
-    #     torch.save(vaftgt, output_dir / f"{vaf_prefix}_{i}.pt")
+
+def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
+    """
+    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
+    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
+    objects, then compares variant objects
+    :param tgt:
+    :param predictions:
+    :param midwidth:
+    :return: Sets of TP, FP, and FN vars
+    """
+    midstart = len(refseqstr) // 2 - midwidth // 2
+    midend  =  len(refseqstr) // 2 + midwidth // 2
+    known_vars = []
+    for v in vcf.aln_to_vars(refseqstr, altseq):
+        if midstart < v.pos < midend:
+            known_vars.append(v)
+
+    pred_vars = []
+    predstr = util.readstr(predictions)
+    for v in vcf.aln_to_vars(refseqstr, predstr):
+        if midstart < v.pos < midend:
+            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
+            pred_vars.append(v)
+
+    tps = [] # True postive - real and detected variant
+    fns = [] # False negatives - real variant but not detected
+    fps = [] # False positives - detected but not a real variant
+    for true_var in known_vars:
+        if true_var in pred_vars:
+            tps.append(true_var)
+        else:
+            fns.append(true_var)
+
+    for detected_var in pred_vars:
+        if detected_var not in known_vars:
+            #logger.info(f"FP: {detected_var}")
+            fps.append(detected_var)
+
+    return tps, fps, fns
 
 
-def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
+def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
     """
     Call variants in a region of a BAM file using the given altpredictor and model
     and return a list of vcf.Variant objects
@@ -314,26 +277,31 @@ def callvars(altpredictor, model, aln, reference, chrom, pos, max_read_depth):
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
 
-
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
     reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-
 
     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
     reftensor = string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
     padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
 
-
+    focal_min = padded_reads.shape[1] // 2 - window_width // 2 + 0
+    focal_max = padded_reads.shape[1] // 2 + window_width // 2 + 0
+    trimmed_reads = padded_reads[:, focal_min:focal_max, :, :]
+    print(f"Window {minref} [{minref + focal_min}  {pos}  {minref + focal_max}]  {maxref}")
+    refseq = refseq[focal_min:focal_max]
     #masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(padded_reads.float().to(DEVICE))
+    seq_preds, _ = model(trimmed_reads.float().to(DEVICE))
     pred1str = util.readstr(seq_preds[0, :, :])
+
+    # for i, r, p in zip(range(minref + focal_min, minref + focal_max), refseq, pred1str):
+    #     print(f"{i}\t{r}\t{p} {'*' if r != p else ''}")
 
     variants = [v for v in vcf.aln_to_vars(refseq,
                              pred1str,
-                             offset=minref)]
-    return variants, seq_preds.squeeze(0)
+                             offset=minref + focal_min)]
+    return variants, seq_preds.squeeze(0),  minref + focal_min
 
 
 def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
@@ -348,15 +316,17 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     reference = pysam.FastaFile(conf['reference'])
 
-    altpredictor = None
-
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2, device=DEVICE).to(DEVICE)
+    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=8, d_hid=400, n_encoder_layers=4, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
     aln = pysam.AlignmentFile(bam)
     results = defaultdict(Counter)
+
+    window_size = 60
+
     for i, row in pd.read_csv(labels).iterrows():
+        pos = int(row.pos)
         if row.ngs_vaf < 0.05:
             vafgroup = "< 0.05"
         elif 0.05 <= row.ngs_vaf < 0.25:
@@ -367,23 +337,23 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
             vafgroup = "> 0.50"
 
         labeltype = f"{row.vtype}-{row.status} {vafgroup}"
-        if results[labeltype]['rows'] > 100:
+        if results[labeltype]['rows'] > 20:
             continue
         try:
-            variants, seq_preds = callvars(altpredictor, model, aln, reference, str(row.chrom), int(row.pos), max_read_depth=max_read_depth)
+            variants, seq_preds, pred_start = callvars(model, aln, reference, str(row.chrom), pos, window_size, max_read_depth=max_read_depth)
         except Exception as ex:
             logger.warning(f"Hmm, exception processing {row.chrom}:{row.pos}, skipping it")
             logger.warning(ex)
             continue
         refwidth = seq_preds.shape[0]
-        refseq = reference.fetch(str(row.chrom), int(row.pos) - refwidth//2, int(row.pos) + refwidth//2)
+        refseq = reference.fetch(str(row.chrom), pred_start, pred_start + seq_preds.shape[0])
         if row.status == 'TP' or row.status == 'FN':
-            true_altseq = refseq[0:refwidth//2 - 1] + row.alt + refseq[refwidth//2 + len(row.ref) - 1:]
+            true_altseq = refseq[0:pos-pred_start-1] + row.alt + refseq[pos - pred_start + len(row.ref)-1:]
         else:
             true_altseq = refseq
 
         tps, fps, fns = eval_prediction(refseq, true_altseq, seq_preds,
-                                        midwidth=150)
+                                        midwidth=min(refwidth, window_size))
         print(f"{row.chrom}:{row.pos} {row.ref} -> {row.alt}\t{row.status} VAF: {row.ngs_vaf:.4f} TP: {len(tps)} FP: {len(fps)} FN: {len(fns)}")
         # print(f"TPs: {tps}")
         # print(f"FPs: {fps}")
