@@ -4,6 +4,12 @@ import torch.nn as nn
 
 
 class SmithWatermanLoss(nn.Module):
+    """
+    A pure pytorch implementation of the differentiable Smith-Waterman alignment, following the
+    algorithm first developed by Petti et al. 2021 (http://repository.cshl.edu/id/eprint/40409/)
+    See also: https://github.com/spetti/SMURF
+    """
+
     def __init__(
         self,
         gap_open_penalty,
@@ -113,3 +119,33 @@ class SmithWatermanLoss(nn.Module):
         hij = results[:, i, j]
         final = self.softmax_temperature(hij + x[:, 1:, 1:, None], dim=(1, 2, 3))
         return -1.0 * final.sum()
+
+
+
+def example():
+    """
+    Some example code for using the Smith-Waterman loss...
+    """
+    BASE_IDX = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+
+    # These functions just convert strings into the tensors needed for input
+    def seq2tensor(s):
+        t = torch.zeros(len(s), 4)
+        for i, b in enumerate(s):
+            t[i, BASE_IDX[b]] = 1
+        return t
+
+    def seq2labels(s):
+        return torch.tensor([BASE_IDX[b] for b in s], dtype=torch.int)
+
+    swl = SmithWatermanLoss(gap_open_penalty=-2, gap_extend_penalty=-1, temperature=1.0, device='cpu')
+    s1 = seq2tensor("ACTGACTG")
+    t1 = seq2labels("ACTGCCTG")
+
+    loss = swl(s1.unsqueeze(0), t1.unsqueeze(0).long())
+    print(f"Score: {loss.item()}")
+    # loss.backward() # Backprop those gradients!
+
+
+if __name__=="__main__":
+    example()
