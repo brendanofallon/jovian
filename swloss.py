@@ -49,18 +49,18 @@ class SmithWatermanLoss(nn.Module):
         self.neg_inf = -1e30
 
     def _gen_rotation_mat(self, shape):
-        ar = torch.arange(shape[1] - 1, end=-1, step=-1).unsqueeze(1)
-        br = torch.arange(shape[2]).unsqueeze(0)
+        ar = torch.arange(shape[1] - 1, end=-1, step=-1, device=self.device).unsqueeze(1)
+        br = torch.arange(shape[2], device=self.device).unsqueeze(0)
 
         i = (br - ar) + (shape[1] - 1)
         j = (ar + br) // 2
         n = shape[1] + shape[2] - 1
         m = (shape[1] + shape[2]) // 2
-        y = torch.full((shape[0], n, m), self.neg_inf)
+        y = torch.full((shape[0], n, m), self.neg_inf, device=self.device)
         return (
             y,
-            (torch.arange(n) + shape[1] % 2) % 2,
-            (torch.full((shape[0], m, 3), self.neg_inf), torch.full((shape[0], m, 3), self.neg_inf)),
+            (torch.arange(n, device=self.device) + shape[1] % 2) % 2,
+            (torch.full((shape[0], m, 3), self.neg_inf, device=self.device), torch.full((shape[0], m, 3), self.neg_inf, device=self.device)),
             (i, j),
         )
 
@@ -118,7 +118,7 @@ class SmithWatermanLoss(nn.Module):
         results = torch.stack(results).transpose(0,1)
         hij = results[:, i, j]
         final = self.softmax_temperature(hij + x[:, 1:, 1:, None], dim=(1, 2, 3))
-        return final.sum()
+        return -1.0 * final.sum()
 
 
 

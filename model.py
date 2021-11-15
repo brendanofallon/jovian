@@ -4,13 +4,9 @@ import logging
 
 import torch
 import torch.nn as nn
-import jax
 import numpy as np
-import jax.numpy as jnp
-from jax2torch import jax2torch
 import math
 
-import sw_functions as sw
 
 logger = logging.getLogger(__name__)
 
@@ -170,19 +166,3 @@ class VarTransformerAltMask(nn.Module):
         return output, 0
 
 
-class SmithWattermanLoss(nn.Module):
-
-    def __init__(self, device, gap_open_penalty=-5, gap_extend_penalty=-1):
-        super().__init__()
-        self.device = device
-        self.gap_open_penalty = gap_open_penalty
-        self.gap_extend_penalty = gap_extend_penalty
-        sw_affine_func = jax.jit(sw.sw_affine(batch=True))
-        self.sw = jax2torch(sw_affine_func)
-
-    def forward(self, predictions, targets):
-        targs_onehot = nn.functional.one_hot(targets, num_classes=4).float().to(self.device)
-        inputs = torch.bmm(predictions, targs_onehot.transpose(1, 2))
-        lens = jnp.array([[predictions.shape[1], targets.shape[1]] for _ in range(predictions.shape[0])])
-        resultmat = self.sw(inputs, lens, self.gap_extend_penalty, self.gap_open_penalty)
-        return resultmat.diagonal(dim1=1, dim2=2).sum()
