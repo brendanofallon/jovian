@@ -112,4 +112,4 @@ class SmithWatermanLoss(nn.Module):
         results = torch.stack(results).transpose(0,1)
         hij = results[:, i, j]
         final = self.softmax_temperature(hij + x[:, 1:, 1:, None], dim=(1, 2, 3))
-        return final.mean()
+        return -1.0 * final.sum()
