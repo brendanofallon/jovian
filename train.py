@@ -111,12 +111,16 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
 def calc_val_accuracy(valpaths, model):
     """
-    Compute accuracy (mean number of variant counts)
+    Compute accuracy (fraction of predicted bases that match actual bases)
+    and calculates mean number of variant counts,
     across all samples in valpaths, using the given model, and return it
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
     with torch.no_grad():
+        match_sum = 0
+        count = 0
+        vaf_mse_sum = 0
         pred_vars = []
         for srcpath, tgtpath, vaftgtpath in valpaths:
             src = util.tensor_from_file(srcpath, DEVICE).float()
@@ -125,6 +129,16 @@ def calc_val_accuracy(valpaths, model):
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
+            # Compute accuracy
+            mid = seq_preds.shape[1] // 2
+            midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
+                        ).float().mean()
+            match_sum += midmatch
+            count += 1
+            vaf_mse_sum += ((vaf - vaf_preds) * (vaf-vaf_preds)).mean().item()
+
+            # Compute mean variant counts
             count_vars_per_batch = 0
             batch_size = 0
             for b in range(src.shape[0]):
@@ -135,7 +149,7 @@ def calc_val_accuracy(valpaths, model):
                 
             pred_vars.append(count_vars_per_batch/batch_size)
                 
-    return mean(pred_vars)
+    return match_sum / count, vaf_mse_sum / count, mean(pred_vars)
 
 
 def train_epochs(epochs,
@@ -178,7 +192,7 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "learning_rate", "epochtime"])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
@@ -223,10 +237,10 @@ def train_epochs(epochs,
             elapsed = datetime.now() - starttime
 
             if valpaths:
-                val_accuracy, val_vaf_mse = calc_val_accuracy(valpaths, model)
+                val_accuracy, val_vaf_mse, mean_var_count = calc_val_accuracy(valpaths, model)
             else:
-                val_accuracy, val_vaf_mse = float("NaN"), float("NaN")
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, val VAF accuracy: {val_vaf_mse:.4f}")
+                val_accuracy, val_vaf_mse, mean_var_count = float("NaN"), float("NaN"), float("NaN")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_accuracy:.4f} val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, val VAF accuracy: {val_vaf_mse:.4f}")
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
@@ -237,6 +251,7 @@ def train_epochs(epochs,
                     "trainingloss": loss,
                     "train_accuracy": train_accuracy,
                     "val_accuarcy": val_accuracy,
+                    "mean_var_count": mean_var_count,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                 })
@@ -247,6 +262,7 @@ def train_epochs(epochs,
                 "trainingloss": loss,
                 "train_accuracy": train_accuracy,
                 "val_accuracy": val_accuracy,
+                "mean_var_count": mean_var_count,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
