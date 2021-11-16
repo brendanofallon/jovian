@@ -436,8 +436,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
         # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
         if kwargs.get("data_augmentation"):
             dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-            dataloader = loader.ShufflingLoader(dataloader)
-            dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
+            #dataloader = loader.ShufflingLoader(dataloader)
+            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
