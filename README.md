@@ -67,8 +67,6 @@ each class type (snv-TP, small_del_1-24-FP, etc), and a list of BAMs + labels, l
 The 'labels.csv' contains a list of genomic regions, chrom/pos/ref/alt and 'TP/FN/FP' status. *This is the tp_fn_fp.csv file produced by the Caravel calc_ppa_ppv task*,
 no modifications needed. 
 
-The `--vals-per-class` argument to the pregen function is now interpreted as a default, so if a class in encountered that
-does not have a `vals_per_class` entry in the config, it will use the default number of samples
 
 ### Performing a training run
 
