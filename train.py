@@ -5,7 +5,6 @@ from datetime import datetime
 import os
 
 import numpy as np
-from statistics import mean
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
@@ -161,7 +160,7 @@ def calc_val_accuracy(valpaths, model):
                 
             pred_vars.append(count_vars_per_batch/batch_size)
                 
-    return match_sum / count, vaf_mse_sum / count, mean(pred_vars)
+    return match_sum / count, vaf_mse_sum / count, np.mean(pred_vars)
 
 
 def train_epochs(epochs,
