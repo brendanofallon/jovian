@@ -213,7 +213,7 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "tps", "fps", "fns", "ppa", "ppv", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "ppa", "ppv", "learning_rate", "epochtime"])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
