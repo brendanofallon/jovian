@@ -141,6 +141,7 @@ def load_conf(confyaml):
     return conf
 
 
+
 def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
@@ -149,11 +150,9 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     src_prefix = "src"
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
-
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
-
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         logger.info(f"Saving batch {i} with uid {uid}")
@@ -172,6 +171,16 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     return metafile.name
 
 
+def annoying():
+    """
+    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
+    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
+    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
+    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
+    """
+    return 500
+
+
 def pregen(config, **kwargs):
     """
     Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
@@ -182,7 +191,7 @@ def pregen(config, **kwargs):
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
     default_vals_per_class = kwargs.get('vals_per_class', 1000)
-    vals_per_class = defaultdict(lambda: default_vals_per_class)
+    vals_per_class = defaultdict(annoying)
     vals_per_class.update(conf['vals_per_class'])
 
     output_dir = Path(kwargs.get('dir'))
@@ -205,7 +214,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
         dataloaders = [
-            loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+                loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
         ]
 
