@@ -248,6 +248,9 @@ def train_epochs(epochs,
                     "val_accuarcy": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
+                    "batch_time_mean": 0, # todo
+                    "decompress_time": 0,  # todo
+                    "train_time": 0,  # todo
                 })
 
             scheduler.step()
@@ -258,6 +261,9 @@ def train_epochs(epochs,
                 "val_accuracy": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
+                "batch_time_mean": 0,  # todo
+                "decompress_time": 0,  # todo
+                "train_time": 0,  # todo
             })
 
             tensorboardWriter.add_scalar("loss/train", loss, epoch)
