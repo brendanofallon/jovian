@@ -213,7 +213,7 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "tps", "fps", "fns", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "tps", "fps", "fns", "ppa", "ppv", "learning_rate", "epochtime"])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
@@ -259,9 +259,15 @@ def train_epochs(epochs,
 
             if valpaths:
                 val_accuracy, val_vaf_mse, mean_var_count, tps, fps, fns = calc_val_accuracy(valpaths, model)
+                try:
+                    ppa = tps/(tps+fns)
+                    ppv = tps/(tps+fps)
+                except ZeroDivisionError:
+                    ppa = 0
+                    ppv = 0
             else:
-                val_accuracy, val_vaf_mse, mean_var_count, tps, fps, fns = float("NaN"), float("NaN"), float("NaN"), 0, 0, 0
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f} val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}, val VAF accuracy: {val_vaf_mse:.4f}")
+                val_accuracy, val_vaf_mse, mean_var_count, ppa, ppv, tps, fps, fns = float("NaN"), float("NaN"), float("NaN"), float("NaN"), float("NaN"), 0, 0, 0
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}, val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}, ppa: {ppa}, ppv: {ppv}, val VAF accuracy: {val_vaf_mse:.4f}")
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
@@ -274,9 +280,8 @@ def train_epochs(epochs,
                     "train_wide_accuracy": train_wide_acc,
                     "val_accuarcy": val_accuracy,
                     "mean_var_count": mean_var_count,
-                    "tps": tps,
-                    "fps": fps,
-                    "fns": fns,
+                    "ppa": ppa,
+                    "ppv": ppv,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                 })
@@ -288,9 +293,8 @@ def train_epochs(epochs,
                 "train_accuracy": train_narrow_acc,
                 "val_accuracy": val_accuracy,
                 "mean_var_count": mean_var_count,
-                "tps": tps,
-                "fps": fps,
-                "fns": fns,
+                "ppa": ppa,
+                "ppv": ppv,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
