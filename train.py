@@ -125,7 +125,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
         if batch % 100 == 0:
-            logger.info(f"Train midmatch for batch {batch} : {midmatch.item():.3f} loss: {loss.item():.3f}")
+            logger.info(f"Batch {batch} : narrow acc: {midmatch_narrow.item():.3f} loss: {loss.item():.3f}")
             
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
@@ -286,7 +286,8 @@ def train_epochs(epochs,
             else:
                 val_accuracy, val_vaf_mse, mean_var_count, ppa, ppv, tps, fps, fns = float("NaN"), float("NaN"), float("NaN"), float("NaN"), float("NaN"), 0, 0, 0
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}, val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}, ppa: {ppa}, ppv: {ppv}, val VAF accuracy: {val_vaf_mse:.4f}")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}, val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}")
+
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
@@ -431,7 +432,7 @@ def create_eval_batches(batch_size, num_reads, read_length, config):
                                                       conf['reference'],
                                                       numreads=num_reads,
                                                       readlength=read_length,
-                                                      var_funcs=[bwasim.make_het_del],
+                                                                          var_funcs=[bwasim.make_het_del],
                                                       vaf_func=vaffunc,
                                                       error_rate=base_error_rate,
                                                       clip_prob=0)
@@ -495,8 +496,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
         # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
         if kwargs.get("data_augmentation"):
             dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-            dataloader = loader.ShufflingLoader(dataloader)
-            dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
+            #dataloader = loader.ShufflingLoader(dataloader)
+            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")

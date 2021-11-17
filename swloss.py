@@ -5,7 +5,7 @@ import torch.nn as nn
 
 class SmithWatermanLoss(nn.Module):
     """
-    A pure pytorch implementation of the differentiable Smith-Waterman alignment, following the
+    A pure pytorch implementation of differentiable Smith-Waterman alignment, following the
     algorithm first developed by Petti et al. 2021 (http://repository.cshl.edu/id/eprint/40409/)
     See also: https://github.com/spetti/SMURF
     """
@@ -65,6 +65,9 @@ class SmithWatermanLoss(nn.Module):
         )
 
     def _rotate(self, x):
+        """
+        Rotate the input matrix... by 45 degrees!
+        """
         smx, smo, carry, (i,j) = self._gen_rotation_mat(x.shape)
         smx[:, i, j] = x
         return (
@@ -77,6 +80,7 @@ class SmithWatermanLoss(nn.Module):
         return cond * true + (1 - cond) * false
 
     def softmax_temperature(self, x, dim=-1):
+        """ A softmax-with-temperature implementation """
         return self.temperature * torch.logsumexp(x / self.temperature, dim=dim)
 
     def _step(self, prev, smx, smo):
