@@ -391,11 +391,6 @@ def main():
     callparser.add_argument("--pos", help="Position", required=True, type=int)
     callparser.set_defaults(func=call)
 
-    evalparser = subparser.add_parser("eval", help="Evaluate a model on some known or simulated data")
-    evalparser.add_argument("-m", "--statedict", help="Stored model", required=True)
-    evalparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
-    evalparser.set_defaults(func=eval_sim)
-
     args = parser.parse_args()
     args.func(**vars(args))
 

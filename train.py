@@ -133,10 +133,7 @@ def calc_val_accuracy(loader, model):
         match_sum = 0
         count = 0
         vaf_mse_sum = 0
-        for src, tgt, vaf, _ in loader:
-            # src = util.tensor_from_file(srcpath, DEVICE).float()
-            # tgt = util.tensor_from_file(tgtpath, DEVICE).long()
-            # vaf = util.tensor_from_file(vaftgtpath, DEVICE)
+        for src, tgt, vaf, _ in loader.iter_once(64):
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
@@ -212,7 +209,6 @@ def train_epochs(epochs,
     if val_dir:
         logger.info(f"Using validation data in {val_dir}")
         val_loader = loader.PregenLoader(device=DEVICE, datadir=val_dir, threads=4)
-        logger.info(f"Found {len(valpaths)} batches in {val_dir}")
     else:
         logger.info(f"No val. dir. provided retaining a few training samples for validation")
         valpaths = dataloader.retain_val_samples(fraction=0.05)
