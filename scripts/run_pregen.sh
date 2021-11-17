@@ -17,13 +17,13 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
-CONF=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/onc_giabs_capturewide/all_chr_except_20_21/all_chr_except_20_21_chpc_conf5.yaml
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/conf_nochr20_21_tns.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_confvpc_tns/
 
-VALS_PER_CLASS=25
+VALS_PER_CLASS=500
 
 mkdir -p $DEST
 
-$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 25 --vals-per-class $VALS_PER_CLASS > $DEST/stdout.log 
+$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 10 --vals-per-class $VALS_PER_CLASS > $DEST/stdout.log 
 

@@ -29,7 +29,7 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, VarTransformerAltMask
-from train import train, load_train_conf
+from train import train, load_train_conf, eval_prediction
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -141,6 +141,7 @@ def load_conf(confyaml):
     return conf
 
 
+
 def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
@@ -149,11 +150,9 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     src_prefix = "src"
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
-
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
-
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         logger.info(f"Saving batch {i} with uid {uid}")
@@ -172,6 +171,16 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     return metafile.name
 
 
+def default_vals_per_class():
+    """
+    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
+    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
+    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
+    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
+    """
+    return 500
+
+
 def pregen(config, **kwargs):
     """
     Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
@@ -181,7 +190,9 @@ def pregen(config, **kwargs):
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
-    vals_per_class = kwargs.get('vals_per_class', 1000)
+    vals_per_class = defaultdict(default_vals_per_class)
+    vals_per_class.update(conf['vals_per_class'])
+
     output_dir = Path(kwargs.get('dir'))
     metadata_file = kwargs.get("metadata_file", None)
     if metadata_file is None:
@@ -202,7 +213,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
         dataloaders = [
-            loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+                loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
         ]
 
@@ -224,47 +235,6 @@ def pregen(config, **kwargs):
             for fut in futures:
                 sample_metafile = fut.result()
                 util.concat_metafile(sample_metafile, metafh)
-
-
-def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
-    """
-    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
-    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
-    objects, then compares variant objects
-    :param tgt:
-    :param predictions:
-    :param midwidth:
-    :return: Sets of TP, FP, and FN vars
-    """
-    midstart = len(refseqstr) // 2 - midwidth // 2
-    midend  =  len(refseqstr) // 2 + midwidth // 2
-    known_vars = []
-    for v in vcf.aln_to_vars(refseqstr, altseq):
-        if midstart < v.pos < midend:
-            known_vars.append(v)
-
-    pred_vars = []
-    predstr = util.readstr(predictions)
-    for v in vcf.aln_to_vars(refseqstr, predstr):
-        if midstart < v.pos < midend:
-            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
-            pred_vars.append(v)
-
-    tps = [] # True postive - real and detected variant
-    fns = [] # False negatives - real variant but not detected
-    fps = [] # False positives - detected but not a real variant
-    for true_var in known_vars:
-        if true_var in pred_vars:
-            tps.append(true_var)
-        else:
-            fns.append(true_var)
-
-    for detected_var in pred_vars:
-        if detected_var not in known_vars:
-            #logger.info(f"FP: {detected_var}")
-            fps.append(detected_var)
-
-    return tps, fps, fns
 
 
 def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
@@ -386,7 +356,7 @@ def main():
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
-    genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
+    # genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
     genparser.add_argument("-mf", "--metadata-file", help="The metadata file that records each row in the encoded tensor files and the variant from which that row is derived. The name pregen_{time}.csv will be used if not specified.")
     genparser.set_defaults(func=pregen)
 

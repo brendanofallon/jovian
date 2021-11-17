@@ -5,7 +5,6 @@ from datetime import datetime
 import os
 
 import numpy as np
-from statistics import mean
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
@@ -136,8 +135,9 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
 def calc_val_accuracy(valpaths, model):
     """
-    Compute accuracy (fraction of predicted bases that match actual bases)
-    and calculates mean number of variant counts,
+    Compute accuracy (fraction of predicted bases that match actual bases),
+    calculates mean number of variant counts between tgt and predicted sequence,
+    and also calculates TP, FP and FN count based on reference, alt and predicted sequence.
     across all samples in valpaths, using the given model, and return it
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
@@ -148,6 +148,9 @@ def calc_val_accuracy(valpaths, model):
         count = 0
         vaf_mse_sum = 0
         pred_vars = []
+        tp_total = 0
+        fp_total = 0
+        fn_total = 0
         for srcpath, tgtpath, vaftgtpath in valpaths:
             src = util.tensor_from_file(srcpath, DEVICE).float()
             tgt = util.tensor_from_file(tgtpath, DEVICE).long()
@@ -172,10 +175,16 @@ def calc_val_accuracy(valpaths, model):
                 tgtstr = util.tgt_str(tgt[b, :])
                 count_vars_per_batch += len(list(vcf.aln_to_vars(tgtstr, predstr)))
                 batch_size += 1
-                
+
+                # Get TP, FN and FN based on reference, alt and predicted sequence.
+                tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]),  tgtstr, seq_preds[b, :, :])
+                tp_total += len(tps)
+                fp_total += len(fps)
+                fn_total += len(fns)
+
             pred_vars.append(count_vars_per_batch/batch_size)
                 
-    return match_sum / count, vaf_mse_sum / count, mean(pred_vars)
+    return match_sum / count, vaf_mse_sum / count, np.mean(pred_vars), tp_total, fp_total, fn_total
 
 
 def train_epochs(epochs,
@@ -222,7 +231,7 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "ppa", "ppv", "learning_rate", "epochtime"])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
@@ -267,12 +276,17 @@ def train_epochs(epochs,
             elapsed = datetime.now() - starttime
 
             if valpaths:
-                val_accuracy, val_vaf_mse, mean_var_count = calc_val_accuracy(valpaths, model)
+                val_accuracy, val_vaf_mse, mean_var_count, tps, fps, fns = calc_val_accuracy(valpaths, model)
+                try:
+                    ppa = tps/(tps+fns)
+                    ppv = tps/(tps+fps)
+                except ZeroDivisionError:
+                    ppa = 0
+                    ppv = 0
             else:
-                val_accuracy, val_vaf_mse, mean_var_count = float("NaN"), float("NaN"), float("NaN")
+                val_accuracy, val_vaf_mse, mean_var_count, ppa, ppv, tps, fps, fns = float("NaN"), float("NaN"), float("NaN"), float("NaN"), float("NaN"), 0, 0, 0
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}  val accuracy: {val_accuracy:.4f} val var count:  {mean_var_count:.2f}")
-
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}, val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}, ppa: {ppa}, ppv: {ppv}, val VAF accuracy: {val_vaf_mse:.4f}")
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
@@ -285,6 +299,8 @@ def train_epochs(epochs,
                     "train_wide_accuracy": train_wide_acc,
                     "val_accuarcy": val_accuracy,
                     "mean_var_count": mean_var_count,
+                    "ppa": ppa,
+                    "ppv": ppv,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                 })
@@ -296,6 +312,8 @@ def train_epochs(epochs,
                 "train_accuracy": train_narrow_acc,
                 "val_accuracy": val_accuracy,
                 "mean_var_count": mean_var_count,
+                "ppa": ppa,
+                "ppv": ppv,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
@@ -328,6 +346,47 @@ def load_train_conf(confyaml):
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
     assert 'data' in conf, "Expected 'data' entry in training configuration"
     return conf
+
+
+def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
+    """
+    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
+    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
+    objects, then compares variant objects
+    :param tgt:
+    :param predictions:
+    :param midwidth:
+    :return: Sets of TP, FP, and FN vars
+    """
+    midstart = len(refseqstr) // 2 - midwidth // 2
+    midend  =  len(refseqstr) // 2 + midwidth // 2
+    known_vars = []
+    for v in vcf.aln_to_vars(refseqstr, altseq):
+        if midstart < v.pos < midend:
+            known_vars.append(v)
+
+    pred_vars = []
+    predstr = util.readstr(predictions)
+    for v in vcf.aln_to_vars(refseqstr, predstr):
+        if midstart < v.pos < midend:
+            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
+            pred_vars.append(v)
+
+    tps = [] # True postive - real and detected variant
+    fns = [] # False negatives - real variant but not detected
+    fps = [] # False positives - detected but not a real variant
+    for true_var in known_vars:
+        if true_var in pred_vars:
+            tps.append(true_var)
+        else:
+            fns.append(true_var)
+
+    for detected_var in pred_vars:
+        if detected_var not in known_vars:
+            #logger.info(f"FP: {detected_var}")
+            fps.append(detected_var)
+
+    return tps, fps, fns
 
 
 def eval_batch(src, tgt, predictions):
