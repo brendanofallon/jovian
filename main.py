@@ -29,7 +29,7 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, VarTransformerAltMask
-from train import train, load_train_conf
+from train import train, load_train_conf, eval_prediction
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -189,47 +189,6 @@ def pregen(config, **kwargs):
             for fut in futures:
                 sample_metafile = fut.result()
                 util.concat_metafile(sample_metafile, metafh)
-
-
-def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
-    """
-    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
-    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
-    objects, then compares variant objects
-    :param tgt:
-    :param predictions:
-    :param midwidth:
-    :return: Sets of TP, FP, and FN vars
-    """
-    midstart = len(refseqstr) // 2 - midwidth // 2
-    midend  =  len(refseqstr) // 2 + midwidth // 2
-    known_vars = []
-    for v in vcf.aln_to_vars(refseqstr, altseq):
-        if midstart < v.pos < midend:
-            known_vars.append(v)
-
-    pred_vars = []
-    predstr = util.readstr(predictions)
-    for v in vcf.aln_to_vars(refseqstr, predstr):
-        if midstart < v.pos < midend:
-            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
-            pred_vars.append(v)
-
-    tps = [] # True postive - real and detected variant
-    fns = [] # False negatives - real variant but not detected
-    fps = [] # False positives - detected but not a real variant
-    for true_var in known_vars:
-        if true_var in pred_vars:
-            tps.append(true_var)
-        else:
-            fns.append(true_var)
-
-    for detected_var in pred_vars:
-        if detected_var not in known_vars:
-            #logger.info(f"FP: {detected_var}")
-            fps.append(detected_var)
-
-    return tps, fps, fns
 
 
 def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):

@@ -266,7 +266,9 @@ class ShufflingLoader:
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
-            src = src[:, :, torch.randperm(src.shape[2])[1:], :]
+            src_non_ref_reads = src[:, :, 1:, :]
+            src_non_ref_reads_shuf = src_non_ref_reads[:, :, torch.randperm(src_non_ref_reads.shape[2]), :]
+            src = torch.cat((src[:, :, :1, :], src_non_ref_reads_shuf), dim=2)
             yield src, tgt, vaftgt, None
 
 
