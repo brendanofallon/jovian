@@ -436,9 +436,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
  
     conf = load_train_conf(config)
-    # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
+
     if kwargs.get("datadir") is not None:
         logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
         pregenloader = loader.PregenLoader(DEVICE,
@@ -451,8 +449,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
         # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
         if kwargs.get("data_augmentation"):
             dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-            #dataloader = loader.ShufflingLoader(dataloader)
-            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
+            dataloader = loader.ShufflingLoader(dataloader)
+            dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")

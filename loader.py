@@ -241,9 +241,7 @@ class ShorteningLoader:
 
     def iter_once(self, batch_size):
         for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
-            #start = np.random.randint(100) # src.shape[1] // 2 - self.seq_len // 2
             start = src.shape[1] // 2 - self.seq_len // 2
-            #end = src.shape[1] - np.random.randint(100) # // 2 + self.seq_len //2
             end = src.shape[1] // 2 + self.seq_len //2
             yield src[:, start:end, :, :], tgt[:, :, start:end],  vaftgt, None
 
