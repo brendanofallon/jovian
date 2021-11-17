@@ -421,7 +421,7 @@ def assign_class_indexes(rows):
     return idxs, class_names
 
 
-def resample_classes(classes, class_names, rows, vals_per_class=100):
+def resample_classes(classes, class_names, rows, vals_per_class):
     """
     Randomly sample each class so that there are 'vals_per_class' members of each class
     then return a list of class assignments and the selected rows
@@ -430,21 +430,26 @@ def resample_classes(classes, class_names, rows, vals_per_class=100):
     for clz, row in zip(classes, rows):
         byclass[clz].append(row)
 
+    for name in class_names.values():
+        if name not in vals_per_class:
+            logger.warning(f"Class name '{name}' not found in vals per class, will select default of {vals_per_class[class_names[clz]]} items from class {name}")
+
     result_rows = []
     result_classes = []
     for clz, classrows in byclass.items():
+
         # If there are MORE instances on this class than we want, grab a random sample of them
         logger.info(f"Variant class {class_names[clz]} contains {len(classrows)} variants")
-        if len(classrows) > vals_per_class:
-            logger.info(f"Randomly sampling {vals_per_class} variants for variant class {class_names[clz]}")
-            rows = random.sample(classrows, vals_per_class)
+        if len(classrows) > vals_per_class[class_names[clz]]:
+            logger.info(f"Randomly sampling {vals_per_class[class_names[clz]]} variants for variant class {class_names[clz]}")
+            rows = random.sample(classrows, vals_per_class[class_names[clz]])
             result_rows.extend(rows)
-            result_classes.extend([clz] * vals_per_class)
+            result_classes.extend([clz] * vals_per_class[class_names[clz]])
         else:
             # If there are FEWER instances of the class than we want, then loop over them
             # repeatedly - no random sampling since that might ignore a few of the precious few samples we do have
-            logger.info(f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class} {class_names[clz]} variants")
-            for i in range(vals_per_class):
+            logger.info(f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class[class_names[clz]]} {class_names[clz]} variants")
+            for i in range(vals_per_class[class_names[clz]]):
                 result_classes.append(clz)
                 idx = i % len(classrows)
                 result_rows.append(classrows[idx])
@@ -458,7 +463,7 @@ def upsample_labels(rows, vals_per_class):
      The new list will be multiple times larger then the old list and will contain repeated
      elements of the low frequency classes
     :param rows: List of elements with vtype and status attributes (probably read in from a labels CSV file)
-    :param vals_per_class: Number of instances to retain for each class
+    :param vals_per_class: Number of instances to retain for each class, OR a Mapping with class names and values
     :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
     """
     label_idxs, label_names = assign_class_indexes(rows)
