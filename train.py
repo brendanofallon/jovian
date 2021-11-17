@@ -82,8 +82,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         seq_preds, vaf_preds = model(src)
 
         tgt_seq = tgt_seq.squeeze(1)
-        # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
-        loss = criterion(seq_preds, tgt_seq)
+        if type(criterion) == nn.CrossEntropyLoss:
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        else:
+            loss = criterion(seq_preds, tgt_seq)
 
         count += 1
         if count % 100 == 0:
@@ -197,7 +199,8 @@ def train_epochs(epochs,
                  model_dest=None,
                  eval_batches=None,
                  val_dir=None,
-                 batch_size=64):
+                 batch_size=64,
+                 lossfunc='ce'):
 
 
     attention_heads = 8
@@ -220,11 +223,19 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict))
     model.train()
 
-    # criterion = nn.CrossEntropyLoss()
-    criterion = SmithWatermanLoss(gap_open_penalty=-5,
-                                   gap_extend_penalty=-1,
-                                   temperature=1.0,
+    if lossfunc == 'ce':
+        logger.info("Creating CrossEntropy loss function")
+        criterion = nn.CrossEntropyLoss()
+    elif lossfunc == 'sw':
+        gap_open_penalty=-5
+        gap_exend_penalty=-1
+        temperature=1.0
+        logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}")
+        criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
+                                   gap_extend_penalty=gap_exend_penalty,
+                                   temperature=temperature,
                                    device=DEVICE)
+
     vaf_crit = None #nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
@@ -411,62 +422,6 @@ def eval_batch(src, tgt, predictions):
     return tp_total, fp_total, fn_total
 
 
-def create_eval_batches(batch_size, num_reads, read_length, config):
-    """
-    Create batches of simulated variants for evaluation
-    :param batch_size: Number of pileups per batch
-    :param config: Config yaml, must contain reference and regions
-    :return: Mapping from variant type -> (batch src, tgt, vaftgt, altmask)
-    """
-    base_error_rate = 0.01
-    if type(config) == str:
-        conf = load_train_conf(config)
-    else:
-        conf = config
-    regions = bwasim.load_regions(conf['regions'])
-    eval_batches = {}
-    logger.info(f"Generating evaluation batches of size {batch_size}")
-    vaffunc = bwasim.betavaf
-    eval_batches['del'] = bwasim.make_batch(batch_size,
-                                                      regions,
-                                                      conf['reference'],
-                                                      numreads=num_reads,
-                                                      readlength=read_length,
-                                                                          var_funcs=[bwasim.make_het_del],
-                                                      vaf_func=vaffunc,
-                                                      error_rate=base_error_rate,
-                                                      clip_prob=0)
-    eval_batches['ins'] = bwasim.make_batch(batch_size,
-                                                regions,
-                                                conf['reference'],
-                                                numreads=num_reads,
-                                                readlength=read_length,
-                                                vaf_func=vaffunc,
-                                                var_funcs=[bwasim.make_het_ins],
-                                                error_rate=base_error_rate,
-                                                clip_prob=0)
-    eval_batches['snv'] = bwasim.make_batch(batch_size,
-                                                regions,
-                                                conf['reference'],
-                                                numreads=num_reads,
-                                                readlength=read_length,
-                                                vaf_func=vaffunc,
-                                                var_funcs=[bwasim.make_het_snv],
-                                                error_rate=base_error_rate,
-                                                clip_prob=0)
-    eval_batches['mnv'] = bwasim.make_batch(batch_size,
-                                                regions,
-                                                conf['reference'],
-                                                numreads=num_reads,
-                                                readlength=read_length,
-                                                vaf_func=vaffunc,
-                                                var_funcs=[bwasim.make_het_del],
-                                                error_rate=base_error_rate,
-                                                clip_prob=0)
-    logger.info("Done generating evaluation batches")
-    return eval_batches
-
-
 def train(config, output_model, input_model, epochs, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
@@ -519,5 +474,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
+                 lossfunc=kwargs.get('loss'),
                  )
 
