@@ -86,52 +86,6 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
 
 
 
-def eval_sim(statedict, config, **kwargs):
-    max_read_depth = 200
-    feats_per_read = 7
-    logger.info(f"Found torch device: {DEVICE}")
-    conf = load_train_conf(config)
-    regions = bwasim.load_regions(conf['regions'])
-    in_dim = (max_read_depth ) * feats_per_read
-
-    altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
-    altpredictor.to(DEVICE)
-
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
-    model.load_state_dict(torch.load(statedict))
-    model.eval()
-
-    batch_size = 100
-    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
-        label = str(varfunc.__name__).split("_")[-1]
-        for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
-            src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
-                                                  regions,
-                                                  conf['reference'],
-                                                  numreads=200,
-                                                  readlength=140,
-                                                  var_funcs=[varfunc],
-                                                  vaf_func=lambda : vaf,
-                                                  error_rate=0.01,
-                                                  clip_prob=0)
-
-            fullmask = create_altmask(altpredictor, src)
-            masked_src = src.to(DEVICE) * fullmask
-            seq_preds, vaf_preds = model(masked_src)
-
-            tp_total = 0
-            fp_total = 0
-            fn_total = 0
-            for b in range(src.shape[0]):
-                tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]),  util.tgt_str(tgt[b, :]), seq_preds[b, :, :], midwidth=50)
-                tp_total += len(tps)
-                fp_total += len(fps)
-                fn_total += len(fns)
-
-            print(f"{label}, {vaf:.3f}, {tp_total}, {fp_total}, {fn_total}")
-            # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
-
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
@@ -396,11 +350,6 @@ def main():
     callparser.add_argument("--chrom", help="Chromosome", required=True)
     callparser.add_argument("--pos", help="Position", required=True, type=int)
     callparser.set_defaults(func=call)
-
-    evalparser = subparser.add_parser("eval", help="Evaluate a model on some known or simulated data")
-    evalparser.add_argument("-m", "--statedict", help="Stored model", required=True)
-    evalparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
-    evalparser.set_defaults(func=eval_sim)
 
     args = parser.parse_args()
     args.func(**vars(args))

@@ -128,20 +128,26 @@ def decompress_multi(paths, threads):
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
+    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
         """
         Create a new loader that reads tensors from a 'pre-gen' directory
         :param device: torch.device
         :param datadir: Directory to read data from
         :param threads: Max threads to use for decompressing data
         :param max_decomped_batches: Maximum number of batches to decompress at once. Increase this on machines with tons of RAM
+        :param pathpairs: List of (src path, tgt path, vaftgt path) tuples to use for data
         """
         self.device = device
         self.datadir = Path(datadir)
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
-        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
+        if pathpairs and datadir:
+            raise ValueError(f"Both datadir and pathpairs specified for PregenLoader - please choose just one")
+        if pathpairs:
+            self.pathpairs = pathpairs
+        else:
+            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
