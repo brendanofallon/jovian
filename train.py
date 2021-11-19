@@ -85,7 +85,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         if type(criterion) == nn.CrossEntropyLoss:
             loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
         else:
-            loss = criterion(seq_preds, tgt_seq)
+            midwidth = 100
+            start = seq_preds.shape[1] // 2 - midwidth // 2
+            end = seq_preds.shape[1] // 2 + midwidth // 2
+            loss = criterion(seq_preds[:, start:end, :, :], tgt_seq[:, start:end])
 
         count += 1
         if count % 100 == 0:
@@ -464,7 +467,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
 
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=300,
+                 max_read_depth=100,
                  feats_per_read=9,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
