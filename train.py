@@ -3,6 +3,7 @@ import logging
 import yaml
 from datetime import datetime
 import os
+from pygit2 import Repository
 
 import numpy as np
 import torch
@@ -50,7 +51,7 @@ class TrainLogger:
             pass
 
     def log(self, items):
-        assert len(items) == len(self.headers), f"Expected {len(headers)} items to log, but got {len(items)}"
+        assert len(items) == len(self.headers), f"Expected {len(self.headers)} items to log, but got {len(items)}"
         self.output.write(
             ",".join(str(items[k]) for k in self.headers) + "\n"
         )
@@ -109,7 +110,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
     logger.info(f"Trained {batch+1} batches in total.")
-    return epoch_loss_sum, midmatch.item(), vafloss_sum
+    batch_time_mean, decompress_time, train_time, io_time = 0, 0, 0, 0
+    return epoch_loss_sum, midmatch.item(), vafloss_sum, batch_time_mean, decompress_time, train_time, io_time
 
 
 def calc_val_accuracy(valpaths, model):
@@ -153,7 +155,9 @@ def train_epochs(epochs,
                  eval_batches=None,
                  val_dir=None,
                  wandb_run_name=None,
-                 batch_size=64):
+                 batch_size=64,
+                 cl_args={},
+                 ):
 
 
     attention_heads = 8
@@ -190,19 +194,34 @@ def train_epochs(epochs,
 
     if ENABLE_WANDB:
         import wandb
-        wandb.init(project='variant-transformer', entity='arup-rnd')
-        if wandb_run_name:
-            wandb.run.name = f"wandb_run_name_{wandb.run.id}"
-            wandb.run.save()
-        wandb.config.learning_rate = init_learning_rate
-        wandb.config.feats_per_read = feats_per_read
-        wandb.config.batch_size = batch_size
-        wandb.config.read_depth = max_read_depth
-        wandb.config.attn_heads = attention_heads
-        wandb.config.transformer_dim = transformer_dim
-        wandb.config.encoder_layers = encoder_layers
-        wandb.watch(model)
+        # get git branch info for logging
+        git_repo = Repository(os.path.abspath(__file__))
+        # what to log in wandb
+        wandb_config_params = dict(
+            learning_rate=init_learning_rate,
+            feats_per_read=feats_per_read,
+            batch_size=batch_size,
+            read_depth=max_read_depth,
+            attn_heads=attention_heads,
+            transformer_dim=transformer_dim,
+            encoder_layers=encoder_layers,
+            git_branch=git_repo.head.name,
+            git_target=git_repo.head.target,
+            git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
+        )
+        # log command line too
+        wandb_config_params.update(cl_args)
+        with wandb.init(config=wandb_config_params, project='variant-transformer', entity='arup-rnd'):
+            if wandb_run_name:
+                wandb.run.name = f"wandb_run_name_{wandb.run.id}"
+                wandb.run.save()
+            wandb.watch(model, log="all", log_freq=1000)
         logger.info(f"Created Weights & Biases run with name {wandb.run.name}")
+
+        # create an artifact with input data
+        # we could add this directly to wandb.config if not too much clutter
+
+
 
     valpaths = []
     try:
@@ -222,7 +241,7 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, train_accuracy, vafloss = train_epoch(model,
+            loss, train_accuracy, vafloss, batch_time_mean, decompress_time, train_time, io_time = train_epoch(model,
                                                   optimizer,
                                                   criterion,
                                                   vaf_crit,
@@ -251,6 +270,7 @@ def train_epochs(epochs,
                     "batch_time_mean": 0, # todo
                     "decompress_time": 0,  # todo
                     "train_time": 0,  # todo
+                    "io_time": 0,  # todo
                 })
 
             scheduler.step()
@@ -264,6 +284,7 @@ def train_epochs(epochs,
                 "batch_time_mean": 0,  # todo
                 "decompress_time": 0,  # todo
                 "train_time": 0,  # todo
+                "io_time": 0,  # todo
             })
 
             tensorboardWriter.add_scalar("loss/train", loss, epoch)
@@ -425,6 +446,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
-                 wandb_run_name=kwargs.get("wandb_run_name")
+                 wandb_run_name=kwargs.get("wandb_run_name"),
+                 cl_args=kwargs.get("cl_args")
                  )
 

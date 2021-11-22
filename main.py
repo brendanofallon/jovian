@@ -442,6 +442,7 @@ def main():
     evalparser.set_defaults(func=eval_sim)
 
     args = parser.parse_args()
+    args.cl_args = vars(args).copy()  # command line copy for logging
     args.func(**vars(args))
 
 
