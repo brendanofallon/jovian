@@ -29,7 +29,7 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, VarTransformerAltMask
-from train import train, load_train_conf
+from train import train, load_train_conf, eval_prediction
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -86,52 +86,6 @@ def call(statedict, bam, reference, chrom, pos, **kwargs):
 
 
 
-def eval_sim(statedict, config, **kwargs):
-    max_read_depth = 200
-    feats_per_read = 7
-    logger.info(f"Found torch device: {DEVICE}")
-    conf = load_train_conf(config)
-    regions = bwasim.load_regions(conf['regions'])
-    in_dim = (max_read_depth ) * feats_per_read
-
-    altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
-    altpredictor.to(DEVICE)
-
-    model = VarTransformer(in_dim=in_dim, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
-    model.load_state_dict(torch.load(statedict))
-    model.eval()
-
-    batch_size = 100
-    for varfunc in [bwasim.make_het_del, bwasim.make_het_ins, bwasim.make_het_snv, bwasim.make_mnv, bwasim.make_novar]:
-        label = str(varfunc.__name__).split("_")[-1]
-        for vaf in [0.99, 0.50, 0.25, 0.10, 0.05]:
-            src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
-                                                  regions,
-                                                  conf['reference'],
-                                                  numreads=200,
-                                                  readlength=140,
-                                                  var_funcs=[varfunc],
-                                                  vaf_func=lambda : vaf,
-                                                  error_rate=0.01,
-                                                  clip_prob=0)
-
-            fullmask = create_altmask(altpredictor, src)
-            masked_src = src.to(DEVICE) * fullmask
-            seq_preds, vaf_preds = model(masked_src)
-
-            tp_total = 0
-            fp_total = 0
-            fn_total = 0
-            for b in range(src.shape[0]):
-                tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]),  util.tgt_str(tgt[b, :]), seq_preds[b, :, :], midwidth=50)
-                tp_total += len(tps)
-                fp_total += len(fps)
-                fn_total += len(fns)
-
-            print(f"{label}, {vaf:.3f}, {tp_total}, {fp_total}, {fn_total}")
-            # print(f"VAF: {vaf} PPA: {tp_total / (tp_total + fn_total):.3f} PPV: {tp_total / (tp_total + fp_total):.3f}")
-
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
@@ -139,6 +93,7 @@ def load_conf(confyaml):
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
     assert 'data' in conf, "Expected 'data' entry in training configuration"
     return conf
+
 
 
 def pregen_one_sample(dataloader, batch_size, output_dir):
@@ -149,11 +104,9 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     src_prefix = "src"
     tgt_prefix = "tgt"
     vaf_prefix = "vaftgt"
-
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
-
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         logger.info(f"Saving batch {i} with uid {uid}")
@@ -172,6 +125,16 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     return metafile.name
 
 
+def default_vals_per_class():
+    """
+    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
+    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
+    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
+    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
+    """
+    return 500
+
+
 def pregen(config, **kwargs):
     """
     Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
@@ -181,7 +144,9 @@ def pregen(config, **kwargs):
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
     samples_per_pos = kwargs.get('samples_per_pos', 10)
-    vals_per_class = kwargs.get('vals_per_class', 1000)
+    vals_per_class = defaultdict(default_vals_per_class)
+    vals_per_class.update(conf['vals_per_class'])
+
     output_dir = Path(kwargs.get('dir'))
     metadata_file = kwargs.get("metadata_file", None)
     if metadata_file is None:
@@ -202,7 +167,7 @@ def pregen(config, **kwargs):
     else:
         logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
         dataloaders = [
-            loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+                loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
             for c in conf['data']
         ]
 
@@ -224,47 +189,6 @@ def pregen(config, **kwargs):
             for fut in futures:
                 sample_metafile = fut.result()
                 util.concat_metafile(sample_metafile, metafh)
-
-
-def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
-    """
-    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
-    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
-    objects, then compares variant objects
-    :param tgt:
-    :param predictions:
-    :param midwidth:
-    :return: Sets of TP, FP, and FN vars
-    """
-    midstart = len(refseqstr) // 2 - midwidth // 2
-    midend  =  len(refseqstr) // 2 + midwidth // 2
-    known_vars = []
-    for v in vcf.aln_to_vars(refseqstr, altseq):
-        if midstart < v.pos < midend:
-            known_vars.append(v)
-
-    pred_vars = []
-    predstr = util.readstr(predictions)
-    for v in vcf.aln_to_vars(refseqstr, predstr):
-        if midstart < v.pos < midend:
-            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
-            pred_vars.append(v)
-
-    tps = [] # True postive - real and detected variant
-    fns = [] # False negatives - real variant but not detected
-    fps = [] # False positives - detected but not a real variant
-    for true_var in known_vars:
-        if true_var in pred_vars:
-            tps.append(true_var)
-        else:
-            fns.append(true_var)
-
-    for detected_var in pred_vars:
-        if detected_var not in known_vars:
-            #logger.info(f"FP: {detected_var}")
-            fps.append(detected_var)
-
-    return tps, fps, fns
 
 
 def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
@@ -386,7 +310,7 @@ def main():
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
-    genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
+    # genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
     genparser.add_argument("-mf", "--metadata-file", help="The metadata file that records each row in the encoded tensor files and the variant from which that row is derived. The name pregen_{time}.csv will be used if not specified.")
     genparser.set_defaults(func=pregen)
 
@@ -416,6 +340,7 @@ def main():
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
     trainparser.add_argument("-da", "--data-augmentation", action="store_true", help="Specify --data-augmentation to perform data augmentation via diff loaders, default is false", default=False)
+    trainparser.add_argument("--loss", help="Loss function to use, use 'ce' for CrossEntropy or 'sw' for Smith-Waterman", choices=['ce', 'sw'], default='ce')
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")
@@ -425,11 +350,6 @@ def main():
     callparser.add_argument("--chrom", help="Chromosome", required=True)
     callparser.add_argument("--pos", help="Position", required=True, type=int)
     callparser.set_defaults(func=call)
-
-    evalparser = subparser.add_parser("eval", help="Evaluate a model on some known or simulated data")
-    evalparser.add_argument("-m", "--statedict", help="Stored model", required=True)
-    evalparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
-    evalparser.set_defaults(func=eval_sim)
 
     args = parser.parse_args()
     args.func(**vars(args))
