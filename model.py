@@ -126,7 +126,7 @@ class VarTransformerAltMask(nn.Module):
     def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
         super().__init__()
         self.device=device
-        self.embed_dim = nhead * 20
+        self.embed_dim = nhead * 30
         self.conv_out_channels = 10
         self.fc1_hidden = 12
 
