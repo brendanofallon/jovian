@@ -17,6 +17,7 @@ import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer, VarTransformerAltMask
+from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -68,7 +69,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     :param batch_size:
     :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
     """
-    epoch_loss_sum = 0
+    epoch_loss_sum = None
+    prev_epoch_loss = None
     vafloss_sum = 0
     count = 0
     midmatch_narrow_sum = 0
@@ -80,11 +82,18 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         seq_preds, vaf_preds = model(src)
 
         tgt_seq = tgt_seq.squeeze(1)
-        loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        if type(criterion) == nn.CrossEntropyLoss:
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        else:
+            loss = criterion(seq_preds, tgt_seq)
 
         count += 1
         if count % 100 == 0:
-            logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f}")
+            if prev_epoch_loss:
+                lossdif = epoch_loss_sum - prev_epoch_loss
+            else:
+                lossdif = 0
+            logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f} epoch loss dif: {lossdif:.3f}")
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
 
         with torch.no_grad():
@@ -110,16 +119,23 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
-        epoch_loss_sum += loss.detach().item()
+        if epoch_loss_sum is None:
+            epoch_loss_sum = loss.detach().item()
+        else:
+            prev_epoch_loss = epoch_loss_sum
+            epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
+        if batch % 100 == 0:
+            logger.info(f"Batch {batch} : narrow acc: {midmatch_narrow.item():.3f} loss: {loss.item():.3f}")
+            
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
 
     logger.info(f"Trained {batch+1} batches in total.")
     return epoch_loss_sum, midmatch_narrow_sum / batch, midmatch_wide_sum / batch
 
 
-def calc_val_accuracy(valpaths, model):
+def calc_val_accuracy(loader, model):
     """
     Compute accuracy (fraction of predicted bases that match actual bases),
     calculates mean number of variant counts between tgt and predicted sequence,
@@ -133,14 +149,13 @@ def calc_val_accuracy(valpaths, model):
         match_sum = 0
         count = 0
         vaf_mse_sum = 0
-        pred_vars = []
         tp_total = 0
         fp_total = 0
         fn_total = 0
-        for srcpath, tgtpath, vaftgtpath in valpaths:
-            src = util.tensor_from_file(srcpath, DEVICE).float()
-            tgt = util.tensor_from_file(tgtpath, DEVICE).long()
-            vaf = util.tensor_from_file(vaftgtpath, DEVICE)
+
+        for src, tgt, vaf, _ in loader.iter_once(64):
+            pred_vars = []
+
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
@@ -181,9 +196,9 @@ def train_epochs(epochs,
                  checkpoint_freq=0,
                  statedict=None,
                  model_dest=None,
-                 eval_batches=None,
                  val_dir=None,
-                 batch_size=64):
+                 batch_size=64,
+                 lossfunc='ce'):
 
 
     attention_heads = 8
@@ -206,8 +221,20 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict))
     model.train()
 
-    criterion = nn.CrossEntropyLoss()
-    vaf_crit = nn.MSELoss()
+    if lossfunc == 'ce':
+        logger.info("Creating CrossEntropy loss function")
+        criterion = nn.CrossEntropyLoss()
+    elif lossfunc == 'sw':
+        gap_open_penalty=-5
+        gap_exend_penalty=-1
+        temperature=1.0
+        logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}")
+        criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
+                                   gap_extend_penalty=gap_exend_penalty,
+                                   temperature=temperature,
+                                   device=DEVICE)
+
+    vaf_crit = None #nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
 
@@ -230,21 +257,15 @@ def train_epochs(epochs,
         wandb.config.encoder_layers = encoder_layers
         wandb.watch(model)
 
-    valpaths = []
-    try:
-        if val_dir:
-            logger.info(f"Using validation data in {val_dir}")
-            valpaths = util.find_files(val_dir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt')
-            logger.info(f"Found {len(valpaths)} batches in {val_dir}")
-        else:
-            logger.info(f"No val. dir. provided retaining a few training samples for validation")
-            valpaths = dataloader.retain_val_samples(fraction=0.05)
-            logger.info(f"Pulled {len(valpaths)} samples to use for validation")
+    if val_dir:
+        logger.info(f"Using validation data in {val_dir}")
+        val_loader = loader.PregenLoader(device=DEVICE, datadir=val_dir, threads=4)
+    else:
+        logger.info(f"No val. dir. provided retaining a few training samples for validation")
+        valpaths = dataloader.retain_val_samples(fraction=0.05)
+        val_loader = loader.PregenLoader(device=DEVICE, datadir=None, pathpairs=valpaths, threads=4)
+        logger.info(f"Pulled {len(valpaths)} samples to use for validation")
 
-    except Exception as ex:
-        logger.warning(f"Error loading validation samples, will not have any validation data for this run {ex}")
-        valpaths = []
-    
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
@@ -257,17 +278,17 @@ def train_epochs(epochs,
                                                   max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
 
-            if valpaths:
-                val_accuracy, val_vaf_mse, mean_var_count, tps, fps, fns = calc_val_accuracy(valpaths, model)
-                try:
-                    ppa = tps/(tps+fns)
-                    ppv = tps/(tps+fps)
-                except ZeroDivisionError:
-                    ppa = 0
-                    ppv = 0
-            else:
-                val_accuracy, val_vaf_mse, mean_var_count, ppa, ppv, tps, fps, fns = float("NaN"), float("NaN"), float("NaN"), float("NaN"), float("NaN"), 0, 0, 0
+            val_accuracy, val_vaf_mse, mean_var_count, tps, fps, fns = calc_val_accuracy(val_loader, model)
+
+            try:
+                ppa = tps/(tps+fns)
+                ppv = tps/(tps+fps)
+            except ZeroDivisionError:
+                ppa = 0
+                ppv = 0
+
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}, val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}, ppa: {ppa}, ppv: {ppv}, val VAF accuracy: {val_vaf_mse:.4f}")
+
 
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
@@ -391,62 +412,6 @@ def eval_batch(src, tgt, predictions):
     return tp_total, fp_total, fn_total
 
 
-def create_eval_batches(batch_size, num_reads, read_length, config):
-    """
-    Create batches of simulated variants for evaluation
-    :param batch_size: Number of pileups per batch
-    :param config: Config yaml, must contain reference and regions
-    :return: Mapping from variant type -> (batch src, tgt, vaftgt, altmask)
-    """
-    base_error_rate = 0.01
-    if type(config) == str:
-        conf = load_train_conf(config)
-    else:
-        conf = config
-    regions = bwasim.load_regions(conf['regions'])
-    eval_batches = {}
-    logger.info(f"Generating evaluation batches of size {batch_size}")
-    vaffunc = bwasim.betavaf
-    eval_batches['del'] = bwasim.make_batch(batch_size,
-                                                      regions,
-                                                      conf['reference'],
-                                                      numreads=num_reads,
-                                                      readlength=read_length,
-                                                      var_funcs=[bwasim.make_het_del],
-                                                      vaf_func=vaffunc,
-                                                      error_rate=base_error_rate,
-                                                      clip_prob=0)
-    eval_batches['ins'] = bwasim.make_batch(batch_size,
-                                                regions,
-                                                conf['reference'],
-                                                numreads=num_reads,
-                                                readlength=read_length,
-                                                vaf_func=vaffunc,
-                                                var_funcs=[bwasim.make_het_ins],
-                                                error_rate=base_error_rate,
-                                                clip_prob=0)
-    eval_batches['snv'] = bwasim.make_batch(batch_size,
-                                                regions,
-                                                conf['reference'],
-                                                numreads=num_reads,
-                                                readlength=read_length,
-                                                vaf_func=vaffunc,
-                                                var_funcs=[bwasim.make_het_snv],
-                                                error_rate=base_error_rate,
-                                                clip_prob=0)
-    eval_batches['mnv'] = bwasim.make_batch(batch_size,
-                                                regions,
-                                                conf['reference'],
-                                                numreads=num_reads,
-                                                readlength=read_length,
-                                                vaf_func=vaffunc,
-                                                var_funcs=[bwasim.make_het_del],
-                                                error_rate=base_error_rate,
-                                                clip_prob=0)
-    logger.info("Done generating evaluation batches")
-    return eval_batches
-
-
 def train(config, output_model, input_model, epochs, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
@@ -461,9 +426,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
  
     conf = load_train_conf(config)
-    # train_sets = [(c['bam'], c['labels']) for c in conf['data']]
-    #dataloader = make_multiloader(train_sets, conf['reference'], threads=6, max_to_load=max_to_load, max_reads_per_aln=200)
-    # dataloader = loader.SimLoader(DEVICE, seqlen=100, readsperbatch=100, readlength=80, error_rate=0.01, clip_prob=0.01)
+
     if kwargs.get("datadir") is not None:
         logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
         pregenloader = loader.PregenLoader(DEVICE,
@@ -510,5 +473,6 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
+                 lossfunc=kwargs.get('loss'),
                  )
 
