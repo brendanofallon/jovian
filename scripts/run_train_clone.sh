@@ -1,12 +1,11 @@
 #!/bin/bash
 
-#SBATCH --account=kingspeak-gpu
-#SBATCH --partition=kingspeak-gpu
+#SBATCH --account=notchpeak-gpu
+#SBATCH --partition=notchpeak-gpu
 #SBATCH --time=2-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32GB
 
 
 
@@ -16,7 +15,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="transforming_loaders"
+GIT_BRANCH="master"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -26,16 +25,16 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
+PREGEN_DIR=/scratch/general/lustre/u0064568/seq2seq/exome_av/exome_av_valspc_pregen_nochr20or21
 
 
-ALTPREDICTOR=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/altpredictor_pleasant-dew-54-299.sd
 
 LEARNING_RATE=0.0005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="test-shorten_seqlen_150-2"
+RUN_NAME="test_shuffle"
 
 set -x
 
@@ -58,6 +57,8 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
+#export ENABLE_WANDB=1
+
 $PYTHON $ds2s train \
     -c $CONF \
     -d $PREGEN_DIR \
@@ -65,8 +66,9 @@ $PYTHON $ds2s train \
     -n 100 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
-    -o my_new.model \
+    -o ${RUN_NAME}.model \
     --threads 16 \
-    --max-decomp-batches 32
+    --max-decomp-batches 32 \
+    --data-augmentation
 
 echo "Script is exiting"
