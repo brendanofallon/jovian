@@ -68,8 +68,8 @@ $PYTHON $ds2s train \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    --threads 16 \
-    --max-decomp-batches 32 \
+    --threads 8 \
+    --max-decomp-batches 8 \
     --data-augmentation
 
 echo "Script is exiting"
