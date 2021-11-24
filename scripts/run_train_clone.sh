@@ -24,7 +24,8 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
-VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
+#VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
+VAL_DIR=/scratch/general/lustre/u0064568/seq2seq/exome_av/exome_av_valspc_pregen_chr20and21
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
 PREGEN_DIR=/scratch/general/lustre/u0064568/seq2seq/exome_av/exome_av_valspc_pregen_nochr20or21
 
@@ -57,7 +58,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-#export ENABLE_WANDB=1
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
