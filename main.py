@@ -196,7 +196,8 @@ def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
     Call variants in a region of a BAM file using the given altpredictor and model
     and return a list of vcf.Variant objects
     """
-    reads = reads_spanning(aln, chrom, pos, max_reads=max_read_depth)
+    reads = reads_spanning_range(aln, chrom, pos - 10, pos + 10)
+    reads = util.sortreads(random.sample(reads, min(len(reads), maxreads)))
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
 

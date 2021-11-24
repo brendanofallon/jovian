@@ -78,6 +78,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss = torch.tensor([0])
     for batch, (src, tgt_seq, tgtvaf, altmask) in enumerate(loader.iter_once(batch_size)):
         optimizer.zero_grad()
+        if batch > 2:
+            break
         
         seq_preds, vaf_preds = model(src)
 
@@ -454,7 +456,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
 
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=300,
+                 max_read_depth=100,
                  feats_per_read=9,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),

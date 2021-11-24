@@ -83,6 +83,8 @@ def tensor_from_file(path, device):
     else:
         return torch.load(path, map_location=device)
 
+def sortreads(reads):
+    return sorted(reads, key=lambda r: r.reference_start)
 
 def unzip_load(path, device='cpu'):
     """

@@ -2,6 +2,7 @@
 import random
 import traceback
 
+import numpy as np
 import torch
 import logging
 import pysam
@@ -309,6 +310,24 @@ def reads_spanning(bam, chrom, pos, max_reads):
     mid = len(reads) // 2
     return reads[max(0, mid-max_reads//2):min(len(reads), mid+max_reads//2)]
 
+def reads_spanning_range(bam, chrom, start, end):
+    """
+    Return a list of reads spanning the given position, generally attempting to take
+    reads in which 'pos' is approximately in the middle of the read
+    :return : list of reads spanning the given position
+    """
+    bamit = bam.fetch(chrom, start - 10)
+    reads = []
+    try:
+        read = next(bamit)
+        while read.reference_start < end:
+            if read.reference_end is not None and read.reference_end > start:
+                reads.append(read)
+            read = next(bamit)
+    except StopIteration:
+        pass
+    return reads
+
 
 def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     """
@@ -343,7 +362,10 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
     :param maxreads: Number of reads to downsample to
     :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
-    allreads = reads_spanning(bam, chrom, pos, max_reads=float("inf"))
+
+    start = np.random.randint(pos - 100, pos - 10)
+    end = start + 100
+    allreads = reads_spanning_range(bam, chrom, start, end)
     if len(allreads) < 5:
         raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
 
@@ -354,6 +376,7 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
     pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
     for i in range(num_samples):
         reads = random.sample(allreads, min(len(allreads), maxreads))
+        reads = util.sortreads(reads)
         minref = min(alnstart(r) for r in reads)
         maxref = max(alnstart(r) + r.query_length for r in reads)
         reads_encoded, _ = encode_pileup3(reads, minref, maxref)
