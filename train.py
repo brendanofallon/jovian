@@ -444,7 +444,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                 raise ValueError("Expected one of these options: ['shortening', 'shuffling', 'downsampling'],"
                                  f"Instead found this {data_augmentation}")
             else:
-                fraction_to_augment = kwargs.get("fraction_to_augment")
+                fraction_to_augment = kwargs.get("fraction_to_augment", 0.25)
                 if "shortening" in data_augmentation:
                     dataloader = loader.ShorteningLoader(dataloader, seq_len=150, fraction_to_augment=fraction_to_augment)
                 if "shuffling" in data_augmentation:
