@@ -60,9 +60,9 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
         suffix = src.name.split("_")[-1].split(".")[0]
         tgt = find_tgt(suffix, alltgt)
         alltgt.remove(tgt)
-        vaftgt = find_tgt(suffix, allvaftgt)
-        allvaftgt.remove(vaftgt)
-        pairs.append((src, tgt, vaftgt))
+        #vaftgt = find_tgt(suffix, allvaftgt)
+        #allvaftgt.remove(vaftgt)
+        pairs.append((src, tgt, None))
     return pairs
 
 def tensor_from_lz4(path, device):
