@@ -228,10 +228,12 @@ def train_epochs(epochs,
         gap_open_penalty=-5
         gap_exend_penalty=-1
         temperature=1.0
-        logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}")
+        trim_width=100
+        logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
                                    gap_extend_penalty=gap_exend_penalty,
                                    temperature=temperature,
+                                   trim_width=trim_width,
                                    device=DEVICE)
 
     vaf_crit = None #nn.MSELoss()
@@ -454,7 +456,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
 
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=300,
+                 max_read_depth=100,
                  feats_per_read=9,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
