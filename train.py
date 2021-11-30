@@ -315,12 +315,14 @@ def train_epochs(epochs,
         )
         # log command line too
         wandb_config_params.update(cl_args)
-        with wandb.init(config=wandb_config_params, project='variant-transformer', entity='arup-rnd'):
-            if wandb_run_name:
-                wandb.run.name = f"wandb_run_name_{wandb.run.id}"
-                wandb.run.save()
+        wandb_run_name = wandb_run_name = f"{wandb_run_name}_{wandb.run.id}" if wandb_run_name else None
+        with wandb.init(
+                config=wandb_config_params,
+                project='variant-transformer',
+                entity='arup-rnd',
+                name=wandb_run_name
+        ):
             wandb.watch(model, log="all", log_freq=1000)
-        logger.info(f"Created Weights & Biases run with name {wandb.run.name}")
 
     if val_dir:
         logger.info(f"Using validation data in {val_dir}")
