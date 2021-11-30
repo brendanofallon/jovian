@@ -17,6 +17,7 @@ class SmithWatermanLoss(nn.Module):
         temperature=1.0,
         penalize_turns=True,
         restrict_turns=True,
+        trim_width=None,
         device='cpu',
     ):
         super().__init__()
@@ -26,6 +27,7 @@ class SmithWatermanLoss(nn.Module):
         self.penalize_turns = penalize_turns
         self.restrict_turns = restrict_turns
         self.temperature = temperature
+        self.trim_width = trim_width
         if self.penalize_turns:
             self.rightmod = torch.tensor(
                 [self.gap_open_penalty, self.gap_extend_penalty, self.gap_open_penalty],
@@ -108,6 +110,12 @@ class SmithWatermanLoss(nn.Module):
         Expect predictions to have dimension [batch, seq, probs], and
         targets to have dimension [batch, seq, label]
         """
+        if self.trim_width is not None:
+            start = predictions.shape[1] // 2 - self.trim_width // 2
+            end = predictions.shape[1] // 2 + self.trim_width // 2
+            predictions = predictions[:, start:end, :]
+            targets = targets[:, start:end]
+
         targs_onehot = nn.functional.one_hot(targets, num_classes=4).float().to(self.device)
         x = torch.bmm(predictions, targs_onehot.transpose(1, 2))
         (smx, smo), carry, (i,j) = self._rotate(x[:, :-1, :-1])
