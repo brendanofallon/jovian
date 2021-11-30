@@ -319,7 +319,8 @@ def train_epochs(epochs,
 
         # change working dir so wandb finds git repo info
         current_working_dir = os.getcwd()
-        os.chdir(os.path.abspath(__file__))
+        git_dir = os.path.dirname(os.path.abspath(__file__))
+        os.chdir(git_dir)
 
         with wandb.init(
                 config=wandb_config_params,
