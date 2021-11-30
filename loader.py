@@ -128,20 +128,26 @@ def decompress_multi(paths, threads):
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt"):
+    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
         """
         Create a new loader that reads tensors from a 'pre-gen' directory
         :param device: torch.device
         :param datadir: Directory to read data from
         :param threads: Max threads to use for decompressing data
         :param max_decomped_batches: Maximum number of batches to decompress at once. Increase this on machines with tons of RAM
+        :param pathpairs: List of (src path, tgt path, vaftgt path) tuples to use for data
         """
         self.device = device
         self.datadir = Path(datadir)
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
-        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
+        if pathpairs and datadir:
+            raise ValueError(f"Both datadir and pathpairs specified for PregenLoader - please choose just one")
+        if pathpairs:
+            self.pathpairs = pathpairs
+        else:
+            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -268,6 +274,11 @@ class ShufflingLoader:
     def iter_once(self, batch_size):
         for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
             src = src[:, :, torch.randperm(src.shape[2])[1:], :]
+            yield src, tgt, vaftgt, None, log_info
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
+            src_non_ref_reads = src[:, :, 1:, :]
+            src_non_ref_reads_shuf = src_non_ref_reads[:, :, torch.randperm(src_non_ref_reads.shape[2]), :]
+            src = torch.cat((src[:, :, :1, :], src_non_ref_reads_shuf), dim=2)
             yield src, tgt, vaftgt, None, log_info
 
 
@@ -424,7 +435,7 @@ def assign_class_indexes(rows):
     return idxs, class_names
 
 
-def resample_classes(classes, class_names, rows, vals_per_class=100):
+def resample_classes(classes, class_names, rows, vals_per_class):
     """
     Randomly sample each class so that there are 'vals_per_class' members of each class
     then return a list of class assignments and the selected rows
@@ -433,21 +444,26 @@ def resample_classes(classes, class_names, rows, vals_per_class=100):
     for clz, row in zip(classes, rows):
         byclass[clz].append(row)
 
+    for name in class_names.values():
+        if name not in vals_per_class:
+            logger.warning(f"Class name '{name}' not found in vals per class, will select default of {vals_per_class[class_names[clz]]} items from class {name}")
+
     result_rows = []
     result_classes = []
     for clz, classrows in byclass.items():
+
         # If there are MORE instances on this class than we want, grab a random sample of them
         logger.info(f"Variant class {class_names[clz]} contains {len(classrows)} variants")
-        if len(classrows) > vals_per_class:
-            logger.info(f"Randomly sampling {vals_per_class} variants for variant class {class_names[clz]}")
-            rows = random.sample(classrows, vals_per_class)
+        if len(classrows) > vals_per_class[class_names[clz]]:
+            logger.info(f"Randomly sampling {vals_per_class[class_names[clz]]} variants for variant class {class_names[clz]}")
+            rows = random.sample(classrows, vals_per_class[class_names[clz]])
             result_rows.extend(rows)
-            result_classes.extend([clz] * vals_per_class)
+            result_classes.extend([clz] * vals_per_class[class_names[clz]])
         else:
             # If there are FEWER instances of the class than we want, then loop over them
             # repeatedly - no random sampling since that might ignore a few of the precious few samples we do have
-            logger.info(f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class} {class_names[clz]} variants")
-            for i in range(vals_per_class):
+            logger.info(f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class[class_names[clz]]} {class_names[clz]} variants")
+            for i in range(vals_per_class[class_names[clz]]):
                 result_classes.append(clz)
                 idx = i % len(classrows)
                 result_rows.append(classrows[idx])
@@ -461,7 +477,7 @@ def upsample_labels(rows, vals_per_class):
      The new list will be multiple times larger then the old list and will contain repeated
      elements of the low frequency classes
     :param rows: List of elements with vtype and status attributes (probably read in from a labels CSV file)
-    :param vals_per_class: Number of instances to retain for each class
+    :param vals_per_class: Number of instances to retain for each class, OR a Mapping with class names and values
     :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
     """
     label_idxs, label_names = assign_class_indexes(rows)

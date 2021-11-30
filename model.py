@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 import math
 
+
 logger = logging.getLogger(__name__)
 
 class PositionalEncoding2D(nn.Module):
@@ -163,3 +164,5 @@ class VarTransformerAltMask(nn.Module):
 
         # pred_vaf = altmask.mean(dim=1)
         return output, 0
+
+
