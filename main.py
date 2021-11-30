@@ -301,7 +301,7 @@ def print_pileup(path, idx, target=None, **kwargs):
 
 
 def alphanumeric_no_spaces(name):
-    if not re.match(r"[a-zA-Z0-9_-]+", name):
+    if re.match(r"[a-zA-Z0-9_-]+", name):
         return name
     else:
         raise argparse.ArgumentTypeError(f"{name} is not an alphanumeric plus '_' or '-' without spaces")
