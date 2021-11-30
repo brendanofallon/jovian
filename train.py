@@ -248,6 +248,7 @@ def train_epochs(epochs,
                  batch_size=64,
                  lossfunc='ce',
                  wandb_run_name=None,
+                 wandb_notes="",
                  cl_args = {}
 ):
     attention_heads = 8
@@ -309,20 +310,28 @@ def train_epochs(epochs,
             attn_heads=attention_heads,
             transformer_dim=transformer_dim,
             encoder_layers=encoder_layers,
-            git_branch=git_repo.head.name,
-            git_target=git_repo.head.target,
-            git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
+            # git_branch=git_repo.head.name,
+            # git_target=git_repo.head.target,
+            # git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
         )
         # log command line too
         wandb_config_params.update(cl_args)
-        wandb_run_name = wandb_run_name = f"{wandb_run_name}_{wandb.run.id}" if wandb_run_name else None
+
+        # change working dir so wandb finds git repo info
+        current_working_dir = os.getcwd()
+        os.chdir(os.path.abspath(__file__))
+
         with wandb.init(
                 config=wandb_config_params,
                 project='variant-transformer',
                 entity='arup-rnd',
-                name=wandb_run_name
+                name=wandb_run_name,
+                notes=wandb_notes,
         ):
             wandb.watch(model, log="all", log_freq=1000)
+
+        # back to correct working dir
+        os.chdir(current_working_dir)
 
     if val_dir:
         logger.info(f"Using validation data in {val_dir}")
@@ -552,6 +561,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                  batch_size=kwargs.get("batch_size"),
                  lossfunc=kwargs.get('loss'),
                  wandb_run_name=kwargs.get("wandb_run_name"),
-                 cl_args=kwargs.get("cl_args")
+                 wandb_notes=kwargs.get("wandb_notes"),
+                 cl_args=kwargs.get("cl_args"),
                  )
 

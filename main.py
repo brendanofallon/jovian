@@ -350,6 +350,8 @@ def main():
     trainparser.add_argument("-da", "--data-augmentation", action="store_true", help="Specify --data-augmentation to perform data augmentation via diff loaders, default is false", default=False)
     trainparser.add_argument("-rn", "--wandb-run-name", type=alphanumeric_no_spaces, default=None,
                              help="Weights & Biases run name, must be alphanumeric plus '_' or '-'")
+    trainparser.add_argument("--wandb-notes", type=str, default=None,
+                             help="Weights & Biases run notes, longer description of run (like 'git commit -m')")
     trainparser.add_argument("--loss", help="Loss function to use, use 'ce' for CrossEntropy or 'sw' for Smith-Waterman", choices=['ce', 'sw'], default='ce')
     trainparser.set_defaults(func=train)
 
