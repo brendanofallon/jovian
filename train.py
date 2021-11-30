@@ -58,7 +58,33 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
+def calc_time_sums(
+        time_sums={},
+        decomp_time=0.0,
+        start=None,
+        decomp_and_load=None,
+        zero_grad=None,
+        forward_pass=None,
+        loss=None,
+        midmatch=None,
+        backward_pass=None,
+        optimize=None,
+):
+    load_time = (decomp_and_load - start).total_seconds() - decomp_time
 
+    return dict(
+        decomp_time = decomp_time + time_sums.get("decomp_time", 0.0),
+        load_time = load_time + time_sums.get("load_time", 0.0),
+        batch_count= 1 + time_sums.get("batch_count", 0),
+        batch_time=(optimize - start).total_seconds() + time_sums.get("batch_time", 0.0),
+        zero_grad_time=(zero_grad - decomp_and_load).total_seconds() + time_sums.get("zero_grad_time", 0.0),
+        forward_pass_time=(forward_pass - zero_grad).total_seconds() + time_sums.get("forward_pass_time", 0.0),
+        loss_time=(loss - forward_pass).total_seconds() + time_sums.get("loss_time", 0.0),
+        midmatch_time=(midmatch - loss).total_seconds() + time_sums.get("midmatch_time", 0.0),
+        backward_pass_time=(backward_pass - midmatch).total_seconds() + time_sums.get("backward_pass_time", 0.0),
+        optimize_time=(optimize - backward_pass).total_seconds() + time_sums.get("optimize_time", 0.0),
+        train_time=(zero_grad - optimize).total_seconds() + time_sums.get("train_time", 0.0)
+    )
 
 
 def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
@@ -75,13 +101,25 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     vafloss_sum = 0
     count = 0
     vafloss = torch.tensor([0])
-    for batch, (src, tgt_seq, tgtvaf, altmask) in enumerate(loader.iter_once(batch_size)):
+    # init time usage to zeros
+    epoch_times = calc_time_sums()
+    start_time = datetime.now()
+    for batch, (src, tgt_seq, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
+        if log_info:
+            decomp_time = log_info.get("decomp_time", 0.0)
+        else:
+            decomp_time = 0.0
+        times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
+
         optimizer.zero_grad()
-        
+        times["zero_grad"] = datetime.now()
+
         seq_preds, vaf_preds = model(src)
+        times["forward_pass"] = datetime.now()
 
         tgt_seq = tgt_seq.squeeze(1)
         loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+        times["loss"] = datetime.now()
 
         count += 1
         if count % 100 == 0:
@@ -94,8 +132,10 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             midmatch = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
                                      dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
+        times["midmatch"] = datetime.now()
 
         loss.backward()
+        times["backward_pass"] = datetime.now()
 
         #if vaf_criterion is not None and np.random.rand() < 0.10:
         #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
@@ -104,14 +144,17 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
+        times["optimize"] = datetime.now()
+
         epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
+        epoch_times = calc_time_sums(time_sums=epoch_times, **times)
+        start_time = datetime.now()  # reset timer for next batch
 
     logger.info(f"Trained {batch+1} batches in total.")
-    batch_time_mean, decompress_time, train_time, io_time = 0, 0, 0, 0
-    return epoch_loss_sum, midmatch.item(), vafloss_sum, batch_time_mean, decompress_time, train_time, io_time
+    return epoch_loss_sum, midmatch.item(), vafloss_sum, epoch_times
 
 
 def calc_val_accuracy(valpaths, model):
@@ -158,7 +201,6 @@ def train_epochs(epochs,
                  batch_size=64,
                  cl_args={},
                  ):
-
 
     attention_heads = 8
     transformer_dim = 400
@@ -218,11 +260,6 @@ def train_epochs(epochs,
             wandb.watch(model, log="all", log_freq=1000)
         logger.info(f"Created Weights & Biases run with name {wandb.run.name}")
 
-        # create an artifact with input data
-        # we could add this directly to wandb.config if not too much clutter
-
-
-
     valpaths = []
     try:
         if val_dir:
@@ -241,7 +278,7 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, train_accuracy, vafloss, batch_time_mean, decompress_time, train_time, io_time = train_epoch(model,
+            loss, train_accuracy, vafloss, epoch_times = train_epoch(model,
                                                   optimizer,
                                                   criterion,
                                                   vaf_crit,
@@ -259,6 +296,19 @@ def train_epochs(epochs,
             if type(val_accuracy) == torch.Tensor:
                 val_accuracy = val_accuracy.item()
 
+            if epoch_times.get("batch_count", 0) > 0:
+                mean_batch_time = epoch_times.get("batch_time",0.0) / epoch_times.get("batch_count")
+            else:
+                mean_batch_time = 0.0
+            if epoch_times.get("batch_time", 0.0) > 0.0:
+                decompress_time_frac = epoch_times.get("decomp_time", 0.0) / epoch_times.get("batch_time")
+                load_time_frac = epoch_times.get("load_time", 0.0) / epoch_times.get("batch_time")
+                train_time_frac = epoch_times.get("train_time", 0.0) / epoch_times.get("batch_time")
+            else:
+                load_time_frac = 0.0
+                decompress_time_frac = 0.0
+                train_time_frac = 0.0
+
             if ENABLE_WANDB:
                 wandb.log({
                     "epoch": epoch,
@@ -267,10 +317,10 @@ def train_epochs(epochs,
                     "val_accuarcy": val_accuracy,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
-                    "batch_time_mean": 0, # todo
-                    "decompress_time": 0,  # todo
-                    "train_time": 0,  # todo
-                    "io_time": 0,  # todo
+                    "batch_time_mean": mean_batch_time,
+                    "decompress_frac": decompress_time_frac,
+                    "train_frac": train_time_frac,
+                    "io_frac": load_time_frac,
                 })
 
             scheduler.step()
@@ -281,10 +331,10 @@ def train_epochs(epochs,
                 "val_accuracy": val_accuracy,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
-                "batch_time_mean": 0,  # todo
-                "decompress_time": 0,  # todo
-                "train_time": 0,  # todo
-                "io_time": 0,  # todo
+                "batch_time_mean": mean_batch_time,
+                "decompress_frac": decompress_time_frac,
+                "train_frac": train_time_frac,
+                "io_frac": load_time_frac,
             })
 
             tensorboardWriter.add_scalar("loss/train", loss, epoch)
