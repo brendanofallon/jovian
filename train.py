@@ -73,7 +73,6 @@ def calc_time_sums(
         optimize=None,
 ):
     load_time = (decomp_and_load - start).total_seconds() - decomp_time
-
     return dict(
         decomp_time = decomp_time + time_sums.get("decomp_time", 0.0),
         load_time = load_time + time_sums.get("load_time", 0.0),
@@ -106,8 +105,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     midmatch_narrow_sum = 0
     midmatch_wide_sum = 0
     vafloss = torch.tensor([0])
-    # init time usage to zeros
-    epoch_times = calc_time_sums()
+    # init time usage to zero
+    epoch_times = {}
     start_time = datetime.now()
     for batch, (src, tgt_seq, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
         if log_info:
