@@ -200,7 +200,7 @@ def calc_val_accuracy(loader, model):
         fp_total = 0
         fn_total = 0
 
-        for src, tgt, vaf, _ in loader.iter_once(64):
+        for src, tgt, vaf, *_ in loader.iter_once(64):
             pred_vars = []
 
             tgt = tgt.squeeze(1)
