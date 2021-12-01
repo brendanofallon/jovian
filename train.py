@@ -291,7 +291,27 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, ["epoch", "trainingloss", "train_accuracy", "val_accuracy", "mean_var_count", "ppa", "ppv", "learning_rate", "epochtime"])
+    trainlogger = TrainLogger(trainlogpath, [
+        "epoch",
+        "trainingloss",
+        "train_accuracy",
+        "val_accuracy",
+        "mean_var_count",
+        "ppa",
+        "ppv",
+        "learning_rate",
+        "epochtime",
+        "batch_time_mean",
+        "decompress_frac",
+        "train_frac",
+        "io_frac",
+        "zero_grad_frac",
+        "forward_pass_frac",
+        "loss_frac",
+        "midmatch_frac",
+        "backward_pass_frac",
+        "optimize_frac",
+    ])
 
     tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
     tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
@@ -377,10 +397,22 @@ def train_epochs(epochs,
                 decompress_time_frac = epoch_times.get("decomp_time", 0.0) / epoch_times.get("batch_time")
                 load_time_frac = epoch_times.get("load_time", 0.0) / epoch_times.get("batch_time")
                 train_time_frac = epoch_times.get("train_time", 0.0) / epoch_times.get("batch_time")
+                zero_grad_frac = epoch_times.get("zero_grad_time", 0.0) / epoch_times.get("batch_time")
+                forward_pass_frac = epoch_times.get("forward_pass_time", 0.0) / epoch_times.get("batch_time")
+                loss_frac = epoch_times.get("loss_time", 0.0) / epoch_times.get("batch_time")
+                midmatch_frac = epoch_times.get("midmatch_time", 0.0) / epoch_times.get("batch_time")
+                backward_pass_frac = epoch_times.get("backward_pass_time", 0.0) / epoch_times.get("batch_time")
+                optimize_frac = epoch_times.get("optimize_time", 0.0) / epoch_times.get("batch_time")
             else:
                 load_time_frac = 0.0
                 decompress_time_frac = 0.0
                 train_time_frac = 0.0
+                zero_grad_frac = 0.0
+                forward_pass_frac = 0.0
+                loss_frac = 0.0
+                midmatch_frac = 0.0
+                backward_pass_frac = 0.0
+                optimize_frac = 0.0
 
             if ENABLE_WANDB:
                 wandb.log({
@@ -398,6 +430,12 @@ def train_epochs(epochs,
                     "decompress_frac": decompress_time_frac,
                     "train_frac": train_time_frac,
                     "io_frac": load_time_frac,
+                    "zero_grad_frac": zero_grad_frac,
+                    "forward_pass_frac": forward_pass_frac,
+                    "loss_frac": loss_frac,
+                    "midmatch_frac": midmatch_frac,
+                    "backward_pass_frac": backward_pass_frac,
+                    "optimize_frac": optimize_frac,
                 })
 
             scheduler.step()
@@ -415,6 +453,12 @@ def train_epochs(epochs,
                 "decompress_frac": decompress_time_frac,
                 "train_frac": train_time_frac,
                 "io_frac": load_time_frac,
+                "zero_grad_frac": zero_grad_frac,
+                "forward_pass_frac": forward_pass_frac,
+                "loss_frac": loss_frac,
+                "midmatch_frac": midmatch_frac,
+                "backward_pass_frac": backward_pass_frac,
+                "optimize_frac": optimize_frac,
             })
 
             tensorboardWriter.add_scalar("loss/train", loss, epoch)
