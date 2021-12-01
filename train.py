@@ -329,9 +329,9 @@ def train_epochs(epochs,
             attn_heads=attention_heads,
             transformer_dim=transformer_dim,
             encoder_layers=encoder_layers,
-            # git_branch=git_repo.head.name,
-            # git_target=git_repo.head.target,
-            # git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
+            git_branch=git_repo.head.name,
+            git_target=git_repo.head.target,
+            git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
         )
         # log command line too
         wandb_config_params.update(cl_args)
