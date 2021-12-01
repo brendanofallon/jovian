@@ -321,14 +321,14 @@ def train_epochs(epochs,
         git_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(git_dir)
 
-        with wandb.init(
+        wandb.init(
                 config=wandb_config_params,
                 project='variant-transformer',
                 entity='arup-rnd',
                 name=wandb_run_name,
                 notes=wandb_notes,
-        ):
-            wandb.watch(model, log="all", log_freq=1000)
+        )
+        wandb.watch(model, log="all", log_freq=1000)
 
         # back to correct working dir
         os.chdir(current_working_dir)
