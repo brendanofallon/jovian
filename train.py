@@ -84,7 +84,7 @@ def calc_time_sums(
         midmatch_time=(midmatch - loss).total_seconds() + time_sums.get("midmatch_time", 0.0),
         backward_pass_time=(backward_pass - midmatch).total_seconds() + time_sums.get("backward_pass_time", 0.0),
         optimize_time=(optimize - backward_pass).total_seconds() + time_sums.get("optimize_time", 0.0),
-        train_time=(zero_grad - optimize).total_seconds() + time_sums.get("train_time", 0.0)
+        train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
     )
 
 
