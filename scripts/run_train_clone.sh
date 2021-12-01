@@ -36,6 +36,7 @@ LEARNING_RATE=0.0005
 CHECKPOINT_FREQ=1
 
 RUN_NAME="test-shorten_seqlen_150-2"
+RUN_NOTES="test shortening seq length to 150"
 
 set -x
 
@@ -67,6 +68,8 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o my_new.model \
     --threads 16 \
-    --max-decomp-batches 32
+    --max-decomp-batches 32 \
+    --wandb-run-name $RUN_NAME \
+    --wandb-notes "$RUN_NOTES"
 
 echo "Script is exiting"
