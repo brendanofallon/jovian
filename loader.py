@@ -180,10 +180,12 @@ class PregenLoader:
         :param batch_size: The number of samples in a minibatch.
         """
         src, tgt, vaftgt = [], [], []
-                    
         for i in range(0, len(self.pathpairs), self.max_decomped):
+            decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi(chain.from_iterable(paths), self.threads)
+            decomp_end = datetime.now()
+            decomp_time = (decomp_end - decomp_start).total_seconds()
 
             for j in range(0, len(decomped), 3):
                 src.append(decomped[j])
@@ -211,8 +213,11 @@ class PregenLoader:
                     src_t[start:end].to(self.device).float(),
                     tgt_t[start:end].to(self.device).long(),
                     vaftgt_t[start:end].to(self.device), 
-                    None
-                ) 
+                    None,
+                    {"decomp_time": decomp_time},
+                )
+                decomp_time = 0.0
+
 
             if remain:
                 # The remaining data points will be in next batch. 
@@ -222,13 +227,15 @@ class PregenLoader:
             else:
                 src, tgt, vaftgt = [], [], []
 
+
         if len(src) > 0:
             # We need to yield the last batch.
             yield (
                 torch.cat(src, dim=0).to(self.device).float(),
                 torch.cat(tgt, dim=0).to(self.device).long(),
                 torch.cat(vaftgt, dim=0).to(self.device),
-                None
+                None,
+                {"decomp_time": 0.0},
             )
 
 
@@ -273,6 +280,7 @@ class ShufflingLoader:
         self.fraction_to_augment = fraction_to_augment
 
     def iter_once(self, batch_size):
+<<<<<<< HEAD
         iter = 0
         for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
             if np.random.rand() < self.fraction_to_augment:
@@ -282,6 +290,16 @@ class ShufflingLoader:
                 iter += 1
             yield src, tgt, vaftgt, None
         logger.info(f"Total number of sample batches that had their reads shuffled are: {iter}")
+=======
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
+            src = src[:, :, torch.randperm(src.shape[2])[1:], :]
+            yield src, tgt, vaftgt, None, log_info
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
+            src_non_ref_reads = src[:, :, 1:, :]
+            src_non_ref_reads_shuf = src_non_ref_reads[:, :, torch.randperm(src_non_ref_reads.shape[2]), :]
+            src = torch.cat((src[:, :, :1, :], src_non_ref_reads_shuf), dim=2)
+            yield src, tgt, vaftgt, None, log_info
+>>>>>>> 1af7cf9251d4359c0d3e41195db17e45f72ce4f0
 
 
 class DownsamplingLoader:
@@ -302,6 +320,7 @@ class DownsamplingLoader:
         self.fraction_to_augment = fraction_to_augment
 
     def iter_once(self, batch_size):
+<<<<<<< HEAD
         for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
             iter = 0
             if np.random.rand() < self.fraction_to_augment:
@@ -314,6 +333,16 @@ class DownsamplingLoader:
                 iter += 1
             yield src, tgt, vaftgt, None
         logger.info(f"Total number of sample batches that had their reads downsampled are: {iter}")
+=======
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
+            num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
+            for idx in range(src.shape[0]):
+                logger.debug(f"{num_reads_to_drop[idx]} reads to be dropped out of total {src.shape[2]} reads in batch: {idx}")
+                read_index_to_drop = random.sample(list(range(src.shape[2])[1:]), num_reads_to_drop[idx])
+                logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped, excluding ref read at 0th position.")
+                src[idx, :, read_index_to_drop, :] = 0
+            yield src, tgt, vaftgt, None, log_info
+>>>>>>> 1af7cf9251d4359c0d3e41195db17e45f72ce4f0
 
 
 class MultiLoader:
@@ -327,7 +356,7 @@ class MultiLoader:
     def iter_once(self, batch_size):
         for loader in self.loaders:
             for src, tgt in loader.iter_once(batch_size):
-                yield src, tgt, None, None
+                yield src, tgt, None, None, None
 
 
 class BWASimLoader:
@@ -362,7 +391,7 @@ class BWASimLoader:
 
                 self.sim_data.append((src, tgt, vaftgt, altmask))
             src, tgt, vaftgt, altmask = self.sim_data[i]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
+            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
 
 
 class SimLoader:
@@ -392,7 +421,7 @@ class SimLoader:
                                             clip_prob=self.clip_prob)
                 self.sim_data.append((src, tgt, vaftgt, altmask))
             src, tgt, vaftgt, altmask = self.sim_data[-1]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device)
+            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
 
 
 def trim_pileuptensor(src, tgt, width):
