@@ -345,6 +345,7 @@ def train_epochs(epochs,
                 config=wandb_config_params,
                 project='variant-transformer',
                 entity='arup-rnd',
+                dir=current_working_dir,
                 name=wandb_run_name,
                 notes=wandb_notes,
         )
