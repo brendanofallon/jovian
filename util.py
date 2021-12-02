@@ -53,16 +53,13 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
     """
     datadir = Path(datadir)
     allsrc = list(datadir.glob(src_prefix + "*"))
-    alltgt = list(datadir.glob(tgt_prefix + "*"))
-    allvaftgt = list(datadir.glob(vaftgt_prefix + "*"))
     pairs = []
     for src in allsrc:
-        suffix = src.name.split("_")[-1].split(".")[0]
-        tgt = find_tgt(suffix, alltgt)
-        alltgt.remove(tgt)
-        vaftgt = find_tgt(suffix, allvaftgt)
-        allvaftgt.remove(vaftgt)
-        pairs.append((src, tgt, vaftgt))
+        suffix = src.name.split("_")[-1]
+        pairs.append((src,
+                     f"{datadir}/{tgt_prefix}_{suffix}",
+                     f"{datadir}/{vaftgt_prefix}_{suffix}"
+                      ))
     return pairs
 
 def tensor_from_lz4(path, device):
