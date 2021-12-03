@@ -467,6 +467,7 @@ def resample_classes(classes, class_names, rows, vals_per_class):
                 result_classes.append(clz)
                 idx = i % len(classrows)
                 result_rows.append(classrows[idx])
+
     return result_classes, result_rows
 
 
