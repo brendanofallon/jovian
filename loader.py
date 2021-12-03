@@ -474,17 +474,12 @@ def upsample_labels(rows, vals_per_class):
     label_idxs, rows = resample_classes(
         np.array(label_idxs), label_names, rows, vals_per_class=vals_per_class
     )
-    classes, counts = np.unique(label_idxs, return_counts=True)
 
-    freqs = 1.0 / (np.min(1.0/counts) * counts)
-    results = []
-    for clz, row in zip(label_idxs, rows):
-        freq = min(10, int(freqs[clz]))
-        for reps in range(freq):
-            results.append(row)
+    # Should match vals_per_class, if anyone's checking
+    #classes, counts = np.unique(label_idxs, return_counts=True)
 
-    random.shuffle(results)
-    return results
+    random.shuffle(rows)
+    return rows
 
 
 def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, vals_per_class):
