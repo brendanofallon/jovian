@@ -411,29 +411,60 @@ def trim_pileuptensor(src, tgt, width):
     return src, tgt
 
 
-def assign_class_indexes(rows):
+# def assign_class_indexes(rows):
+#     """
+#     Iterate over every row in rows and create a list of class indexes for each element
+#     , where class index is currently row.vtype-row.status. So a class will be something like
+#     snv-TP or small_del-FP, and each class gets a unique number
+#     :returns : 1. List of class indexes across rows.
+#                2. A dictionary keyed by class index and valued by class names.
+#     """
+#     classcount = 0
+#     classes = defaultdict(int)
+#     idxs = []
+#     for row in rows:
+#         clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
+#         if clz in classes:
+#             idx = classes[clz]
+#         else:
+#             idx = classcount
+#             classcount += 1
+#             classes[clz] = idx
+#         idxs.append(idx)
+#     class_names = {v: k for k, v in classes.items()}
+#     return idxs, class_names
+
+
+def parse_rows_classes(bed):
     """
     Iterate over every row in rows and create a list of class indexes for each element
     , where class index is currently row.vtype-row.status. So a class will be something like
     snv-TP or small_del-FP, and each class gets a unique number
-    :returns : 1. List of class indexes across rows.
+    :returns : 0. List of chrom / start / end tuples from the input BED
+               1. List of class indexes across rows.
                2. A dictionary keyed by class index and valued by class names.
     """
     classcount = 0
     classes = defaultdict(int)
     idxs = []
-    for row in rows:
-        clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
-        if clz in classes:
-            idx = classes[clz]
-        else:
-            idx = classcount
-            classcount += 1
-            classes[clz] = idx
-        idxs.append(idx)
+    rows = []
+    with open(bed) as fh:
+        for line in fh:
+            row = line.strip().split("\t")
+            chrom = row[0]
+            start = int(row[1])
+            end = int(row[2])
+            clz = row[3]
+            rows.append((chrom, start, end))
+            if clz in classes:
+                idx = classes[clz]
+            else:
+                idx = classcount
+                classcount += 1
+                classes[clz] = idx
+            idxs.append(idx)
     class_names = {v: k for k, v in classes.items()}
-    return idxs, class_names
-
+    return rows, idxs, class_names
 
 def resample_classes(classes, class_names, rows, vals_per_class):
     """
@@ -471,7 +502,7 @@ def resample_classes(classes, class_names, rows, vals_per_class):
     return result_classes, result_rows
 
 
-def upsample_labels(rows, vals_per_class):
+def upsample_labels(bed, vals_per_class):
     """
     Generate class assignments for each element in rows (see assign_class_indexes),
      then create a new list of rows that is "upsampled" to normalize class frequencies
@@ -481,24 +512,17 @@ def upsample_labels(rows, vals_per_class):
     :param vals_per_class: Number of instances to retain for each class, OR a Mapping with class names and values
     :returns: List of rows, with less frequent rows included multiple times to help normalize frequencies
     """
-    label_idxs, label_names = assign_class_indexes(rows)
+    rows, label_idxs, label_names = parse_rows_classes(bed)
     label_idxs, rows = resample_classes(
         np.array(label_idxs), label_names, rows, vals_per_class=vals_per_class
     )
-    classes, counts = np.unique(label_idxs, return_counts=True)
+    # classes, counts = np.unique(label_idxs, return_counts=True
 
-    freqs = 1.0 / (np.min(1.0/counts) * counts)
-    results = []
-    for clz, row in zip(label_idxs, rows):
-        freq = min(10, int(freqs[clz]))
-        for reps in range(freq):
-            results.append(row)
-
-    random.shuffle(results)
-    return results
+    random.shuffle(rows)
+    return rows
 
 
-def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, vals_per_class):
+def load_from_csv(bampath, refpath, bed, max_reads_per_aln, samples_per_pos, vals_per_class):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
     alignment (BAM) and labels csv file. This performs some class normalized by upsampling / downsampling
@@ -514,19 +538,14 @@ def load_from_csv(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, val
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
 
-    labels = [l for _, l in pd.read_csv(csv, dtype={'chrom': str, 'filters': str}).iterrows()]
-    upsampled_labels = upsample_labels(labels, vals_per_class=vals_per_class)
-    logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {csv}")
-    for row in upsampled_labels:
-        if row.status == 'FP':
-            altseq = row.ref
-        else:
-            altseq = row.alt
+    upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)
+    logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
+    for region in upsampled_labels:
 
         try:
-            for encoded, refseq, altseq in encode_and_downsample(str(row.chrom),
-                                                                 row.pos,
-                                                                 row.ref,
+            for encoded, hap0, hap1 in encode_and_downsample(region[0],
+                                                                 region[1],
+                                                                 region[2],
                                                                  altseq,
                                                                  bam,
                                                                  refgenome,

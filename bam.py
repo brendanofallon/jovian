@@ -335,7 +335,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     return encoded_with_ref, refseq, altseq
 
 
-def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_samples):
+def encode_and_downsample(chrom, start, end, ref, alt, bam, fasta, maxreads, num_samples):
     """
     Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
     chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the
@@ -343,7 +343,7 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
     :param maxreads: Number of reads to downsample to
     :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
-    allreads = reads_spanning(bam, chrom, pos, max_reads=float("inf"))
+    allreads = reads_spanning_range(bam, chrom, pos, max_reads=float("inf"))
     if len(allreads) < 5:
         raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
 
