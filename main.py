@@ -133,7 +133,7 @@ def default_vals_per_class():
     is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
     specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
     """
-    return 500
+    return 0
 
 
 def pregen(config, **kwargs):
@@ -154,23 +154,12 @@ def pregen(config, **kwargs):
         str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
         metadata_file = f"pregen_{str_time}.csv"
     processes = kwargs.get('threads', 1)
-    if kwargs.get("sim"):
-        batches = 50
-        logger.info(f"Generating simulated data with batch size {batch_size} and {batches} total batches")
-        dataloaders = [loader.BWASimLoader(DEVICE,
-                                     regions=conf['regions'],
-                                     refpath=conf['reference'],
-                                     readsperpileup=200,
-                                     readlength=145,
-                                     error_rate=0.02,
-                                     clip_prob=0.01)]
-        dataloaders[0].batches_in_epoch = batches
-    else:
-        logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
-        dataloaders = [
-                loader.LazyLoader(c['bam'], c['labels'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
-            for c in conf['data']
-        ]
+
+    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
+    dataloaders = [
+            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+        for c in conf['data']
+    ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")

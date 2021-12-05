@@ -1,5 +1,8 @@
 
 import logging
+
+import phaser
+
 logger = logging.getLogger(__name__)
 
 import random
@@ -10,7 +13,7 @@ from itertools import chain
 import gzip
 import lz4.frame
 from datetime import datetime
-
+import traceback as tb
 
 import io
 
@@ -56,19 +59,21 @@ class LazyLoader:
     Useful for 'pre-gen' where we just want to iterate over everything once and save it to a file
     """
 
-    def __init__(self, bam, csv, reference, reads_per_pileup, samples_per_pos, vals_per_class):
+    def __init__(self, bam, bed, vcf, reference, reads_per_pileup, samples_per_pos, vals_per_class):
         self.bam = bam
-        self.csv = csv
+        self.bed = bed
+        self.vcf = vcf
         self.reference = reference
         self.reads_per_pileup = reads_per_pileup
         self.samples_per_pos = samples_per_pos
         self.vals_per_class = vals_per_class
 
     def iter_once(self, batch_size):
-        logger.info(f"Encoding tensors from {self.bam} and {self.csv}")
+        logger.info(f"Encoding tensors from {self.bam} and {self.vcf}")
         for src, tgt, vaftgt, varsinfo in encode_chunks(self.bam,
                                           self.reference,
-                                          self.csv,
+                                          self.bed,
+                                          self.vcf,
                                           batch_size,
                                           self.reads_per_pileup,
                                           self.samples_per_pos,
@@ -477,7 +482,7 @@ def resample_classes(classes, class_names, rows, vals_per_class):
 
     for name in class_names.values():
         if name not in vals_per_class:
-            logger.warning(f"Class name '{name}' not found in vals per class, will select default of {vals_per_class[class_names[clz]]} items from class {name}")
+            logger.warning(f"Class name '{name}' not found in vals per class, will select default of {vals_per_class['asldkjas']} items from class {name}")
 
     result_rows = []
     result_classes = []
@@ -522,7 +527,7 @@ def upsample_labels(bed, vals_per_class):
     return rows
 
 
-def load_from_csv(bampath, refpath, bed, max_reads_per_aln, samples_per_pos, vals_per_class):
+def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per_pos, vals_per_class):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
     alignment (BAM) and labels csv file. This performs some class normalized by upsampling / downsampling
@@ -537,35 +542,42 @@ def load_from_csv(bampath, refpath, bed, max_reads_per_aln, samples_per_pos, val
     """
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
+    vcf = pysam.VariantFile(vcfpath)
 
     upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)
     logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
     for region in upsampled_labels:
+        chrom, start, end = region[0:3]
+        variants = list(vcf.fetch(chrom, start, end))
 
         try:
-            for encoded, hap0, hap1 in encode_and_downsample(region[0],
-                                                                 region[1],
-                                                                 region[2],
-                                                                 altseq,
-                                                                 bam,
-                                                                 refgenome,
-                                                                 max_reads_per_aln,
-                                                                 samples_per_pos):
+            hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, start, end + 100, variants)
+            print(f"Hap lengths: {len(hap0)} - {len(hap1)}")
+            tgt0 = target_string_to_tensor(hap0[0:(end-start)])
+            tgt1 = target_string_to_tensor(hap1[0:(end-start)])
+            tgt_haps = torch.stack((tgt0, tgt1))
+            print(f"Dimension of stacked haps: {tgt_haps.shape}")
 
+            for encoded in encode_and_downsample(chrom,
+                                                 start,
+                                                 end,
+                                                 bam,
+                                                 refgenome,
+                                                 max_reads_per_aln,
+                                                 samples_per_pos):
 
-                minseqlen = min(len(refseq), len(altseq))
-                tgt = target_string_to_tensor(altseq[0:minseqlen])
-                if minseqlen != encoded.shape[0]:
-                    encoded = encoded[0:minseqlen, :, :]
+                if encoded.shape[0] > (end-start):
+                    encoded = encoded[0:(end-start), :, :]
 
-                yield encoded, tgt, row
+                yield encoded, tgt_haps, region
 
         except Exception as ex:
-            logger.warning(f"Error encoding position {row.chrom}:{row.pos} for bam: {bampath}, skipping it: {ex}")
+            logger.warning(f"Error encoding position {chrom}:{start}-{end} for bam: {bampath}, skipping it: {ex}")
+            tb.print_exc()
 
 
 
-def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_per_pos, vals_per_class, max_to_load=1e9):
+def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, samples_per_pos, vals_per_class, max_to_load=1e9):
     """
     Generator for creating batches of src, tgt (data and label) tensors from a CSV file
 
@@ -585,19 +597,17 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     count = 0
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
-    for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
-        status, vtype, vaf = row.status, row.vtype, row.exp_vaf
+    for enc, tgt, region in load_from_csv(bampath, refpath, bed, vcf, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
-        assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+        assert tgt.shape[-1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[-1]} but should be {seq_len}"
         allsrc.append(src)
         alltgt.append(tgt)
-        alltgtvaf.append(vaf)
-        varsinfo.append([f"{row.chrom}", f"{row.pos}", row.ref, row.alt, f"{vaf}"])
+
         count += 1
-        if count % 100 == 0:
-            logger.info(f"Loaded {count} tensors from {csv}")
+        if count % 1 == 0:
+            logger.info(f"Loaded {count} tensors from {bampath}")
         if count == max_to_load:
             logger.info(f"Stopping tensor load after {max_to_load}")
             yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
@@ -613,7 +623,7 @@ def encode_chunks(bampath, refpath, csv, chunk_size, max_reads_per_aln, samples_
     if len(allsrc):
         yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
 
-    logger.info(f"Done loading {count} tensors from {csv}")
+    logger.info(f"Done loading {count} tensors from {bampath}")
 
 
 

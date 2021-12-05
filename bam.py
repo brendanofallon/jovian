@@ -4,7 +4,6 @@ import traceback
 
 import torch
 import logging
-import pysam
 
 import util
 
@@ -310,6 +309,25 @@ def reads_spanning(bam, chrom, pos, max_reads):
     return reads[max(0, mid-max_reads//2):min(len(reads), mid+max_reads//2)]
 
 
+def reads_spanning_range(bam, chrom, start, end):
+    """
+    Return a list of reads spanning the given position, generally attempting to take
+    reads in which 'pos' is approximately in the middle of the read
+    :return : list of reads spanning the given position
+    """
+    bamit = bam.fetch(chrom, start - 10)
+    reads = []
+    try:
+        read = next(bamit)
+        while read.reference_start < end:
+            if read.reference_end is not None and read.reference_end > start:
+                reads.append(read)
+            read = next(bamit)
+    except StopIteration:
+        pass
+    return reads
+
+
 def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     """
     Fetch reads from the given BAM file, encode them into a single tensor, and also
@@ -335,7 +353,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     return encoded_with_ref, refseq, altseq
 
 
-def encode_and_downsample(chrom, start, end, ref, alt, bam, fasta, maxreads, num_samples):
+def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples):
     """
     Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
     chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the
@@ -343,29 +361,21 @@ def encode_and_downsample(chrom, start, end, ref, alt, bam, fasta, maxreads, num
     :param maxreads: Number of reads to downsample to
     :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
-    allreads = reads_spanning_range(bam, chrom, pos, max_reads=float("inf"))
+    allreads = reads_spanning_range(bam, chrom, start, end)
     if len(allreads) < 5:
-        raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
+        raise ValueError(f"Not enough reads in {chrom}:{start}-{end}, aborting")
 
     if (len(allreads) // maxreads) < num_samples:
         num_samples = max(1, len(allreads) // maxreads)
         # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
 
-    pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
     for i in range(num_samples):
         reads = random.sample(allreads, min(len(allreads), maxreads))
         minref = min(alnstart(r) for r in reads)
         maxref = max(alnstart(r) + r.query_length for r in reads)
         reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-
-        refseq = fasta.fetch(chrom, minref, maxref)
-        assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
-        altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
-        if ref == alt:
-            assert refseq == altseq, "Ref == alt allele, but ref sequence didn't match alt sequence!"
-        assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
-
+        refseq = refgenome.fetch(chrom, minref, maxref)
         ref_encoded = string_to_tensor(refseq)
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
-        yield encoded_with_ref, refseq, altseq
+        yield encoded_with_ref
