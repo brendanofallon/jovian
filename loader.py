@@ -549,16 +549,9 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     for region in upsampled_labels:
         chrom, start, end = region[0:3]
         variants = list(vcf.fetch(chrom, start, end))
-
+        logger.info(f"Number of variants in {chrom}:{start}-{end} : {len(variants)}")
         try:
-            hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, start, end + 100, variants)
-            print(f"Hap lengths: {len(hap0)} - {len(hap1)}")
-            tgt0 = target_string_to_tensor(hap0[0:(end-start)])
-            tgt1 = target_string_to_tensor(hap1[0:(end-start)])
-            tgt_haps = torch.stack((tgt0, tgt1))
-            print(f"Dimension of stacked haps: {tgt_haps.shape}")
-
-            for encoded in encode_and_downsample(chrom,
+            for encoded, (minref, maxref) in encode_and_downsample(chrom,
                                                  start,
                                                  end,
                                                  bam,
@@ -566,8 +559,17 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
                                                  max_reads_per_aln,
                                                  samples_per_pos):
 
-                if encoded.shape[0] > (end-start):
-                    encoded = encoded[0:(end-start), :, :]
+                hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, minref, maxref, variants)
+                regionsize = end - start
+                midstart = max(0, start - minref)
+                midend = midstart + regionsize
+
+                tgt0 = target_string_to_tensor(hap0[midstart:midend])
+                tgt1 = target_string_to_tensor(hap1[midstart:midend])
+                tgt_haps = torch.stack((tgt0, tgt1))
+
+                if encoded.shape[0] > regionsize:
+                    encoded = encoded[midstart:midend, :, :]
 
                 yield encoded, tgt_haps, region
 
@@ -598,7 +600,7 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
     seq_len = 300
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
     for enc, tgt, region in load_from_csv(bampath, refpath, bed, vcf, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
-        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+        src, tgt = trim_pileuptensor(enc, tgt, seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[-1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[-1]} but should be {seq_len}"
@@ -614,7 +616,7 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).short(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
             allsrc = []
             alltgt = []
             alltgtvaf = []
@@ -657,27 +659,3 @@ def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_t
     return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
 
 
-
-def make_multiloader(inputs, refpath, threads, max_to_load, max_reads_per_aln, samples_per_pos):
-    """
-    Create multiple ReadLoaders in parallel for each element in Inputs
-    :param inputs: List of (BAM path, labels csv) tuples
-    :param threads: Number of threads to use
-    :param max_reads_per_aln: Max number of reads for each pileup
-    :return: List of loaders
-    """
-    results = []
-    if len(inputs) == 1:
-        logger.info(
-            f"Loading training data for {len(inputs)} sample with 1 processe (max to load = {max_to_load})")
-        bam = inputs[0][0]
-        labels_csv = inputs[0][1]
-        return make_loader(bam, refpath, labels_csv, max_to_load=max_to_load, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos)
-    else:
-        logger.info(f"Loading training data for {len(inputs)} samples with {threads} processes (max to load = {max_to_load})")
-        with mp.Pool(processes=threads) as pool:
-            for bam, labels_csv in inputs:
-                result = pool.apply_async(make_loader, (bam, refpath, labels_csv, max_reads_per_aln, samples_per_pos, max_to_load))
-                results.append(result)
-            pool.close()
-            return MultiLoader([l.get(timeout=2*60*60) for l in results])

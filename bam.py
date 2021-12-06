@@ -371,6 +371,7 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
     for i in range(num_samples):
         reads = random.sample(allreads, min(len(allreads), maxreads))
+        reads = util.sortreads(reads)
         minref = min(alnstart(r) for r in reads)
         maxref = max(alnstart(r) + r.query_length for r in reads)
         reads_encoded, _ = encode_pileup3(reads, minref, maxref)
@@ -378,4 +379,4 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         ref_encoded = string_to_tensor(refseq)
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
-        yield encoded_with_ref
+        yield encoded_with_ref, (minref, maxref)

@@ -193,7 +193,7 @@ def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
     reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-
+    reads_encoded = util.sortreads(reads_encoded)
     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
     reftensor = string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
@@ -283,10 +283,27 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
 
 def print_pileup(path, idx, target=None, **kwargs):
+    path = Path(path)
+
+    suffix = path.name.split("_")[-1]
+    tgtpath = path.parent / f"tgt_{suffix}"
+    if tgtpath.exists():
+        tgt = util.tensor_from_file(tgtpath, device='cpu')
+        logger.info(f"Found target file: {tgtpath}, loaded tensor of shape {tgt.shape}")
+        for i in range(tgt.shape[1]):
+            t = tgt[idx, i, :]
+            bases = util.tgt_str(tgt[idx, i, :])
+            print(bases)
+    else:
+        logger.info(f"No tgt file found (look for {tgtpath})")
+
     src = util.tensor_from_file(path, device='cpu')
     logger.info(f"Loaded tensor with shape {src.shape}")
     s = util.to_pileup(src[idx, :, :, :])
     print(s)
+
+
+
 
 
 def alphanumeric_no_spaces(name):
