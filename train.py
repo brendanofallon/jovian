@@ -199,10 +199,8 @@ def calc_val_accuracy(loader, model):
         tp_total = 0
         fp_total = 0
         fn_total = 0
-
+        vars_per_batch = []
         for src, tgt, vaf, *_ in loader.iter_once(64):
-            pred_vars = []
-
             tgt = tgt.squeeze(1)
 
             seq_preds, vaf_preds = model(src)
@@ -230,9 +228,9 @@ def calc_val_accuracy(loader, model):
                 fp_total += len(fps)
                 fn_total += len(fns)
 
-            pred_vars.append(count_vars_per_batch/batch_size)
+            vars_per_batch.append(count_vars_per_batch/batch_size)
                 
-    return match_sum / count, vaf_mse_sum / count, np.mean(pred_vars), tp_total, fp_total, fn_total
+    return match_sum / count, vaf_mse_sum / count, np.mean(vars_per_batch), tp_total, fp_total, fn_total
 
 
 def train_epochs(epochs,
