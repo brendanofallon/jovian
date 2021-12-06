@@ -274,7 +274,7 @@ def train_epochs(epochs,
         logger.info("Creating CrossEntropy loss function")
         criterion = nn.CrossEntropyLoss()
     elif lossfunc == 'sw':
-        gap_open_penalty=-5
+        gap_open_penalty=-2
         gap_exend_penalty=-1
         temperature=1.0
         trim_width=100
