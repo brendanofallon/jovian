@@ -233,7 +233,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
     Call variants in BAM file with given model at positions given in the labels CSV, emit useful
     summary information about PPA / PPV, etc
     """
-    max_read_depth = 300
+    max_read_depth = 100
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_conf(config)
