@@ -36,6 +36,7 @@ LEARNING_RATE=0.0005
 CHECKPOINT_FREQ=1
 
 RUN_NAME="test_shuffle"
+RUN_NOTES="test shortening seq length to 150"
 
 set -x
 
@@ -70,6 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 8 \
     --max-decomp-batches 8 \
-    --data-augmentation
+    --wandb-run-name $RUN_NAME \
+    --wandb-notes "$RUN_NOTES"
 
 echo "Script is exiting"
