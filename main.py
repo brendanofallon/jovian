@@ -346,8 +346,7 @@ def main():
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
-<<<<<<< HEAD
-    trainparser.add_argument("-da", "--data-augmentation", help="Specify data augmentation options: 'shortening', 'shuffling', 'downsampling'. You can provide multiple options", nargs="+", default=None)
+    trainparser.add_argument("-da", "--data-augmentation", help="Specify data augmentation options: 'shortening', 'shuffling', 'downsampling'. You can provide multiple options. Default is None", nargs="+", default=None)
     trainparser.add_argument("-fa", "--fraction-to-augment", help="Fraction of sample batches to augment. Needed with '--data-augmentation' option. Default is 0.25", default=0.25, type=float)
     trainparser.add_argument("-rn", "--wandb-run-name", type=alphanumeric_no_spaces, default=None,
                              help="Weights & Biases run name, must be alphanumeric plus '_' or '-'")

@@ -255,14 +255,14 @@ class ShorteningLoader:
 
     def iter_once(self, batch_size):
         iter = 0
-        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
             if np.random.rand() < self.fraction_to_augment:
                 start = src.shape[1] // 2 - self.seq_len // 2
                 end = src.shape[1] // 2 + self.seq_len // 2
                 src = src[:, start:end, :, :]
                 tgt = tgt[:, :, start:end]
                 iter += 1
-            yield src, tgt, vaftgt, None
+            yield src, tgt, vaftgt, None, log_info
         logger.info(f"Total number of sample batches that had their sequence dimension shortened are: {iter}")
 
 
@@ -280,26 +280,15 @@ class ShufflingLoader:
         self.fraction_to_augment = fraction_to_augment
 
     def iter_once(self, batch_size):
-<<<<<<< HEAD
         iter = 0
-        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
             if np.random.rand() < self.fraction_to_augment:
                 src_non_ref_reads = src[:, :, 1:, :]
                 src_non_ref_reads_shuf = src_non_ref_reads[:, :, torch.randperm(src_non_ref_reads.shape[2]), :]
                 src = torch.cat((src[:, :, :1, :], src_non_ref_reads_shuf), dim=2)
                 iter += 1
-            yield src, tgt, vaftgt, None
+            yield src, tgt, vaftgt, None, log_info
         logger.info(f"Total number of sample batches that had their reads shuffled are: {iter}")
-=======
-        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
-            src = src[:, :, torch.randperm(src.shape[2])[1:], :]
-            yield src, tgt, vaftgt, None, log_info
-        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
-            src_non_ref_reads = src[:, :, 1:, :]
-            src_non_ref_reads_shuf = src_non_ref_reads[:, :, torch.randperm(src_non_ref_reads.shape[2]), :]
-            src = torch.cat((src[:, :, :1, :], src_non_ref_reads_shuf), dim=2)
-            yield src, tgt, vaftgt, None, log_info
->>>>>>> 1af7cf9251d4359c0d3e41195db17e45f72ce4f0
 
 
 class DownsamplingLoader:
@@ -320,8 +309,7 @@ class DownsamplingLoader:
         self.fraction_to_augment = fraction_to_augment
 
     def iter_once(self, batch_size):
-<<<<<<< HEAD
-        for src, tgt, vaftgt, _ in self.wrapped_loader.iter_once(batch_size):
+        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
             iter = 0
             if np.random.rand() < self.fraction_to_augment:
                 num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
@@ -331,18 +319,8 @@ class DownsamplingLoader:
                     logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped, excluding ref read at 0th position.")
                     src[idx, :, read_index_to_drop, :] = 0
                 iter += 1
-            yield src, tgt, vaftgt, None
-        logger.info(f"Total number of sample batches that had their reads downsampled are: {iter}")
-=======
-        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
-            num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
-            for idx in range(src.shape[0]):
-                logger.debug(f"{num_reads_to_drop[idx]} reads to be dropped out of total {src.shape[2]} reads in batch: {idx}")
-                read_index_to_drop = random.sample(list(range(src.shape[2])[1:]), num_reads_to_drop[idx])
-                logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped, excluding ref read at 0th position.")
-                src[idx, :, read_index_to_drop, :] = 0
             yield src, tgt, vaftgt, None, log_info
->>>>>>> 1af7cf9251d4359c0d3e41195db17e45f72ce4f0
+        logger.info(f"Total number of sample batches that had their reads downsampled are: {iter}")
 
 
 class MultiLoader:

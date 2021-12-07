@@ -487,7 +487,7 @@ def load_train_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
     conf = yaml.safe_load(open(confyaml).read())
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
-    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    # assert 'data' in conf, "Expected 'data' entry in training configuration"
     return conf
 
 
@@ -578,14 +578,16 @@ def train(config, output_model, input_model, epochs, **kwargs):
         dataloader = pregenloader
 
         # If you want to use data augmentation, you need to pass options with '--data-augmentation" parameter during training, default is no augmentation.
-        data_augmentation = kwargs.get("data_augmentation")
-        if data_augmentation is not None or len(data_augmentation) != 0:
+        data_augmentation = conf['data_augmentation'] if 'data_augmentation' in conf else kwargs.get("data_augmentation")
+        logger.info(f"Data augmentation steps provided are: {data_augmentation}")
+        if data_augmentation is not None and len(data_augmentation) != 0:
             data_aug_options = ['shuffling', 'shortening', 'downsampling']
             if not all(x in data_aug_options for x in data_augmentation) :
                 raise ValueError("Expected one of these options: ['shortening', 'shuffling', 'downsampling'],"
                                  f"Instead found this {data_augmentation}")
             else:
-                fraction_to_augment = kwargs.get("fraction_to_augment", 0.25)
+                fraction_to_augment = conf['fraction_to_augment'] if "fraction_to_augment" in conf else kwargs.get("fraction_to_augment")
+                logger.info(f"Fraction to augment used is: {fraction_to_augment}")
                 if "shortening" in data_augmentation:
                     dataloader = loader.ShorteningLoader(dataloader, seq_len=150, fraction_to_augment=fraction_to_augment)
                 if "shuffling" in data_augmentation:
