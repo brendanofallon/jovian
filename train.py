@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 
 import vcf
 import loader
-import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, VarTransformerAltMask
+from model import VarTransformer
 from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
@@ -102,8 +101,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     prev_epoch_loss = None
     vafloss_sum = 0
     count = 0
-    midmatch_narrow_sum = 0
-    midmatch_wide_sum = 0
+    midmatch_hap0_sum = 0
+    midmatch_hap1_sum = 0
     vafloss = torch.tensor([0])
     # init time usage to zero
     epoch_times = {}
@@ -118,12 +117,11 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
 
-        seq_preds, vaf_preds = model(src)
+        seq_preds = model(src)
         times["forward_pass"] = datetime.now()
 
-        tgt_seq = tgt_seq.squeeze(1)
         if type(criterion) == nn.CrossEntropyLoss:
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
         else:
             loss = criterion(seq_preds, tgt_seq)
         times["loss"] = datetime.now()
@@ -138,27 +136,22 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
 
         with torch.no_grad():
-            width = 20
-            mid = seq_preds.shape[1] // 2
-            midmatch_narrow = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
-                         ).float().mean()
-            midmatch_narrow_sum += midmatch_narrow.item()
             width = 200
-            mid = seq_preds.shape[1] // 2
-            midmatch_wide = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
+            mid = seq_preds.shape[2] // 2
+            midmatch_hap0 = (torch.argmax(seq_preds[:, 0, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq[:, 0, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
-            midmatch_wide_sum += midmatch_wide.item()
+            midmatch_hap0_sum += midmatch_hap0.item()
+
+            midmatch_hap1 = (torch.argmax(seq_preds[:, 1, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq[:, 1, mid-width//2:mid+width//2].flatten()
+                         ).float().mean()
+            midmatch_hap1_sum += midmatch_hap1.item()
+
         times["midmatch"] = datetime.now()
 
         loss.backward()
         times["backward_pass"] = datetime.now()
-
-        #if vaf_criterion is not None and np.random.rand() < 0.10:
-        #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
-        #    vafloss.backward()
-        #    vafloss_sum += vafloss.detach().item()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
@@ -171,15 +164,15 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
-        if batch % 100 == 0:
-            logger.info(f"Batch {batch} : narrow acc: {midmatch_narrow.item():.3f} loss: {loss.item():.3f}")
+        if batch % 1 == 0:
+            logger.info(f"Batch {batch} : hap0 / 1 acc: {midmatch_hap0.item():.3f} / {midmatch_hap1.item():.3f} hap1loss: {loss.item():.3f}")
             
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
         start_time = datetime.now()  # reset timer for next batch
 
     logger.info(f"Trained {batch+1} batches in total.")
-    return epoch_loss_sum, midmatch_narrow_sum / batch, midmatch_wide_sum / batch, epoch_times
+    return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
 
 
 def calc_val_accuracy(loader, model):
@@ -253,9 +246,11 @@ def train_epochs(epochs,
     attention_heads = 8
     transformer_dim = 400
     encoder_layers = 4
-    model = VarTransformerAltMask(read_depth=max_read_depth, 
+    embed_dim_factor = 40
+    model = VarTransformer(read_depth=max_read_depth,
                                     feature_count=feats_per_read, 
-                                    out_dim=4, 
+                                    out_dim=4,
+                                    embed_dim_factor=embed_dim_factor,
                                     nhead=attention_heads, 
                                     d_hid=transformer_dim, 
                                     n_encoder_layers=encoder_layers,
@@ -323,6 +318,7 @@ def train_epochs(epochs,
         # what to log in wandb
         wandb_config_params = dict(
             learning_rate=init_learning_rate,
+            embed_dim_factor=embed_dim_factor,
             feats_per_read=feats_per_read,
             batch_size=batch_size,
             read_depth=max_read_depth,

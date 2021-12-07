@@ -83,50 +83,25 @@ class TwoHapDecoder(nn.Module):
     def __init__(self, in_dim, out_dim):
         super().__init__()
         self.fc1 = nn.Linear(in_dim, 400)
-        self.fc2 = nn.Linear(400, out_dim)
-        self.fc_vaf = nn.Linear(400, 1)
+        self.fc_hap0 = nn.Linear(400, out_dim)
+        self.fc_hap1 = nn.Linear(400, out_dim)
         self.elu = nn.ELU()
         self.softmax = nn.Softmax(dim=2)
 
     def forward(self, x):
         x = self.elu(self.fc1(x))
-        x1 = self.softmax(self.fc2(x))
-        # VAF stuff is VERY experimental - x has shape [batch, seqlen (in general this is variable), 4] - no linear
-        # layer can be operate over the seq_dim since it can change from run to run, so instead we just sum it?? (Mean works better than sum)
-        # x_vaf = torch.sigmoid(self.fc_vaf(x).mean(dim=1))
-        return x1
+        x0 = self.softmax(self.fc_hap0(x))
+        x1 = self.softmax(self.fc_hap1(x))
+        return torch.stack((x0, x1), dim=1)
+
 
 
 class VarTransformer(nn.Module):
 
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1):
-        super().__init__()
-        self.embed_dim = nhead * 20
-        self.fc1 = nn.Linear(read_depth * feature_count, 200)
-        self.fc2 = nn.Linear(200, self.embed_dim)
-        self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
-        encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
-        self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
-        self.elu = torch.nn.ELU()
-
-    def forward(self, src):
-        src = src.flatten(start_dim=2)
-        src = self.elu(self.fc1(src))
-        src = self.elu(self.fc2(src))
-        src = self.pos_encoder(src)
-        output = self.transformer_encoder(src)
-        output = self.decoder(output)
-        return output
-
-
-
-class VarTransformerAltMask(nn.Module):
-
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, embed_dim_factor=40, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
         super().__init__()
         self.device=device
-        self.embed_dim = nhead * 20
+        self.embed_dim = nhead * embed_dim_factor
         self.conv_out_channels = 10
         self.fc1_hidden = 12
 
@@ -162,7 +137,6 @@ class VarTransformerAltMask(nn.Module):
         output = self.transformer_encoder(src)
         output = self.decoder(output)
 
-        # pred_vaf = altmask.mean(dim=1)
-        return output, 0
+        return output
 
 

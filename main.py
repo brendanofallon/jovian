@@ -30,7 +30,7 @@ import vcf
 import loader
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim, \
     reads_spanning_range
-from model import VarTransformer, VarTransformerAltMask
+from model import VarTransformer
 from train import train, load_train_conf, eval_prediction
 
 
@@ -232,7 +232,7 @@ def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
 
     reference = pysam.FastaFile(conf['reference'])
 
-    model = VarTransformerAltMask(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=8, d_hid=400, n_encoder_layers=4, device=DEVICE).to(DEVICE)
+    model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=8, d_hid=400, n_encoder_layers=4, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
