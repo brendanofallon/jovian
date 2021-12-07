@@ -28,7 +28,8 @@ import sim
 import util
 import vcf
 import loader
-from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
+from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim, \
+    reads_spanning_range
 from model import VarTransformer, VarTransformerAltMask
 from train import train, load_train_conf, eval_prediction
 
@@ -186,14 +187,16 @@ def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
     Call variants in a region of a BAM file using the given altpredictor and model
     and return a list of vcf.Variant objects
     """
-    reads = reads_spanning(aln, chrom, pos, max_reads=max_read_depth)
+    reads = reads_spanning_range(aln, chrom, pos)
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
-
+    if len(reads) > max_read_depth:
+        reads = random.sample(reads, max_read_depth)
+    reads = util.sortreads(reads)
     minref = min(alnstart(r) for r in reads)
     maxref = max(alnstart(r) + r.query_length for r in reads)
     reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-    reads_encoded = util.sortreads(reads_encoded)
+
     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
     reftensor = string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)

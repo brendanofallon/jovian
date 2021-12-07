@@ -570,6 +570,10 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
 
                 if encoded.shape[0] > regionsize:
                     encoded = encoded[midstart:midend, :, :]
+                if encoded.shape[0] != tgt_haps.shape[-1]:
+                    # This happens sometimes at the edges of regions where the reads only overlap a few bases at
+                    # the start of the region.. raising an exception just causes this region to be skipped
+                    raise ValueError(f"src shape {encoded.shape} doesn't match haplotype shape {tgt_haps.shape}, skipping")
 
                 yield encoded, tgt_haps, region
 

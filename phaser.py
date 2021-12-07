@@ -345,7 +345,14 @@ def project_vars(variants, allele_indexes, ref_sequence, ref_offset):
 
 
 def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
+    """
+    Generate the two most likely haplotypes given the variants and reads for the region
+    In many cases this is trivial and we don't need to look at the reads, but if there are
+    multiple heterozygous variants we need to get fancy and look at which potential haplotypes
+    are actually best supported by the reads
 
+    : returns: Two strings representing the most probable haplotypes in the region
+    """
     ref_sequence = ref.fetch(chrom, region_start, region_end)
     hap0 = ref_sequence
     hap1 = ref_sequence
@@ -418,16 +425,6 @@ def parse_rows_classes(bed):
     return rows, idxs, class_names
 
 
-def sample_regions(bed):
-    classregions = defaultdict(list)
-    with open(bed) as fh:
-        for line in fh:
-            toks = line.split("\t")
-            chrom = toks[0]
-            start = int(toks[1])
-            end = int(toks[2])
-            clz = toks[3]
-            classregions[clz].append((chrom, start, end))
         
 
 
