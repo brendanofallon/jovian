@@ -138,7 +138,7 @@ class PregenLoader:
         :param pathpairs: List of (src path, tgt path, vaftgt path) tuples to use for data
         """
         self.device = device
-        self.datadir = Path(datadir)
+        self.datadir = Path(datadir) if datadir else None
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         self.vaftgt_prefix = vaftgt_prefix
