@@ -38,7 +38,6 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
                     level=logging.INFO) # handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
 
-
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
@@ -347,7 +346,8 @@ def main():
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
-    trainparser.add_argument("-da", "--data-augmentation", action="store_true", help="Specify --data-augmentation to perform data augmentation via diff loaders, default is false", default=False)
+    trainparser.add_argument("-da", "--data-augmentation", help="Specify data augmentation options: 'shortening', 'shuffling', 'downsampling'. You can provide multiple options. Default is None", nargs="+", default=None)
+    trainparser.add_argument("-fa", "--fraction-to-augment", help="Fraction of sample batches to augment. Needed with '--data-augmentation' option. Default is 0.25", default=0.25, type=float)
     trainparser.add_argument("-rn", "--wandb-run-name", type=alphanumeric_no_spaces, default=None,
                              help="Weights & Biases run name, must be alphanumeric plus '_' or '-'")
     trainparser.add_argument("--wandb-notes", type=str, default=None,
