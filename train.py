@@ -121,9 +121,19 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         times["forward_pass"] = datetime.now()
 
         if type(criterion) == nn.CrossEntropyLoss:
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            # Compute losses in both configurations, and use the best?
+            with torch.no_grad():
+                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq[:, torch.tensor([1,0]), :].flatten())
+
+            if loss1 < loss2:
+                loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            else:
+                loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq[:, torch.tensor([1,0]), :].flatten())
+
         else:
             loss = criterion(seq_preds, tgt_seq)
+
         times["loss"] = datetime.now()
 
         count += 1
@@ -150,7 +160,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         times["midmatch"] = datetime.now()
 
-        loss.backward()
+        # loss.backward()
         times["backward_pass"] = datetime.now()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
@@ -202,6 +212,7 @@ def _calc_hap_accuracy(src, seq_preds, tgt, width=100):
 
     return midmatch, var_count, tp_total, fp_total, fn_total
 
+
 def calc_val_accuracy(loader, model):
     """
     Compute accuracy (fraction of predicted bases that match actual bases),
@@ -232,7 +243,7 @@ def calc_val_accuracy(loader, model):
             tot_samples += src.shape[0]
             seq_preds = model(src)
             midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
-            midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
+            midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :])
             match_sum0 += midmatch0
             tp_tot0 += tps0
             fp_tot0 += fps0
