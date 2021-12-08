@@ -226,7 +226,9 @@ def calc_val_accuracy(loader, model):
         var_counts_sum0 = 0
         var_counts_sum1 = 0
         tot_samples = 0
+        total_batches = 0
         for src, tgt, vaf, *_ in loader.iter_once(64):
+            total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = model(src)
             midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
@@ -243,8 +245,8 @@ def calc_val_accuracy(loader, model):
             var_counts_sum0 += varcount0
             var_counts_sum1 += varcount1
                 
-    return (match_sum0 / tot_samples,
-            match_sum1 / tot_samples,
+    return (match_sum0 / total_batches,
+            match_sum1 / total_batches,
             var_counts_sum0 / tot_samples,
             var_counts_sum1 / tot_samples,
             tp_tot0, fp_tot0, fn_tot0,
