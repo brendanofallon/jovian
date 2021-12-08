@@ -180,7 +180,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
         start_time = datetime.now()  # reset timer for next batch
-
+        del src
+    torch.cuda.empty_cache()
     logger.info(f"Trained {batch+1} batches in total.")
     return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
 
