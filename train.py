@@ -108,6 +108,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     epoch_times = {}
     start_time = datetime.now()
     for batch, (src, tgt_seq, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
+        print(f"Starting batch {batch}")
         if log_info:
             decomp_time = log_info.get("decomp_time", 0.0)
         else:
@@ -281,7 +282,7 @@ def train_epochs(epochs,
                  cl_args = {}
 ):
     attention_heads = 8
-    transformer_dim = 500
+    transformer_dim = 400
     encoder_layers = 4
     embed_dim_factor = 40
     model = VarTransformer(read_depth=max_read_depth,
