@@ -122,15 +122,15 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         if type(criterion) == nn.CrossEntropyLoss:
             # Compute losses in both configurations, and use the best?
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
-            #with torch.no_grad():
-            #    loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
-            #    loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq[:, torch.tensor([1,0]), :].flatten())
+            #loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            with torch.no_grad():
+                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq[:, torch.tensor([1,0]), :].flatten())
 
-            #if loss1 < loss2:
-            #    loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
-            #else:
-            #    loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq[:, torch.tensor([1,0]), :].flatten())
+            if loss1 < loss2:
+                loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            else:
+                loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq[:, torch.tensor([1,0]), :].flatten())
 
         else:
             loss = criterion(seq_preds, tgt_seq)
@@ -161,7 +161,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         times["midmatch"] = datetime.now()
 
-        # loss.backward()
+        loss.backward()
         times["backward_pass"] = datetime.now()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
