@@ -281,7 +281,7 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 8
+    attention_heads = 4
     transformer_dim = 400
     encoder_layers = 4
     embed_dim_factor = 40
