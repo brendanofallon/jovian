@@ -406,13 +406,13 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            # loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
-            #                                                             optimizer,
-            #                                                             criterion,
-            #                                                             vaf_crit,
-            #                                                             dataloader,
-            #                                                             batch_size=batch_size,
-            #                                                             max_alt_reads=max_read_depth)
+            loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
+                                                                         optimizer,
+                                                                         criterion,
+                                                                         vaf_crit,
+                                                                         dataloader,
+                                                                         batch_size=batch_size,
+                                                                         max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
 
             acc0, acc1, var_count0, var_count1, tps0, fps0, fns0, tps1, fps1, fns1 = calc_val_accuracy(val_loader, model, criterion)
