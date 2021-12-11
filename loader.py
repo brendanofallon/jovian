@@ -217,7 +217,7 @@ class PregenLoader:
                 yield (
                     src_t[start:end].to(self.device).float(),
                     tgt_t[start:end].to(self.device).long(),
-                    vaftgt_t[start:end].to(self.device), 
+                    None, #vaftgt_t[start:end].to(self.device), 
                     None,
                     {"decomp_time": decomp_time},
                 )
@@ -238,7 +238,7 @@ class PregenLoader:
             yield (
                 torch.cat(src, dim=0).to(self.device).float(),
                 torch.cat(tgt, dim=0).to(self.device).long(),
-                torch.cat(vaftgt, dim=0).to(self.device),
+                None, #atorch.cat(vaftgt, dim=0).to(self.device),
                 None,
                 {"decomp_time": 0.0},
             )

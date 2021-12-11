@@ -122,6 +122,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         if type(criterion) == nn.CrossEntropyLoss:
             # Compute losses in both configurations, and use the best?
+            #loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
             with torch.no_grad():
                 for b in range(src.shape[0]):
                     loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_seq[b, :, :].flatten())
@@ -132,7 +133,20 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
             loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
         else:
-            loss = criterion(seq_preds, tgt_seq)
+            with torch.no_grad():
+                for b in range(src.shape[0]):
+                    # Must look at two configurations, each with two losses...
+                    loss1 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
+                    loss1 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
+
+                    loss2 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
+                    loss2 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
+
+                    if loss2 < loss1:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
+            loss = criterion(seq_preds[:, 0, :, :], tgt_seq[:, 0, :])
+            loss += criterion(seq_preds[:, 1, :, :], tgt_seq[:, 1, :])
 
         times["loss"] = datetime.now()
 
@@ -160,7 +174,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
 
         times["midmatch"] = datetime.now()
 
-        # loss.backward()
+        loss.backward()
         times["backward_pass"] = datetime.now()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
@@ -180,7 +194,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
         start_time = datetime.now()  # reset timer for next batch
-
+        del src
+    torch.cuda.empty_cache()
     logger.info(f"Trained {batch+1} batches in total.")
     return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
 
@@ -405,12 +420,13 @@ def train_epochs(epochs,
         for epoch in range(epochs):
             starttime = datetime.now()
             loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
-                                                                        optimizer,
-                                                                        criterion,
-                                                                        vaf_crit,
-                                                                        dataloader,
-                                                                        batch_size=batch_size,
-                                                                        max_alt_reads=max_read_depth)
+                                                                 optimizer,
+                                                                 criterion,
+                                                                 vaf_crit,
+                                                                 dataloader,
+                                                                 batch_size=batch_size,
+                                                                 max_alt_reads=max_read_depth)
+
             elapsed = datetime.now() - starttime
 
             acc0, acc1, var_count0, var_count1, tps0, fps0, fns0, tps1, fps1, fns1 = calc_val_accuracy(val_loader, model, criterion)
@@ -632,7 +648,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-
+    torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=100,
