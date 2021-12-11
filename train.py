@@ -213,7 +213,7 @@ def _calc_hap_accuracy(src, seq_preds, tgt, width=100):
     return midmatch, var_count, tp_total, fp_total, fn_total
 
 
-def calc_val_accuracy(loader, model):
+def calc_val_accuracy(loader, model, criterion):
     """
     Compute accuracy (fraction of predicted bases that match actual bases),
     calculates mean number of variant counts between tgt and predicted sequence,
@@ -239,9 +239,17 @@ def calc_val_accuracy(loader, model):
         tot_samples = 0
         total_batches = 0
         for src, tgt, vaf, *_ in loader.iter_once(64):
+
             total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = model(src)
+            for b in range(src.shape[0]):
+                loss1 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1), tgt[b, :, :].flatten())
+                loss2 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1),
+                                  tgt[b, torch.tensor([1, 0]), :].flatten())
+                if loss2 < loss1:
+                    seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
             midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
             midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :])
             match_sum0 += midmatch0
@@ -279,10 +287,10 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 8
-    transformer_dim = 500
+    attention_heads = 4
+    transformer_dim = 400
     encoder_layers = 4
-    embed_dim_factor = 40
+    embed_dim_factor = 80
     model = VarTransformer(read_depth=max_read_depth,
                                     feature_count=feats_per_read, 
                                     out_dim=4,
@@ -298,7 +306,7 @@ def train_epochs(epochs,
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
-        model.load_state_dict(torch.load(statedict))
+        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.train()
 
     if lossfunc == 'ce':
@@ -396,16 +404,16 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
-                                                                        optimizer,
-                                                                        criterion,
-                                                                        vaf_crit,
-                                                                        dataloader,
-                                                                        batch_size=batch_size,
-                                                                        max_alt_reads=max_read_depth)
+            # loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
+            #                                                             optimizer,
+            #                                                             criterion,
+            #                                                             vaf_crit,
+            #                                                             dataloader,
+            #                                                             batch_size=batch_size,
+            #                                                             max_alt_reads=max_read_depth)
             elapsed = datetime.now() - starttime
 
-            acc0, acc1, var_count0, var_count1, tps0, fps0, fns0, tps1, fps1, fns1 = calc_val_accuracy(val_loader, model)
+            acc0, acc1, var_count0, var_count1, tps0, fps0, fns0, tps1, fps1, fns1 = calc_val_accuracy(val_loader, model, criterion)
 
             try:
                 ppa0 = tps0/(tps0+fns0)
