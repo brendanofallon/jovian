@@ -12,6 +12,11 @@ class Variant:
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
 
+    def __hash__(self):
+        return hash(f"{self.ref}&{self.alt}&{self.pos}&{self.qual}")
+
+    def __gt__(self, other):
+        return self.pos > other.pos
 
 @dataclass
 class Cigar:

@@ -287,7 +287,7 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
         read_iterator = aln.fetch(variants[0].chrom.replace("chr", ""), ref_start, ref_end)
 
     for read in read_iterator:
-
+        print(f"read start: {read.reference_start} end: {read.reference_end}")
         # Skip reads that don't overlap the whole region of interest
         if read.reference_start is None \
                 or read.reference_end is None \
@@ -388,6 +388,10 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
         return hap0, hap1
 
     else:
+        ref_start = min(v.start for v in variants)
+        ref_end = max(v.start + len(v.ref) for v in variants)
+        if ref_end - ref_start > 100:
+            raise ValueError(f"Variants are too far apart to phase, skipping {chrom}:{region_start}-{region_end}")
         genotypes = score_genotypes(bam, ref_sequence, region_start, variants)
         best_genotype = genotypes[0] # They come back ordered by score
         return best_genotype.haplotypes[0].seq, best_genotype.haplotypes[1].seq
