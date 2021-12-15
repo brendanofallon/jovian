@@ -4,6 +4,16 @@
 import sys
 import pysam
 
+
+"""
+Given a 'split' BED file (where every region has the same length, usually 300bp), generate a fourth column
+of the BED file that contains a label that can be used for upsampling / downsampling
+
+Right now we do this based on the presence of variants, so regions are labeled according to whether or not
+they contain snvs, indels, etc etc. Anything goes, really
+
+"""
+
 vcf = pysam.VariantFile(sys.argv[1])
 
 for line in open(sys.argv[2]):
