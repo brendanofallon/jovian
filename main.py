@@ -14,7 +14,7 @@ import re
 
 import pysam
 import torch
-import pandas as pd
+
 
 import torch.multiprocessing as mp
 from concurrent.futures.process import ProcessPoolExecutor
@@ -22,9 +22,7 @@ import numpy as np
 import argparse
 import yaml
 
-import bwasim
-import model
-import sim
+import phaser
 import util
 import vcf
 import loader
@@ -182,12 +180,12 @@ def pregen(config, **kwargs):
                 util.concat_metafile(sample_metafile, metafh)
 
 
-def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
+def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth):
     """
     Call variants in a region of a BAM file using the given altpredictor and model
     and return a list of vcf.Variant objects
     """
-    reads = reads_spanning_range(aln, chrom, pos)
+    reads = reads_spanning_range(aln, chrom, start, end)
     if len(reads) < 5:
         raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
     if len(reads) > max_read_depth:
@@ -201,86 +199,133 @@ def callvars(model, aln, reference, chrom, pos, window_width, max_read_depth):
     reftensor = string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
     padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
+    midstart = max(0, start - minref)
+    midend = midstart + window_width
 
-    focal_min = padded_reads.shape[1] // 2 - window_width // 2 + 0
-    focal_max = padded_reads.shape[1] // 2 + window_width // 2 + 0
-    trimmed_reads = padded_reads[:, focal_min:focal_max, :, :]
-    print(f"Window {minref} [{minref + focal_min}  {pos}  {minref + focal_max}]  {maxref}")
-    refseq = refseq[focal_min:focal_max]
+    if padded_reads.shape[1] > window_width:
+        padded_reads = padded_reads[:, midstart:midend, :, :]
+
     #masked_reads = padded_reads * fullmask
-    seq_preds, _ = model(trimmed_reads.float().to(DEVICE))
-    pred1str = util.readstr(seq_preds[0, :, :])
+    seq_preds = model(padded_reads.float().to(DEVICE))
+    return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], start
 
-    # for i, r, p in zip(range(minref + focal_min, minref + focal_max), refseq, pred1str):
-    #     print(f"{i}\t{r}\t{p} {'*' if r != p else ''}")
+def _var_type(variant):
+    if len(variant.ref) == 1 and len(variant.alt) == 1:
+        return 'snv'
+    elif len(variant.ref) == 0 and len(variant.alt) > 0:
+        return 'ins'
+    elif len(variant.ref) > 0 and len(variant.alt) == 0:
+        return 'del'
+    elif len(variant.ref) > 0 and len(variant.alt) > 0:
+        return 'mnv'
+    print(f"Whoa, unknown variant type: {variant}")
+    return 'unknown'
 
-    variants = [v for v in vcf.aln_to_vars(refseq,
-                             pred1str,
-                             offset=minref + focal_min)]
-    return variants, seq_preds.squeeze(0),  minref + focal_min
-
-
-def eval_labeled_bam(config, bam, labels, statedict, **kwargs):
+def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
     """
     Call variants in BAM file with given model at positions given in the labels CSV, emit useful
     summary information about PPA / PPV, etc
     """
-    max_read_depth = 300
+    max_read_depth = 100
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_conf(config)
 
     reference = pysam.FastaFile(conf['reference'])
+    truth_vcf = pysam.VariantFile(truth_vcf)
+    attention_heads = 2
+    transformer_dim = 400
+    encoder_layers = 4
+    embed_dim_factor = 200
+    model = VarTransformer(read_depth=max_read_depth,
+                                    feature_count=feats_per_read,
+                                    out_dim=4,
+                                    embed_dim_factor=embed_dim_factor,
+                                    nhead=attention_heads,
+                                    d_hid=transformer_dim,
+                                    n_encoder_layers=encoder_layers,
+                                    device=DEVICE)
 
-    model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=8, d_hid=400, n_encoder_layers=4, device=DEVICE).to(DEVICE)
     model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.eval()
 
     aln = pysam.AlignmentFile(bam)
     results = defaultdict(Counter)
 
-    window_size = 60
+    window_size = 300
 
-    for i, row in pd.read_csv(labels).iterrows():
-        pos = int(row.pos)
-        if row.ngs_vaf < 0.05:
-            vafgroup = "< 0.05"
-        elif 0.05 <= row.ngs_vaf < 0.25:
-            vafgroup = "0.05 - 0.25"
-        elif 0.25 <= row.ngs_vaf < 0.50:
-            vafgroup = "0.25 - 0.50"
-        else:
-            vafgroup = "> 0.50"
+    tot_tps = 0
+    tot_fps = 0
+    tot_fns = 0
+    results = defaultdict(Counter)
+    for i, line in enumerate(open(labels)):
+        tps = []
+        fps = []
+        fns = []
+        toks = line.strip().split("\t")
+        chrom = toks[0]
+        start = int(toks[1])
+        end = int(toks[2])
+        label = toks[3]
 
-        labeltype = f"{row.vtype}-{row.status} {vafgroup}"
-        if results[labeltype]['rows'] > 20:
-            continue
         try:
-            variants, seq_preds, pred_start = callvars(model, aln, reference, str(row.chrom), pos, window_size, max_read_depth=max_read_depth)
+            hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size, max_read_depth=max_read_depth)
+            hap0 = util.readstr(hap0_t)
+            hap1 = util.readstr(hap1_t)
         except Exception as ex:
-            logger.warning(f"Hmm, exception processing {row.chrom}:{row.pos}, skipping it")
+            logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
             logger.warning(ex)
             continue
-        refwidth = seq_preds.shape[0]
-        refseq = reference.fetch(str(row.chrom), pred_start, pred_start + seq_preds.shape[0])
-        if row.status == 'TP' or row.status == 'FN':
-            true_altseq = refseq[0:pos-pred_start-1] + row.alt + refseq[pos - pred_start + len(row.ref)-1:]
-        else:
-            true_altseq = refseq
 
-        tps, fps, fns = eval_prediction(refseq, true_altseq, seq_preds,
-                                        midwidth=min(refwidth, window_size))
-        print(f"{row.chrom}:{row.pos} {row.ref} -> {row.alt}\t{row.status} VAF: {row.ngs_vaf:.4f} TP: {len(tps)} FP: {len(fps)} FN: {len(fns)}")
-        # print(f"TPs: {tps}")
-        # print(f"FPs: {fps}")
-        # print(f"TP: {total_tps} FP: {total_fps} FNs: {total_fns}")
-        results[labeltype]['TP'] += len(tps)
-        results[labeltype]['FP'] += len(fps)
-        results[labeltype]['FN'] += len(fns)
-        results[labeltype]['rows'] += 1
+        print(f"[{start}]  {chrom}:{minref}-{minref + window_size} ", end='')
+
+        refwidth = len(hap0)
+        refseq = reference.fetch(chrom, minref, minref + refwidth)
+        variants = list(truth_vcf.fetch(chrom, minref, minref + refwidth))
+
+        # WONT ALWAYS WORK: Grab *ALL* variants and generate a single alt sequence with everything???
+        pseudo_altseq = phaser.project_vars(variants, [1] * len(variants), refseq, minref)
+        pseudo_vars = list(vcf.aln_to_vars(refseq, pseudo_altseq, minref))
+
+        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
+        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
+
+        print(f" true: {len(pseudo_vars)}", end='')
+
+        var_types = set()
+        for true_var in pseudo_vars:
+            var_type = _var_type(true_var)
+            var_types.add(var_type)
+            # print(f"{true_var} ", end='')
+            # print(f" hap0: {true_var in vars_hap0}, hap1: {true_var in vars_hap1}")
+            if true_var in vars_hap0 or true_var in vars_hap1:
+                tps.append(true_var)
+                tot_tps += 1
+                results[var_type]['tp'] += 1
+            else:
+                fns.append(true_var)
+                tot_fns += 1
+                results[var_type]['fn'] += 1
+        print(f" {', '.join(var_types)} TP: {len(tps)} FN: {len(fns)}", end='')
+
+        for var0 in vars_hap0:
+            var_type = _var_type(var0)
+            if var0 not in pseudo_vars:
+                fps.append(var0)
+                tot_fps += 1
+                results[var_type]['fp'] += 1
+        for var1 in vars_hap1:
+            var_type = _var_type(var1)
+            if var1 not in pseudo_vars and var1 not in vars_hap0:
+                fps.append(var1)
+                tot_fps += 1
+                results[var_type]['fp'] += 1
+
+
+        print(f" FP: {len(fps)}")
 
     for key, val in results.items():
-        print(f"{key} : total entries: {val['rows']}")
+        print(f"{key} : total entries: {sum(val.values())}")
         for t, count in val.items():
             print(f"\t{t} : {count}")
 
@@ -340,6 +385,7 @@ def main():
     evalbamparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     evalbamparser.add_argument("-m", "--statedict", help="Stored model", required=True)
     evalbamparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
+    evalbamparser.add_argument("-v", "--truth-vcf", help="Truth VCF", required=True)
     evalbamparser.add_argument("-l", "--labels", help="CSV file with truth variants", required=True)
     evalbamparser.set_defaults(func=eval_labeled_bam)
 
