@@ -73,13 +73,13 @@ def tensor_from_gzip(path, device):
 def tensor_from_file(path, device):
     with open(path, "rb") as fh:
         data = fh.read()
-    if str(path).endswith('.gz'):
-        return tensor_from_gz(data, device)
-    elif str(path).endswith('.lz4'):
+    if str(path).endswith('.lz4'):
         return tensor_from_lz4(data, device)
     else:
         return torch.load(path, map_location=device)
 
+def sortreads(reads):
+    return sorted(reads, key=lambda r: r.reference_start)
 
 def unzip_load(path, device='cpu'):
     """
