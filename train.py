@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 
 import vcf
 import loader
-import bwasim
 import util
 from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
-from model import VarTransformer, VarTransformerAltMask
+from model import VarTransformer
 from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
@@ -102,8 +101,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     prev_epoch_loss = None
     vafloss_sum = 0
     count = 0
-    midmatch_narrow_sum = 0
-    midmatch_wide_sum = 0
+    midmatch_hap0_sum = 0
+    midmatch_hap1_sum = 0
     vafloss = torch.tensor([0])
     # init time usage to zero
     epoch_times = {}
@@ -118,14 +117,37 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
 
-        seq_preds, vaf_preds = model(src)
+        seq_preds = model(src)
         times["forward_pass"] = datetime.now()
 
-        tgt_seq = tgt_seq.squeeze(1)
         if type(criterion) == nn.CrossEntropyLoss:
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten())
+            # Compute losses in both configurations, and use the best?
+            #loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            with torch.no_grad():
+                for b in range(src.shape[0]):
+                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_seq[b, :, :].flatten())
+                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_seq[b, torch.tensor([1,0]), :].flatten())
+
+                    if loss2 < loss1:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :]
+
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
         else:
-            loss = criterion(seq_preds, tgt_seq)
+            with torch.no_grad():
+                for b in range(src.shape[0]):
+                    # Must look at two configurations, each with two losses...
+                    loss1 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
+                    loss1 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
+
+                    loss2 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
+                    loss2 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
+
+                    if loss2 < loss1:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
+            loss = criterion(seq_preds[:, 0, :, :], tgt_seq[:, 0, :])
+            loss += criterion(seq_preds[:, 1, :, :], tgt_seq[:, 1, :])
+
         times["loss"] = datetime.now()
 
         count += 1
@@ -138,27 +160,22 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
 
         with torch.no_grad():
-            width = 20
-            mid = seq_preds.shape[1] // 2
-            midmatch_narrow = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
-                         ).float().mean()
-            midmatch_narrow_sum += midmatch_narrow.item()
             width = 200
-            mid = seq_preds.shape[1] // 2
-            midmatch_wide = (torch.argmax(seq_preds[:, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq[:, mid-width//2:mid+width//2].flatten()
+            mid = seq_preds.shape[2] // 2
+            midmatch_hap0 = (torch.argmax(seq_preds[:, 0, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq[:, 0, mid-width//2:mid+width//2].flatten()
                          ).float().mean()
-            midmatch_wide_sum += midmatch_wide.item()
+            midmatch_hap0_sum += midmatch_hap0.item()
+
+            midmatch_hap1 = (torch.argmax(seq_preds[:, 1, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
+                                     dim=1) == tgt_seq[:, 1, mid-width//2:mid+width//2].flatten()
+                         ).float().mean()
+            midmatch_hap1_sum += midmatch_hap1.item()
+
         times["midmatch"] = datetime.now()
 
         loss.backward()
         times["backward_pass"] = datetime.now()
-
-        #if vaf_criterion is not None and np.random.rand() < 0.10:
-        #    vafloss = vaf_criterion(vaf_preds.double(), tgtvaf.double())
-        #    vafloss.backward()
-        #    vafloss_sum += vafloss.detach().item()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
         optimizer.step()
@@ -171,18 +188,47 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
-        if batch % 100 == 0:
-            logger.info(f"Batch {batch} : narrow acc: {midmatch_narrow.item():.3f} loss: {loss.item():.3f}")
+        if batch % 1 == 0:
+            logger.info(f"Batch {batch} : hap0 / 1 acc: {midmatch_hap0.item():.3f} / {midmatch_hap1.item():.3f} hap1loss: {loss.item():.3f}")
             
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
         start_time = datetime.now()  # reset timer for next batch
-
+        del src
+    torch.cuda.empty_cache()
     logger.info(f"Trained {batch+1} batches in total.")
-    return epoch_loss_sum, midmatch_narrow_sum / batch, midmatch_wide_sum / batch, epoch_times
+    return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
 
 
-def calc_val_accuracy(loader, model):
+def _calc_hap_accuracy(src, seq_preds, tgt, width=100):
+    # Compute val accuracy
+    mid = seq_preds.shape[1] // 2
+    midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
+                             dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
+                ).float().mean()
+
+    # Compute mean variant counts
+    var_count = 0
+    batch_size = 0
+    tp_total = 0
+    fp_total = 0
+    fn_total = 0
+    for b in range(src.shape[0]):
+        predstr = util.readstr(seq_preds[b, :, :])
+        tgtstr = util.tgt_str(tgt[b, :])
+        var_count += len(list(vcf.aln_to_vars(tgtstr, predstr)))
+        batch_size += 1
+
+        # Get TP, FN and FN based on reference, alt and predicted sequence.
+        tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, :])
+        tp_total += len(tps)
+        fp_total += len(fps)
+        fn_total += len(fns)
+
+    return midmatch, var_count, tp_total, fp_total, fn_total
+
+
+def calc_val_accuracy(loader, model, criterion):
     """
     Compute accuracy (fraction of predicted bases that match actual bases),
     calculates mean number of variant counts between tgt and predicted sequence,
@@ -193,44 +239,52 @@ def calc_val_accuracy(loader, model):
     """
     width = 20
     with torch.no_grad():
-        match_sum = 0
+        match_sum0 = 0
+        match_sum1 = 0
         count = 0
-        vaf_mse_sum = 0
-        tp_total = 0
-        fp_total = 0
-        fn_total = 0
-        vars_per_batch = []
+        tp_tot0 = 0
+        fp_tot0 = 0
+        fn_tot0 = 0
+        tp_tot1 = 0
+        fp_tot1 = 0
+        fn_tot1 = 0
+
+        var_counts_sum0 = 0
+        var_counts_sum1 = 0
+        tot_samples = 0
+        total_batches = 0
         for src, tgt, vaf, *_ in loader.iter_once(64):
-            tgt = tgt.squeeze(1)
 
-            seq_preds, vaf_preds = model(src)
-            # Compute val accuracy
-            mid = seq_preds.shape[1] // 2
-            midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
-                        ).float().mean()
-            match_sum += midmatch
-            count += 1
-            vaf_mse_sum += ((vaf - vaf_preds) * (vaf-vaf_preds)).mean().item()
-
-            # Compute mean variant counts
-            count_vars_per_batch = 0
-            batch_size = 0
+            total_batches += 1
+            tot_samples += src.shape[0]
+            seq_preds = model(src)
             for b in range(src.shape[0]):
-                predstr = util.readstr(seq_preds[b, :, :])
-                tgtstr = util.tgt_str(tgt[b, :])
-                count_vars_per_batch += len(list(vcf.aln_to_vars(tgtstr, predstr)))
-                batch_size += 1
+                loss1 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1), tgt[b, :, :].flatten())
+                loss2 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1),
+                                  tgt[b, torch.tensor([1, 0]), :].flatten())
+                if loss2 < loss1:
+                    seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
 
-                # Get TP, FN and FN based on reference, alt and predicted sequence.
-                tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]),  tgtstr, seq_preds[b, :, :])
-                tp_total += len(tps)
-                fp_total += len(fps)
-                fn_total += len(fns)
+            midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
+            midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :])
+            match_sum0 += midmatch0
+            tp_tot0 += tps0
+            fp_tot0 += fps0
+            fn_tot0 += fns0
+            match_sum1 += midmatch1
+            tp_tot1 += tps1
+            fp_tot1 += fps1
+            fn_tot1 += fns1
 
-            vars_per_batch.append(count_vars_per_batch/batch_size)
+            var_counts_sum0 += varcount0
+            var_counts_sum1 += varcount1
                 
-    return match_sum / count, vaf_mse_sum / count, np.mean(vars_per_batch), tp_total, fp_total, fn_total
+    return (match_sum0 / total_batches,
+            match_sum1 / total_batches,
+            var_counts_sum0 / tot_samples,
+            var_counts_sum1 / tot_samples,
+            tp_tot0, fp_tot0, fn_tot0,
+            tp_tot1, fp_tot1, fn_tot1, )
 
 
 def train_epochs(epochs,
@@ -248,12 +302,14 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 8
-    transformer_dim = 400
-    encoder_layers = 4
-    model = VarTransformerAltMask(read_depth=max_read_depth, 
+    attention_heads = 2
+    transformer_dim = 500
+    encoder_layers = 6
+    embed_dim_factor = 120
+    model = VarTransformer(read_depth=max_read_depth,
                                     feature_count=feats_per_read, 
-                                    out_dim=4, 
+                                    out_dim=4,
+                                    embed_dim_factor=embed_dim_factor,
                                     nhead=attention_heads, 
                                     d_hid=transformer_dim, 
                                     n_encoder_layers=encoder_layers,
@@ -265,14 +321,14 @@ def train_epochs(epochs,
     logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
-        model.load_state_dict(torch.load(statedict))
+        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.train()
 
     if lossfunc == 'ce':
         logger.info("Creating CrossEntropy loss function")
         criterion = nn.CrossEntropyLoss()
     elif lossfunc == 'sw':
-        gap_open_penalty=-5
+        gap_open_penalty=-2
         gap_exend_penalty=-1
         temperature=1.0
         trim_width=100
@@ -289,30 +345,29 @@ def train_epochs(epochs,
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
-    trainlogger = TrainLogger(trainlogpath, [
-        "epoch",
-        "trainingloss",
-        "train_accuracy",
-        "val_accuracy",
-        "mean_var_count",
-        "ppa",
-        "ppv",
-        "learning_rate",
-        "epochtime",
-        "batch_time_mean",
-        "decompress_frac",
-        "train_frac",
-        "io_frac",
-        "zero_grad_frac",
-        "forward_pass_frac",
-        "loss_frac",
-        "midmatch_frac",
-        "backward_pass_frac",
-        "optimize_frac",
-    ])
 
-    tensorboard_log_path = str(model_dest).replace(".model", "") + "_tensorboard_data"
-    tensorboardWriter = SummaryWriter(log_dir=tensorboard_log_path)
+
+    trainlogger = TrainLogger(trainlogpath, [
+            "epoch",
+            "trainingloss",
+            "train_accuracy",
+            "val_accuracy",
+            "mean_var_count",
+            "ppa0",
+            "ppv0",
+            "learning_rate",
+            "epochtime",
+            "batch_time_mean",
+            "decompress_frac",
+            "train_frac",
+            "io_frac",
+            "zero_grad_frac",
+            "forward_pass_frac",
+            "loss_frac",
+            "midmatch_frac",
+            "backward_pass_frac",
+            "optimize_frac",
+    ])
 
     if ENABLE_WANDB:
         import wandb
@@ -321,6 +376,7 @@ def train_epochs(epochs,
         # what to log in wandb
         wandb_config_params = dict(
             learning_rate=init_learning_rate,
+            embed_dim_factor=embed_dim_factor,
             feats_per_read=feats_per_read,
             batch_size=batch_size,
             read_depth=max_read_depth,
@@ -364,29 +420,31 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, train_narrow_acc, train_wide_acc, epoch_times = train_epoch(model,
-                                                                        optimizer,
-                                                                        criterion,
-                                                                        vaf_crit,
-                                                                        dataloader,
-                                                                        batch_size=batch_size,
-                                                                        max_alt_reads=max_read_depth)
+            loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
+                                                                 optimizer,
+                                                                 criterion,
+                                                                 vaf_crit,
+                                                                 dataloader,
+                                                                 batch_size=batch_size,
+                                                                 max_alt_reads=max_read_depth)
+
             elapsed = datetime.now() - starttime
 
-            val_accuracy, val_vaf_mse, mean_var_count, tps, fps, fns = calc_val_accuracy(val_loader, model)
+            acc0, acc1, var_count0, var_count1, tps0, fps0, fns0, tps1, fps1, fns1 = calc_val_accuracy(val_loader, model, criterion)
 
             try:
-                ppa = tps/(tps+fns)
-                ppv = tps/(tps+fps)
+                ppa0 = tps0/(tps0+fns0)
+                ppv0 = tps0/(tps0+fps0)
+                ppa1 = tps1/(tps1+fns1)
+                ppv1 = tps1/(tps1+fps1)
             except ZeroDivisionError:
-                ppa = 0
-                ppv = 0
+                ppa0 = 0
+                ppv0 = 0
+                ppa1 = 0
+                ppv1 = 0
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc narrow / wide: {train_narrow_acc:.4f} / {train_wide_acc:.4f}, val accuracy: {val_accuracy:.4f}, mean_var_count: {mean_var_count}, tps: {tps}, fps: {fps}, fns: {fns}, ppa: {ppa}, ppv: {ppv}, val VAF accuracy: {val_vaf_mse:.4f}")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_acc0:.4f} / {train_acc1:.4f}, val acc: {acc0:.3f} / {acc1:.3f} var counts: {var_count0:.3f} / {var_count1:.3f}, ppa: {ppa0:.3f} / {ppa1:.3f}, ppv: {ppv0:.3f} / {ppv1:.3f}")
 
-
-            if type(val_accuracy) == torch.Tensor:
-                val_accuracy = val_accuracy.item()
 
             if epoch_times.get("batch_count", 0) > 0:
                 mean_batch_time = epoch_times.get("batch_time",0.0) / epoch_times.get("batch_count")
@@ -417,35 +475,39 @@ def train_epochs(epochs,
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
-                    "train_accuracy": train_narrow_acc,
-                    "train_wide_accuracy": train_wide_acc,
-                    "val_accuarcy": val_accuracy,
-                    "mean_var_count": mean_var_count,
-                    "ppa": ppa,
-                    "ppv": ppv,
+                    "train_acc_hap0": train_acc0,
+                    "train_acc_hap1": train_acc1,
+                    "accuracy/val_acc_hap0": acc0,
+                    "accuracy/val_acc_hap1": acc1,
+                    "accuracy/var_count0": var_count0,
+                    "accuracy/var_count1": var_count1,
+                    "accuracy/ppa hap0": ppa0,
+                    "accuracy/ppv hap0": ppv0,
+                    "accuracy/ppa hap1": ppa1,
+                    "accuracy/ppv hap1": ppv1,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                     "batch_time_mean": mean_batch_time,
-                    "decompress_frac": decompress_time_frac,
-                    "train_frac": train_time_frac,
-                    "io_frac": load_time_frac,
-                    "zero_grad_frac": zero_grad_frac,
-                    "forward_pass_frac": forward_pass_frac,
-                    "loss_frac": loss_frac,
-                    "midmatch_frac": midmatch_frac,
-                    "backward_pass_frac": backward_pass_frac,
-                    "optimize_frac": optimize_frac,
+                    "performance/decompress_frac": decompress_time_frac,
+                    "performance/train_frac": train_time_frac,
+                    "performance/io_frac": load_time_frac,
+                    "performance/zero_grad_frac": zero_grad_frac,
+                    "performance/forward_pass_frac": forward_pass_frac,
+                    "performance/loss_frac": loss_frac,
+                    "performance/midmatch_frac": midmatch_frac,
+                    "performance/backward_pass_frac": backward_pass_frac,
+                    "performance/optimize_frac": optimize_frac,
                 })
 
             scheduler.step()
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
-                "train_accuracy": train_narrow_acc,
-                "val_accuracy": val_accuracy,
-                "mean_var_count": mean_var_count,
-                "ppa": ppa,
-                "ppv": ppv,
+                "train_accuracy": train_acc0,
+                "val_accuracy": acc0,
+                "mean_var_count": var_count0,
+                "ppa0": ppa0,
+                "ppv0": ppv0,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
                 "batch_time_mean": mean_batch_time,
@@ -459,10 +521,6 @@ def train_epochs(epochs,
                 "backward_pass_frac": backward_pass_frac,
                 "optimize_frac": optimize_frac,
             })
-
-            tensorboardWriter.add_scalar("loss/train", loss, epoch)
-            tensorboardWriter.add_scalar("match/train", train_narrow_acc, epoch)
-            tensorboardWriter.add_scalar("match/val", val_accuracy, epoch)
 
 
             if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
@@ -486,7 +544,7 @@ def load_train_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
     conf = yaml.safe_load(open(confyaml).read())
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
-    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    # assert 'data' in conf, "Expected 'data' entry in training configuration"
     return conf
 
 
@@ -576,11 +634,24 @@ def train(config, output_model, input_model, epochs, **kwargs):
         
         dataloader = pregenloader
 
-        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
-        if kwargs.get("data_augmentation"):
-            dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-            dataloader = loader.ShufflingLoader(dataloader)
-            dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
+        # If you want to use data augmentation, you need to pass options with '--data-augmentation" parameter during training, default is no augmentation.
+        data_augmentation = conf['data_augmentation'] if 'data_augmentation' in conf else kwargs.get("data_augmentation")
+        logger.info(f"Data augmentation steps provided are: {data_augmentation}")
+        if data_augmentation is not None and len(data_augmentation) != 0:
+            data_aug_options = ['shuffling', 'shortening', 'downsampling']
+            if not all(x in data_aug_options for x in data_augmentation) :
+                raise ValueError("Expected one of these options: ['shortening', 'shuffling', 'downsampling'],"
+                                 f"Instead found this {data_augmentation}")
+            else:
+                fraction_to_augment = conf['fraction_to_augment'] if "fraction_to_augment" in conf else kwargs.get("fraction_to_augment")
+                logger.info(f"Fraction to augment used is: {fraction_to_augment}")
+                if "shortening" in data_augmentation:
+                    dataloader = loader.ShorteningLoader(dataloader, seq_len=150, fraction_to_augment=fraction_to_augment)
+                if "shuffling" in data_augmentation:
+                    dataloader = loader.ShufflingLoader(dataloader, fraction_to_augment=fraction_to_augment)
+                if "downsampling" in data_augmentation:
+                    dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01, fraction_to_augment=fraction_to_augment)
+
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
@@ -591,7 +662,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
                                      readlength=145,
                                      error_rate=0.02,
                                      clip_prob=0.01)
-
+    torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=100,
