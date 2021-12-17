@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 
-EMPTY_TENSOR = torch.zeros(9)
+EMPTY_TENSOR = torch.zeros(10)
 
 class MockRead:
 
@@ -75,14 +75,15 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped):
-    ebc = torch.zeros(9).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
+def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped, offset):
+    ebc = torch.zeros(10, dtype=torch.int8) # Char is a signed 8-bit integer, so ints from -128 - 127 only
     ebc = update_from_base(base, ebc)
     ebc[4] = int(round(qual / 10))
-    ebc[5] = consumes_ref_base # Consumes a base on reference seq - which means not insertion
+    ebc[5] = consumes_ref_base  # Consumes a base on reference seq - which means not insertion
     ebc[6] = consumes_read_base # Consumes a base on read - so not a deletion
     ebc[7] = 1 if strand else 0
     ebc[8] = 1 if clipped else 0
+    ebc[9] = offset
     return ebc
 
 
@@ -106,7 +107,7 @@ def decode(t):
 
 
 def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0) for b in bases])
+    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0, 0) for b in bases])
 
 
 def target_string_to_tensor(bases):
@@ -128,41 +129,41 @@ def pad_zeros(pre, data, post):
     return data
 
 
-def iterate_cigar(rec):
-    cigtups = rec.cigartuples
-    bases = rec.query_sequence
-    quals = rec.query_qualities
-    cig_index = 0
-    n_bases_cigop = cigtups[cig_index][1]
-    cigop = cigtups[cig_index][0]
-    is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
-    is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
-    is_clipped = cigop in {4, 5}
-    base_index = 0
-    refstart = alnstart(rec)
-    refpos = refstart
-    while True:
-        if is_seq_consumed:
-            base = bases[base_index]
-            qual = quals[base_index]
-            base_index += 1
-        else:
-            base = "-"
-            qual = 0
-        if is_ref_consumed:
-            refpos += 1
-
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
-        n_bases_cigop -= 1
-        if n_bases_cigop <= 0:
-            cig_index += 1
-            if cig_index >= len(cigtups):
-                break
-            n_bases_cigop = cigtups[cig_index][1]
-            cigop = cigtups[cig_index][0]
-            is_ref_consumed = cigop in {0, 2, 4, 5, 7}
-            is_seq_consumed = cigop in {0, 1, 3, 4, 7}
-            is_clipped = cigop in {4, 5}
+# def iterate_cigar(rec):
+#     cigtups = rec.cigartuples
+#     bases = rec.query_sequence
+#     quals = rec.query_qualities
+#     cig_index = 0
+#     n_bases_cigop = cigtups[cig_index][1]
+#     cigop = cigtups[cig_index][0]
+#     is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
+#     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
+#     is_clipped = cigop in {4, 5}
+#     base_index = 0
+#     refstart = alnstart(rec)
+#     refpos = refstart
+#     while True:
+#         if is_seq_consumed:
+#             base = bases[base_index]
+#             qual = quals[base_index]
+#             base_index += 1
+#         else:
+#             base = "-"
+#             qual = 0
+#         if is_ref_consumed:
+#             refpos += 1
+#
+#         yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
+#         n_bases_cigop -= 1
+#         if n_bases_cigop <= 0:
+#             cig_index += 1
+#             if cig_index >= len(cigtups):
+#                 break
+#             n_bases_cigop = cigtups[cig_index][1]
+#             cigop = cigtups[cig_index][0]
+#             is_ref_consumed = cigop in {0, 2, 4, 5, 7}
+#             is_seq_consumed = cigop in {0, 1, 3, 4, 7}
+#             is_clipped = cigop in {4, 5}
 
 
 def iterate_bases(rec):
@@ -181,9 +182,13 @@ def iterate_bases(rec):
     is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
+    offset = 0
     for i, (base, qual) in enumerate(zip(bases, quals)):
-        readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
+        if is_ref_consumed and not is_seq_consumed and not is_clipped:
+            offset -=1
+        elif is_seq_consumed and not is_ref_consumed and not is_clipped:
+            offset += 1
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped, offset)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -198,7 +203,7 @@ def iterate_bases(rec):
 
 def rec_tensor_it(read, minref):
     for i in range(alnstart(read) - minref):
-        yield EMPTY_TENSOR, True
+        yield EMPTY_TENSOR
 
     try:
         for t in iterate_bases(read):
@@ -207,7 +212,7 @@ def rec_tensor_it(read, minref):
         pass
 
     while True:
-        yield EMPTY_TENSOR, True
+        yield EMPTY_TENSOR
 
 
 def emit_tensor_aln(t):
@@ -253,7 +258,7 @@ def encode_pileup3(reads, start, end):
     everything = []
     for readnum, read in enumerate(reads):
         try:
-            readencoded = [enc.char() for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
+            readencoded = [enc.char() for enc in _consume_n(rec_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))
         except Exception as ex:
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")

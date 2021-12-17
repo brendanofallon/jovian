@@ -287,7 +287,6 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
         read_iterator = aln.fetch(variants[0].chrom.replace("chr", ""), ref_start, ref_end)
 
     for read in read_iterator:
-        print(f"read start: {read.reference_start} end: {read.reference_end}")
         # Skip reads that don't overlap the whole region of interest
         if read.reference_start is None \
                 or read.reference_end is None \
