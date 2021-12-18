@@ -221,7 +221,8 @@ def _calc_hap_accuracy(src, seq_preds, tgt, width=100):
         batch_size += 1
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
-        tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, :])
+        refseqstr = util.readstr(src[b, 75:225, 0, :])
+        tps, fps, fns = eval_prediction(refseqstr, tgtstr, seq_preds[b, :, :])
         tp_total += len(tps)
         fp_total += len(fps)
         fn_total += len(fns)
