@@ -226,7 +226,7 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
     summary information about PPA / PPV, etc
     """
     max_read_depth = 100
-    feats_per_read = 9
+    feats_per_read = 10
     logger.info(f"Found torch device: {DEVICE}")
     conf = load_conf(config)
 
@@ -234,7 +234,7 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
     truth_vcf = pysam.VariantFile(truth_vcf)
     attention_heads = 2
     transformer_dim = 400
-    encoder_layers = 4
+    encoder_layers = 6
     embed_dim_factor = 200
     model = VarTransformer(read_depth=max_read_depth,
                                     feature_count=feats_per_read,

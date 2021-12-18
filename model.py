@@ -80,16 +80,16 @@ class PositionalEncoding(nn.Module):
 
 class TwoHapDecoder(nn.Module):
 
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, in_seq_len=300, out_len=150, out_dim=4):
         super().__init__()
-        self.fc1 = nn.Linear(in_dim, 400)
-        self.fc_hap0 = nn.Linear(400, out_dim)
-        self.fc_hap1 = nn.Linear(400, out_dim)
+        self.fc1 = nn.Linear(in_seq_len, out_len)
+        self.fc_hap0 = nn.Linear(in_dim, out_dim)
+        self.fc_hap1 = nn.Linear(in_dim, out_dim)
         self.elu = nn.ELU()
         self.softmax = nn.Softmax(dim=2)
 
     def forward(self, x):
-        x = self.elu(self.fc1(x))
+        x = self.elu(self.fc1(x.transpose(-1, -2))).transpose(-1, -2)
         x0 = self.softmax(self.fc_hap0(x))
         x1 = self.softmax(self.fc_hap1(x))
         return torch.stack((x0, x1), dim=1)
@@ -98,10 +98,11 @@ class TwoHapDecoder(nn.Module):
 
 class VarTransformer(nn.Module):
 
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, embed_dim_factor=40, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
+    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, embed_dim_factor=40, n_encoder_layers=2, pred_seq_len=150, p_dropout=0.1, device='cpu'):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * embed_dim_factor
+        self.pred_seq_len = pred_seq_len
         self.conv_out_channels = 10
         self.fc1_hidden = 12
 
@@ -117,7 +118,7 @@ class VarTransformer(nn.Module):
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout, batch_first=True, activation='gelu')
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
-        self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
+        self.decoder = TwoHapDecoder(self.embed_dim, in_seq_len=300, out_len=150, out_dim=4)
         self.elu = torch.nn.ELU()
 
     def forward(self, src):

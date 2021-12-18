@@ -117,6 +117,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
 
+        tgt_seq = tgt_seq[:, :, 75:225]
         seq_preds = model(src)
         times["forward_pass"] = datetime.now()
 
@@ -237,7 +238,7 @@ def calc_val_accuracy(loader, model, criterion):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
-    width = 20
+
     with torch.no_grad():
         match_sum0 = 0
         match_sum1 = 0
@@ -257,6 +258,7 @@ def calc_val_accuracy(loader, model, criterion):
 
             total_batches += 1
             tot_samples += src.shape[0]
+            tgt = tgt[:, :, 75:225]
             seq_preds = model(src)
             for b in range(src.shape[0]):
                 loss1 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1), tgt[b, :, :].flatten())
@@ -303,9 +305,9 @@ def train_epochs(epochs,
                  cl_args = {}
 ):
     attention_heads = 2
-    transformer_dim = 500
+    transformer_dim = 20
     encoder_layers = 6
-    embed_dim_factor = 120
+    embed_dim_factor = 20
     model = VarTransformer(read_depth=max_read_depth,
                                     feature_count=feats_per_read, 
                                     out_dim=4,
