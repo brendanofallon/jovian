@@ -102,12 +102,12 @@ class VarTransformer(nn.Module):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * embed_dim_factor
-        self.conv_out_channels = 10
+        self.conv_out_channels = 20
         self.fc1_hidden = 12
 
         self.conv1 = nn.Conv2d(in_channels=feature_count + 1,
                                out_channels=self.conv_out_channels,
-                               kernel_size=(1, 10),
+                               kernel_size=(1, 25),
                                padding='same')
 
         self.fc1 = nn.Linear(feature_count + 1 + self.conv_out_channels, self.fc1_hidden)
