@@ -41,47 +41,7 @@ DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_availa
 
 
 def call(statedict, bam, reference, chrom, pos, **kwargs):
-    max_read_depth = 300
-    feats_per_read = 8
-
-    altpredictor = AltPredictor(0, 7)
-    altpredictor.load_state_dict(torch.load("altpredictor3.sd"))
-    altpredictor.to(DEVICE)
-
-    model = VarTransformer(read_depth=max_read_depth, feature_count=feats_per_read, out_dim=4, nhead=6, d_hid=300, n_encoder_layers=2).to(DEVICE)
-    model.load_state_dict(torch.load(statedict))
-    model.eval()
-
-    bam = pysam.AlignmentFile(bam)
-    reads = reads_spanning(bam, chrom, pos, max_reads=max_read_depth)
-    if len(reads) < 5:
-        raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
-
-    minref = min(alnstart(r) for r in reads)
-    maxref = max(alnstart(r) + r.query_length for r in reads)
-    reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-
-    refseq = pysam.FastaFile(reference).fetch(chrom, minref, minref + reads_encoded.shape[0])
-    reftensor = string_to_tensor(refseq)
-    reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
-    padded_reads = ensure_dim(reads_w_ref, maxref-minref, max_read_depth).unsqueeze(0)
-
-    fullmask = create_altmask(altpredictor, padded_reads)
-    masked_reads = padded_reads * fullmask
-    
-    print(util.to_pileup(padded_reads[0, :, :, :]))
-    seq_preds, _ = model(masked_reads.flatten(start_dim=2))
-    pred1str = util.readstr(seq_preds[0, :, :])
-    print("\n")
-    print(refseq)
-    print(pred1str)
-
-    midwith = 100
-    for v in vcf.aln_to_vars(refseq[len(refseq) // 2 - midwith // 2:len(refseq) // 2 + midwith // 2],
-                            pred1str[len(refseq)//2 - midwith//2:len(refseq)//2 + midwith//2],
-                             offset=minref + len(refseq)//2 - midwith//2 + 1):
-        print(v)
-
+    raise NotImplemented
 
 
 
@@ -220,6 +180,53 @@ def _var_type(variant):
     print(f"Whoa, unknown variant type: {variant}")
     return 'unknown'
 
+
+def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300):
+    """
+    For the given region, identify variants by repeatedly calling the model over a sliding window,
+    tallying all of the variants called, and them making a choice about which ones are 'real'
+    Currently, we exclude all variants in the downstream half of the window, and retain only the remaining
+    variants that are called in more than one window
+
+    TODO: Handle haplotypes appropriately
+    """
+    window_step = 50
+    var_retain_window_size = 150
+    allvars0 = defaultdict(list)
+    allvars1 = defaultdict(list)
+    window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
+    while window_start <= (end - window_step):
+        # print(f"Window {window_start}-{window_start + var_retain_window_size}")
+        hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
+                                          max_read_depth=max_read_depth)
+        hap0 = util.readstr(hap0_t)
+        hap1 = util.readstr(hap1_t)
+        hap0_probs = hap0_t.detach().numpy().max(axis=-1)
+        hap1_probs = hap1_t.detach().numpy().max(axis=-1)
+        refseq = reference.fetch(chrom, offset, offset + window_size)
+        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
+        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        for v in vars_hap0:
+            if v.pos < (window_start + var_retain_window_size):
+                allvars0[v.pos].append(v)
+        for v in vars_hap1:
+            if v.pos < (window_start + var_retain_window_size):
+                allvars1[v.pos].append(v)
+
+        window_start += window_step
+    # print("Hap0 vars:")
+    # for pos, variants in allvars0.items():
+    #     print(f"{pos} : {variants}")
+    # print("Hap1 vars:")
+    # for pos, variants in allvars1.items():
+    #     print(f"{pos} : {variants}")
+
+    # Return variants that occur more than once?
+    hap0_passing = list(v[0] for k, v in allvars0.items() if len(v) > 1 and start < v[0].pos < end)
+    hap1_passing = list(v[0] for k, v in allvars1.items() if len(v) > 1 and start < v[0].pos < end)
+    return hap0_passing, hap1_passing
+
+
 def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
     """
     Call variants in BAM file with given model at positions given in the labels CSV, emit useful
@@ -250,8 +257,10 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
 
     aln = pysam.AlignmentFile(bam)
     results = defaultdict(Counter)
-
     window_size = 300
+    # 1:985172-985472
+    vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, "1", 985100, 985552, max_read_depth=100,
+                                             window_size=300)
 
     tot_tps = 0
     tot_fps = 0
@@ -267,27 +276,31 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
         end = int(toks[2])
         label = toks[3]
 
+        fp_varpos = []
+        tp_varpos = []
         try:
-            hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size, max_read_depth=max_read_depth)
-            hap0 = util.readstr(hap0_t)
-            hap1 = util.readstr(hap1_t)
+            # hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size, max_read_depth=max_read_depth)
+            # hap0 = util.readstr(hap0_t)
+            # hap1 = util.readstr(hap1_t)
+            vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth=100,
+                                                   window_size=300)
         except Exception as ex:
             logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
             logger.warning(ex)
             continue
 
-        print(f"[{start}]  {chrom}:{minref}-{minref + window_size} ", end='')
+        print(f"[{start}]  {chrom}:{start}-{start + window_size} ", end='')
 
-        refwidth = len(hap0)
-        refseq = reference.fetch(chrom, minref, minref + refwidth)
-        variants = list(truth_vcf.fetch(chrom, minref, minref + refwidth))
+        refwidth = end-start
+        refseq = reference.fetch(chrom, start, start + refwidth)
+        variants = list(truth_vcf.fetch(chrom, start, start + refwidth))
 
         # WONT ALWAYS WORK: Grab *ALL* variants and generate a single alt sequence with everything???
-        pseudo_altseq = phaser.project_vars(variants, [1] * len(variants), refseq, minref)
-        pseudo_vars = list(vcf.aln_to_vars(refseq, pseudo_altseq, minref))
+        pseudo_altseq = phaser.project_vars(variants, [np.argmax(v.samples[0]['GT']) for v in variants], refseq, start)
+        pseudo_vars = list(vcf.aln_to_vars(refseq, pseudo_altseq, start))
 
-        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
-        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
+        # vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
+        # vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
 
         print(f" true: {len(pseudo_vars)}", end='')
 
@@ -301,6 +314,7 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
                 tps.append(true_var)
                 tot_tps += 1
                 results[var_type]['tp'] += 1
+                tp_varpos.append(true_var.pos - start)
             else:
                 fns.append(true_var)
                 tot_fns += 1
@@ -311,17 +325,21 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
             var_type = _var_type(var0)
             if var0 not in pseudo_vars:
                 fps.append(var0)
+                fp_varpos.append(var0.pos - start)
                 tot_fps += 1
                 results[var_type]['fp'] += 1
         for var1 in vars_hap1:
             var_type = _var_type(var1)
             if var1 not in pseudo_vars and var1 not in vars_hap0:
                 fps.append(var1)
+                fp_varpos.append(var1.pos - start)
                 tot_fps += 1
                 results[var_type]['fp'] += 1
 
 
-        print(f" FP: {len(fps)}")
+        tp_pos = ", ".join(str(s) for s in tp_varpos)
+        fp_pos = ", ".join(str(s) for s in fp_varpos[0:10])
+        print(f" FP: {len(fps)}\t[{tp_pos}]  [{fp_pos}]")
 
     for key, val in results.items():
         print(f"{key} : total entries: {sum(val.values())}")
