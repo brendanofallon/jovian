@@ -290,7 +290,7 @@ def calc_val_accuracy(loader, model, criterion):
 def train_epochs(epochs,
                  dataloader,
                  max_read_depth=50,
-                 feats_per_read=8,
+                 feats_per_read=9,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  statedict=None,
