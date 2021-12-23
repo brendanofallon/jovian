@@ -258,9 +258,6 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
     aln = pysam.AlignmentFile(bam)
     results = defaultdict(Counter)
     window_size = 300
-    # 1:985172-985472
-    vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, "1", 985100, 985552, max_read_depth=100,
-                                             window_size=300)
 
     tot_tps = 0
     tot_fps = 0
@@ -279,9 +276,6 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
         fp_varpos = []
         tp_varpos = []
         try:
-            # hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size, max_read_depth=max_read_depth)
-            # hap0 = util.readstr(hap0_t)
-            # hap1 = util.readstr(hap1_t)
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth=100,
                                                    window_size=300)
         except Exception as ex:
@@ -299,8 +293,6 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
         pseudo_altseq = phaser.project_vars(variants, [np.argmax(v.samples[0]['GT']) for v in variants], refseq, start)
         pseudo_vars = list(vcf.aln_to_vars(refseq, pseudo_altseq, start))
 
-        # vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
-        # vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
 
         print(f" true: {len(pseudo_vars)}", end='')
 
