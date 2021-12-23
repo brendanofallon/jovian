@@ -19,6 +19,7 @@ class SmithWatermanLoss(nn.Module):
         restrict_turns=True,
         trim_width=None,
         device='cpu',
+        reduction="mean",
     ):
         super().__init__()
         self.device = device
@@ -28,6 +29,10 @@ class SmithWatermanLoss(nn.Module):
         self.restrict_turns = restrict_turns
         self.temperature = temperature
         self.trim_width = trim_width
+        self.reduction = reduction
+        if reduction is None or reduction.lower() == "none":
+            reduction = None
+        assert reduction in ["sum", "mean", None], f"Reduction muyst be 'sum', 'mean', or None"
         if self.penalize_turns:
             self.rightmod = torch.tensor(
                 [self.gap_open_penalty, self.gap_extend_penalty, self.gap_open_penalty],
@@ -130,7 +135,15 @@ class SmithWatermanLoss(nn.Module):
         results = torch.stack(results).transpose(0,1)
         hij = results[:, i, j]
         final = self.softmax_temperature(hij + x[:, 1:, 1:, None], dim=(1, 2, 3))
-        return -1.0 * final.sum()
+        if self.reduction == "mean":
+            return -1.0 * final.mean()
+        elif self.reduction == "sum":
+            return -1.0 * final.sum()
+        elif self.reduction is None:
+            return -1.0 * final
+        else:
+            raise ValueError(f"Unknown value for reduction ({self.reduction})")
+
 
 
 

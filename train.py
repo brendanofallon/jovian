@@ -134,19 +134,21 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
         else:
             with torch.no_grad():
+                idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0]*seq_preds.shape[1], step=2),
+                                   torch.arange(start=1, end=seq_preds.shape[0]*seq_preds.shape[1], step=2)]).transpose(0, 1)
+
+                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten(start_dim=0, end_dim=1))
+                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
+                                  tgt_seq[:, torch.tensor([1,0]), :].flatten(start_dim=0, end_dim=1))
+                pairsum1 = loss1[idx].sum(dim=-1)
+                pairsum2 = loss2[idx].sum(dim=-1)
+
                 for b in range(src.shape[0]):
-                    # Must look at two configurations, each with two losses...
-                    loss1 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
-                    loss1 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
+                    if pairsum2[b] < pairsum1[b]:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :, :]
 
-                    loss2 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
-                    loss2 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
 
-                    if loss2 < loss1:
-                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
-
-            loss = criterion(seq_preds[:, 0, :, :], tgt_seq[:, 0, :])
-            loss += criterion(seq_preds[:, 1, :, :], tgt_seq[:, 1, :])
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten(start_dim=0, end_dim=1)).mean()
 
         times["loss"] = datetime.now()
 
@@ -334,10 +336,11 @@ def train_epochs(epochs,
         trim_width=100
         logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
-                                   gap_extend_penalty=gap_exend_penalty,
-                                   temperature=temperature,
-                                   trim_width=trim_width,
-                                   device=DEVICE)
+                                    gap_extend_penalty=gap_exend_penalty,
+                                    temperature=temperature,
+                                    trim_width=trim_width,
+                                    device=DEVICE,
+                                    reduction=None)
 
     vaf_crit = None #nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
