@@ -260,12 +260,36 @@ def calc_val_accuracy(loader, model, criterion):
             total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = model(src)
-            for b in range(src.shape[0]):
-                loss1 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1), tgt[b, :, :].flatten())
-                loss2 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1),
-                                  tgt[b, torch.tensor([1, 0]), :].flatten())
-                if loss2 < loss1:
-                    seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
+            if type(criterion) == nn.CrossEntropyLoss:
+                # Compute losses in both configurations, and use the best?
+                # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+
+                for b in range(src.shape[0]):
+                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                                      tgt[b, :, :].flatten())
+                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                                      tgt[b, torch.tensor([1, 0]), :].flatten())
+
+                    if loss2 < loss1:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
+            else:
+                idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0] * seq_preds.shape[1], step=2),
+                                   torch.arange(start=1, end=seq_preds.shape[0] * seq_preds.shape[1],
+                                                step=2)]).transpose(0, 1)
+
+                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
+                                  tgt.flatten(start_dim=0, end_dim=1))
+                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
+                                  tgt[:, torch.tensor([1, 0]), :].flatten(start_dim=0, end_dim=1))
+                pairsum1 = loss1[idx].sum(dim=-1)
+                pairsum2 = loss2[idx].sum(dim=-1)
+
+                for b in range(src.shape[0]):
+                    if pairsum2[b] < pairsum1[b]:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :, :]
+
 
             midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
             midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :])
