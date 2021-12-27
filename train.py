@@ -350,14 +350,17 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.train()
 
+    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
+
     if lossfunc == 'ce':
         logger.info("Creating CrossEntropy loss function")
         criterion = nn.CrossEntropyLoss()
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     elif lossfunc == 'sw':
-        gap_open_penalty=-2
-        gap_exend_penalty=-1
-        temperature=1.0
-        trim_width=100
+        gap_open_penalty = -2
+        gap_exend_penalty = -1
+        temperature = 1.0
+        trim_width = 100
         logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
                                     gap_extend_penalty=gap_exend_penalty,
@@ -365,10 +368,9 @@ def train_epochs(epochs,
                                     trim_width=trim_width,
                                     device=DEVICE,
                                     reduction=None)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
 
     vaf_crit = None #nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -413,6 +415,7 @@ def train_epochs(epochs,
             git_branch=git_repo.head.name,
             git_target=git_repo.head.target,
             git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
+            loss_func=str(criterion),
         )
         # log command line too
         wandb_config_params.update(cl_args)
