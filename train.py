@@ -553,7 +553,7 @@ def train_epochs(epochs,
             })
 
 
-            if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
+            if epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
