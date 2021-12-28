@@ -367,7 +367,8 @@ def train_epochs(epochs,
                                     temperature=temperature,
                                     trim_width=trim_width,
                                     device=DEVICE,
-                                    reduction=None)
+                                    reduction=None,
+                                    window_mode="random")
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
 
     vaf_crit = None #nn.MSELoss()

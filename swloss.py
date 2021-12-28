@@ -32,7 +32,7 @@ class SmithWatermanLoss(nn.Module):
         self.trim_width = trim_width
         self.reduction = reduction
         self.window_mode = window_mode
-        assert window_mode is ["mid", "random", "first"], f"window_mode must be one of 'mid', 'random' or 'first'"
+        assert window_mode in ["mid", "random", "start"], f"window_mode must be one of 'mid', 'random' or 'first'"
         if reduction is None or reduction.lower() == "none":
             reduction = None
         assert reduction in ["sum", "mean", None], f"Reduction must be 'sum', 'mean', or None"
@@ -122,7 +122,7 @@ class SmithWatermanLoss(nn.Module):
             if self.window_mode == "mid":
                 start = predictions.shape[1] // 2 - self.trim_width // 2
             elif self.window_mode == "random":
-                start = torch.randint(0, predictions.shape[1] - self.trim_width)
+                start = torch.randint(low=0, high=predictions.shape[1] - self.trim_width, size=(1,)).item()
             elif self.window_mode == "start":
                 start = 0
 
