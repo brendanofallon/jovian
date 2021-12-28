@@ -20,6 +20,7 @@ class SmithWatermanLoss(nn.Module):
         trim_width=None,
         device='cpu',
         reduction="mean",
+        window_mode="mid",
     ):
         super().__init__()
         self.device = device
@@ -30,9 +31,11 @@ class SmithWatermanLoss(nn.Module):
         self.temperature = temperature
         self.trim_width = trim_width
         self.reduction = reduction
+        self.window_mode = window_mode
+        assert window_mode in ["mid", "random", "start"], f"window_mode must be one of 'mid', 'random' or 'first'"
         if reduction is None or reduction.lower() == "none":
             reduction = None
-        assert reduction in ["sum", "mean", None], f"Reduction muyst be 'sum', 'mean', or None"
+        assert reduction in ["sum", "mean", None], f"Reduction must be 'sum', 'mean', or None"
         if self.penalize_turns:
             self.rightmod = torch.tensor(
                 [self.gap_open_penalty, self.gap_extend_penalty, self.gap_open_penalty],
@@ -116,10 +119,15 @@ class SmithWatermanLoss(nn.Module):
         targets to have dimension [batch, seq, label]
         """
         if self.trim_width is not None:
-            start = predictions.shape[1] // 2 - self.trim_width // 2
-            end = predictions.shape[1] // 2 + self.trim_width // 2
-            predictions = predictions[:, start:end, :]
-            targets = targets[:, start:end]
+            if self.window_mode == "mid":
+                start = predictions.shape[1] // 2 - self.trim_width // 2
+            elif self.window_mode == "random":
+                start = torch.randint(low=0, high=predictions.shape[1] - self.trim_width, size=(1,)).item()
+            elif self.window_mode == "start":
+                start = 0
+
+            predictions = predictions[:, start:start + self.trim_width, :]
+            targets = targets[:, start:start + self.trim_width]
 
         targs_onehot = nn.functional.one_hot(targets, num_classes=4).float().to(self.device)
         x = torch.bmm(predictions, targs_onehot.transpose(1, 2))
