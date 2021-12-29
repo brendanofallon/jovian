@@ -382,24 +382,27 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
 
     var_windows = []
     for i, (chrom, start, end) in enumerate(windows):
-        # haplotype tensors
-        try:
-            hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size,
-                                              max_read_depth=max_read_depth)
-        # haplotype sequences
-            hap0 = util.readstr(hap0_t)
-            hap1 = util.readstr(hap1_t)
-        except Exception as ex:
-            logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
-            logger.warning(ex)
-            continue
+        # ! no longer processing model results directly
+        # # haplotype tensors
+        # try:
+        #     hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size,
+        #                                       max_read_depth=max_read_depth)
+        # # haplotype sequences
+        #     hap0 = util.readstr(hap0_t)
+        #     hap1 = util.readstr(hap1_t)
+        # except Exception as ex:
+        #     logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
+        #     logger.warning(ex)
+        #     continue
+        #
+        # # haplotype  variants
+        # refwidth = len(hap0)
+        # refseq = reference.fetch(chrom, minref, minref + refwidth)
+        # vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
+        # vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
+        # logger.debug(f"[{start}]  {chrom}:{minref}-{minref + window_size}, vars: hap0={len(vars_hap0)}, hap1={len(vars_hap1)}")
 
-        # haplotype  variants
-        refwidth = len(hap0)
-        refseq = reference.fetch(chrom, minref, minref + refwidth)
-        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
-        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
-        logger.debug(f"[{start}]  {chrom}:{minref}-{minref + window_size}, vars: hap0={len(vars_hap0)}, hap1={len(vars_hap1)}")
+        vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300)
 
         # group vcf variants by window (list of dicts)
         # may get mostly empty dicts?
@@ -412,12 +415,12 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
 
         log_spacing = 5000
         if (i + 1) % log_spacing == 0:
-            logger.info(f"Called variants to {chrom}:{start}, in {i + 1}  of {windows_total_count} total windows")
+            logger.info(f"Called variants up to {chrom}:{start}, in {i + 1}  of {windows_total_count} total windows")
 
     # convert to pyranges object for sorting, etc.
     vcfvar_list = []
     for var_window in var_windows:
-        for var in var_windows.values():
+        for var in var_window.values():
             vcfvar_list.append(var)
     df_vars = pd.DataFrame(vcfvar_list)
     df_vars["Chromosome"] = df_vars.chrom
@@ -534,7 +537,7 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
     """
     reads = reads_spanning_range(aln, chrom, start, end)
     if len(reads) < 5:
-        raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{pos}")
+        raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{start}-{end}")
     if len(reads) > max_read_depth:
         reads = random.sample(reads, max_read_depth)
     reads = util.sortreads(reads)
