@@ -168,17 +168,7 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
     seq_preds = model(padded_reads.float().to(DEVICE))
     return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], start
 
-def _var_type(variant):
-    if len(variant.ref) == 1 and len(variant.alt) == 1:
-        return 'snv'
-    elif len(variant.ref) == 0 and len(variant.alt) > 0:
-        return 'ins'
-    elif len(variant.ref) > 0 and len(variant.alt) == 0:
-        return 'del'
-    elif len(variant.ref) > 0 and len(variant.alt) > 0:
-        return 'mnv'
-    print(f"Whoa, unknown variant type: {variant}")
-    return 'unknown'
+
 
 
 def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300):
@@ -298,35 +288,35 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
 
         var_types = set()
         for true_var in pseudo_vars:
-            var_type = _var_type(true_var)
-            var_types.add(var_type)
+            vartype = util.var_type(true_var)
+            var_types.add(vartype)
             # print(f"{true_var} ", end='')
             # print(f" hap0: {true_var in vars_hap0}, hap1: {true_var in vars_hap1}")
             if true_var in vars_hap0 or true_var in vars_hap1:
                 tps.append(true_var)
                 tot_tps += 1
-                results[var_type]['tp'] += 1
+                results[vartype]['tp'] += 1
                 tp_varpos.append(true_var.pos - start)
             else:
                 fns.append(true_var)
                 tot_fns += 1
-                results[var_type]['fn'] += 1
+                results[vartype]['fn'] += 1
         print(f" {', '.join(var_types)} TP: {len(tps)} FN: {len(fns)}", end='')
 
         for var0 in vars_hap0:
-            var_type = _var_type(var0)
+            vartype = util.var_type(var0)
             if var0 not in pseudo_vars:
                 fps.append(var0)
                 fp_varpos.append(var0.pos - start)
                 tot_fps += 1
-                results[var_type]['fp'] += 1
+                results[vartype]['fp'] += 1
         for var1 in vars_hap1:
-            var_type = _var_type(var1)
+            vartype = util.var_type(var1)
             if var1 not in pseudo_vars and var1 not in vars_hap0:
                 fps.append(var1)
                 fp_varpos.append(var1.pos - start)
                 tot_fps += 1
-                results[var_type]['fp'] += 1
+                results[vartype]['fp'] += 1
 
 
         tp_pos = ", ".join(str(s) for s in tp_varpos)
