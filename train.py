@@ -134,19 +134,21 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
         else:
             with torch.no_grad():
+                idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0]*seq_preds.shape[1], step=2),
+                                   torch.arange(start=1, end=seq_preds.shape[0]*seq_preds.shape[1], step=2)]).transpose(0, 1)
+
+                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten(start_dim=0, end_dim=1))
+                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
+                                  tgt_seq[:, torch.tensor([1,0]), :].flatten(start_dim=0, end_dim=1))
+                pairsum1 = loss1[idx].sum(dim=-1)
+                pairsum2 = loss2[idx].sum(dim=-1)
+
                 for b in range(src.shape[0]):
-                    # Must look at two configurations, each with two losses...
-                    loss1 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
-                    loss1 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
+                    if pairsum2[b] < pairsum1[b]:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :, :]
 
-                    loss2 = criterion(seq_preds[b, 0, :, :].unsqueeze(0), tgt_seq[b, 1, :].unsqueeze(0))
-                    loss2 += criterion(seq_preds[b, 1, :, :].unsqueeze(0), tgt_seq[b, 0, :].unsqueeze(0))
 
-                    if loss2 < loss1:
-                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
-
-            loss = criterion(seq_preds[:, 0, :, :], tgt_seq[:, 0, :])
-            loss += criterion(seq_preds[:, 1, :, :], tgt_seq[:, 1, :])
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten(start_dim=0, end_dim=1)).mean()
 
         times["loss"] = datetime.now()
 
@@ -258,12 +260,36 @@ def calc_val_accuracy(loader, model, criterion):
             total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = model(src)
-            for b in range(src.shape[0]):
-                loss1 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1), tgt[b, :, :].flatten())
-                loss2 = criterion(seq_preds[b, :, :].flatten(start_dim=0, end_dim=1),
-                                  tgt[b, torch.tensor([1, 0]), :].flatten())
-                if loss2 < loss1:
-                    seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
+            if type(criterion) == nn.CrossEntropyLoss:
+                # Compute losses in both configurations, and use the best?
+                # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+
+                for b in range(src.shape[0]):
+                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                                      tgt[b, :, :].flatten())
+                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                                      tgt[b, torch.tensor([1, 0]), :].flatten())
+
+                    if loss2 < loss1:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
+
+            else:
+                idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0] * seq_preds.shape[1], step=2),
+                                   torch.arange(start=1, end=seq_preds.shape[0] * seq_preds.shape[1],
+                                                step=2)]).transpose(0, 1)
+
+                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
+                                  tgt.flatten(start_dim=0, end_dim=1))
+                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
+                                  tgt[:, torch.tensor([1, 0]), :].flatten(start_dim=0, end_dim=1))
+                pairsum1 = loss1[idx].sum(dim=-1)
+                pairsum2 = loss2[idx].sum(dim=-1)
+
+                for b in range(src.shape[0]):
+                    if pairsum2[b] < pairsum1[b]:
+                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :, :]
+
 
             midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
             midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :])
@@ -324,24 +350,28 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.train()
 
+    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
+
     if lossfunc == 'ce':
         logger.info("Creating CrossEntropy loss function")
         criterion = nn.CrossEntropyLoss()
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     elif lossfunc == 'sw':
-        gap_open_penalty=-2
-        gap_exend_penalty=-1
-        temperature=1.0
-        trim_width=100
+        gap_open_penalty = -2
+        gap_exend_penalty = -1
+        temperature = 1.0
+        trim_width = 100
         logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
-                                   gap_extend_penalty=gap_exend_penalty,
-                                   temperature=temperature,
-                                   trim_width=trim_width,
-                                   device=DEVICE)
+                                    gap_extend_penalty=gap_exend_penalty,
+                                    temperature=temperature,
+                                    trim_width=trim_width,
+                                    device=DEVICE,
+                                    reduction=None,
+                                    window_mode="random")
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
 
     vaf_crit = None #nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -386,6 +416,7 @@ def train_epochs(epochs,
             git_branch=git_repo.head.name,
             git_target=git_repo.head.target,
             git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
+            loss_func=str(criterion),
         )
         # log command line too
         wandb_config_params.update(cl_args)
@@ -523,7 +554,7 @@ def train_epochs(epochs,
             })
 
 
-            if epoch > 0 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
+            if epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
