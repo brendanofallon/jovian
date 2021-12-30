@@ -43,6 +43,13 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
+class LowReadCountException(Exception):
+    """
+    Region of bam file has too few spanning reads for variant detection
+    """
+    pass
+
+
 @dataclass
 class VcfVar:
     """
@@ -338,13 +345,14 @@ def reconcile_current_window(prev_win, current_win):
 
 def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spacing=1000, window_overlap=0, **kwargs):
     """
-    Use model in statedict to call variants in bam in genomic regions in bed file
+    Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
       1. build model
-      2. break bed regions into windows
+      2. break bed regions into windows with start positions determined by window_spacing and end positions
+         determined by window_overlap (the last window in each bed region will likely be shorter than others)
       3. call variants in each window
       4. join variants after searching for any duplicates
-      5. save as well formatted vcf file
+      5. save to vcf file
     :param statedict:
     :param bam:
     :param bed:
@@ -352,12 +360,12 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     :param vcf_out:
     :param bed_slack:
     :param window_spacing:
-    :param window_mask:
+    :param window_overlap:
     :param kwargs:
     :return:
       """
 
-    window_size = 300
+    # window_size = 300
     max_read_depth = 100
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
@@ -432,7 +440,6 @@ def load_conf(confyaml):
     assert 'reference' in conf, "Expected 'reference' entry in training configuration"
     assert 'data' in conf, "Expected 'data' entry in training configuration"
     return conf
-
 
 
 def pregen_one_sample(dataloader, batch_size, output_dir):
@@ -519,14 +526,14 @@ def pregen(config, **kwargs):
                 util.concat_metafile(sample_metafile, metafh)
 
 
-def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth):
+def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
     """
     Call variants in a region of a BAM file using the given altpredictor and model
     and return a list of vcf.Variant objects
     """
     reads = reads_spanning_range(aln, chrom, start, end)
-    if len(reads) < 5:
-        raise ValueError(f"Hmm, couldn't find any reads spanning {chrom}:{start}-{end}")
+    if len(reads) < min_reads:
+        raise LowReadCountException(f"Hmm, couldn't find {min_reads} reads spanning {chrom}:{start}-{end}")
     if len(reads) > max_read_depth:
         reads = random.sample(reads, max_read_depth)
     reads = util.sortreads(reads)
@@ -561,7 +568,7 @@ def _var_type(variant):
     return 'unknown'
 
 
-def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300):
+def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
     tallying all of the variants called, and them making a choice about which ones are 'real'
@@ -577,15 +584,23 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     while window_start <= (end - window_step):
         # print(f"Window {window_start}-{window_start + var_retain_window_size}")
-        hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
-                                          max_read_depth=max_read_depth)
-        hap0 = util.readstr(hap0_t)
-        hap1 = util.readstr(hap1_t)
-        hap0_probs = hap0_t.detach().numpy().max(axis=-1)
-        hap1_probs = hap1_t.detach().numpy().max(axis=-1)
-        refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
-        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        try:
+            hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
+                                              max_read_depth=max_read_depth, min_reads=min_reads)
+            hap0 = util.readstr(hap0_t)
+            hap1 = util.readstr(hap1_t)
+            hap0_probs = hap0_t.detach().numpy().max(axis=-1)
+            hap1_probs = hap1_t.detach().numpy().max(axis=-1)
+            refseq = reference.fetch(chrom, offset, offset + window_size)
+            vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
+            vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        except LowReadCountException:
+            logger.debug(
+                f"Bam window {chrom}:{window_start}-{window_start + window_size} "
+                f"had too few reads for variant calling (< {min_reads})"
+            )
+            vars_hap0, vars_hap1 = [], []
+
         for v in vars_hap0:
             if v.pos < (window_start + var_retain_window_size):
                 allvars0[v.pos].append(v)
