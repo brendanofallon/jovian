@@ -85,7 +85,7 @@ def bed_to_windows(pr_bed, bed_slack=0, window_spacing=1000, window_overlap=0):
     df_windows = pr.PyRanges(df_windows).intersect(pr_slack).df
 
     window_count = len(df_windows)
-    windows = (w.Chromosome, w.Start, w.End for w in df_windows.iterrows())
+    windows = ((win.Chromosome, win.Start, win.End) for i, win in df_windows.iterrows())
     return windows, window_count
 
 
@@ -108,7 +108,7 @@ def var_depth(var, chrom, aln):
     return sum(x[0] for x in counts_acgt)
 
 
-def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
+def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=30):
     """
     From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
     :param vars_hap0:
@@ -128,7 +128,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
     for var, depth in zip(vars_hap0, depths_hap0):
         vcfvars_hap0[(var.pos, var.ref, var.alt)] = VcfVar(
             chrom=chrom,
-            pos=var.pos,
+            pos=var.pos + 1,
             ref=var.ref,
             alt=var.alt,
             qual=var.qual,
@@ -141,7 +141,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
             window_var_count=len(vars_hap0) + len(vars_hap1),
             window_cis_vars=len(vars_hap1),
             window_trans_vars=len(vars_hap0),
-            genotype=(1, 0),  # default to haplotype 0
+            genotype=(0, 1),  # default to haplotype 0
             het=True,
             duplicate = False,  # initialize but check later
         )
@@ -149,7 +149,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
     for var, depth in zip(vars_hap1, depths_hap1):
         vcfvars_hap1[(var.pos, var.ref, var.alt)] = VcfVar(
             chrom=chrom,
-            pos=var.pos,
+            pos=var.pos + 1,
             ref=var.ref,
             alt=var.alt,
             qual=var.qual,
@@ -162,7 +162,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
             window_var_count=len(vars_hap0) + len(vars_hap1),
             window_cis_vars=len(vars_hap1),
             window_trans_vars=len(vars_hap0),
-            genotype=(0, 1),  # default to haplotype 1 for now
+            genotype=(1, 0),  # default to haplotype 1 for now
             het=True,
             duplicate=False,
         )
@@ -171,10 +171,9 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
     for var in homs:
         # modify hap0 var info
         vcfvars_hap0[var].qual = 0.0
-        vcfvars_hap0[var].phased = False
-        vcfvars_hap0[var].window_var_count -= 1
         vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
-        vcfvars_hap0[var].window_trans_vars = 0  # no trans vars for hom
+        vcfvars_hap0[var].window_trans_vars -= 1  # one less trans var for hap0
+        vcfvars_hap0[var].window_var_count -= 1  # one less overall var for hap0
         vcfvars_hap0[var].genotype = (1, 1)
         vcfvars_hap0[var].het = False
         # then remove from hap1 vars
@@ -186,10 +185,17 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, mindepth=30):
     )
     vcfvars = {**vcfvars_hap0, **vcfvars_hap1}
 
-    # adjust filters
-    for var in vcfvars:
+    for key, var in vcfvars.items():
+        # adjust filters
         if var.depth < mindepth:
             var.filter = "LowCov"
+
+        # adjust insertions and deletions so no blank ref or alt
+        if var.ref == "" or var.alt == "":
+            leading_ref_base = reference.fetch(reference=var.chrom, start=var.pos - 2, end=var.pos - 1)
+            var.pos = var.pos - 1
+            var.ref = leading_ref_base + var.ref
+            var.alt = leading_ref_base + var.alt
 
     # go back and set phased to true if more than one het variant remains
     het_vcfvars = [k for k, v in vcfvars.items() if v.het]
@@ -272,18 +278,17 @@ def create_vcf_rec(var, vcf_file):
     """
     # Create record
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
-                       alleles=(var.ref, var.alt), filter=var.filter)
-    r.phased = var.phased
+                       alleles=(var.ref, var.alt), filter=var["filter"], qual=var.qual)
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
+    r.samples['sample'].phased = var.phased  # note: need to set phased after setting genotype
     r.samples['sample']['DP'] = var.depth
     r.samples['sample']['PS'] = var.phase_set
     # Set INFO values
     r.info['WIN_IDX'] = var.window_idx
-    r.info['WIN_VARS'] = var.window_var_count
-    r.info['WIN_CIS_VARS'] = var.window_cis_vars
-    r.info['WIN_TRANS_VARS'] = var.window_trans_vars
-    r.info['QUAL'] = var.qual
+    r.info['WIN_VAR_COUNT'] = var.window_var_count
+    r.info['WIN_CIS_COUNT'] = var.window_cis_vars
+    r.info['WIN_TRANS_COUNT'] = var.window_trans_vars
     return r
 
 
@@ -294,7 +299,7 @@ def vars_to_vcf(vcf_file, pr_vars):
     :param pr_vars:
     :return: None
     """
-    for var in pr_vars.df.iterrows():
+    for i, var in pr_vars.df.iterrows():
         r = create_vcf_rec(var, vcf_file)
         vcf_file.write(r)
 
@@ -344,7 +349,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     :param bam:
     :param bed:
     :param reference_fasta:
-    :param vcf:
+    :param vcf_out:
     :param bed_slack:
     :param window_spacing:
     :param window_mask:
@@ -358,9 +363,9 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     logger.info(f"Found torch device: {DEVICE}")
 
     attention_heads = 2
-    transformer_dim = 500
-    encoder_layers = 6
-    embed_dim_factor = 120
+    transformer_dim = 400  # todo reset to 500
+    encoder_layers = 4  # todo reset to 6
+    embed_dim_factor = 200  # todo reset to 120
     model = VarTransformer(read_depth=max_read_depth,
                            feature_count=feats_per_read,
                            out_dim=4,
@@ -382,40 +387,24 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
 
     var_windows = []
     for i, (chrom, start, end) in enumerate(windows):
-        # ! no longer processing model results directly
-        # # haplotype tensors
-        # try:
-        #     hap0_t, hap1_t, minref = callvars(model, aln, reference, chrom, start, end, window_size,
-        #                                       max_read_depth=max_read_depth)
-        # # haplotype sequences
-        #     hap0 = util.readstr(hap0_t)
-        #     hap1 = util.readstr(hap1_t)
-        # except Exception as ex:
-        #     logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
-        #     logger.warning(ex)
-        #     continue
-        #
-        # # haplotype  variants
-        # refwidth = len(hap0)
-        # refseq = reference.fetch(chrom, minref, minref + refwidth)
-        # vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, minref))
-        # vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, minref))
-        # logger.debug(f"[{start}]  {chrom}:{minref}-{minref + window_size}, vars: hap0={len(vars_hap0)}, hap1={len(vars_hap1)}")
-
         vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300)
 
         # group vcf variants by window (list of dicts)
         # may get mostly empty dicts?
-        var_windows.append(vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln))
+        var_windows.append(vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln, reference=reference))
 
         # compare most recent 2 windows to see if any overlapping variants
         # if so, modify phasing and remove duplicate calls
         if len(var_windows) > 1:  # start on second loop
             var_windows[-1] = reconcile_current_window(var_windows[-2], var_windows[-1])
 
+        # add log update every so often
         log_spacing = 5000
         if (i + 1) % log_spacing == 0:
             logger.info(f"Called variants up to {chrom}:{start}, in {i + 1}  of {windows_total_count} total windows")
+
+    # add one more log update at the end
+    logger.info(f"Called variants up to {chrom}:{start}, in {i + 1}  of {windows_total_count} total windows")
 
     # convert to pyranges object for sorting, etc.
     vcfvar_list = []
@@ -429,7 +418,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     pr_vars = pr.PyRanges(df_vars).sort()
 
     # intersect pyranges vars with pyranges bed file
-    pr_vars = pr_vars.intersect()
+    pr_vars = pr_vars.intersect(pr_bed)
 
     # generate vcf out
     vcf_file = init_vcf(vcf_out, sample_name="sample", lowcov=30)
@@ -812,10 +801,10 @@ def main():
     trainparser.set_defaults(func=train)
     callparser = subparser.add_parser("call", help="Call variants")
     callparser.add_argument("-m", "--statedict", help="Stored model", required=True)
-    callparser.add_argument("-r", "--reference", help="Path to Fasta reference genome", required=True)
+    callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
     callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=True)
-    callparser.add_argument("-v", "--vcf", help="Output vcf file", required=True)
+    callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
