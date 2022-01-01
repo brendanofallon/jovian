@@ -192,14 +192,13 @@ def var_depth(var, chrom, aln):
     :return:
     """
     # get bam depths for now, not same as tensor depth
-    counts_acgt = aln.count_coverage(
+    count = aln.count(
          contig=chrom,
          start=var.pos,
          stop=var.pos + 1,
-         quality_threshold=15,
          read_callback="all",
     )
-    return sum(x[0] for x in counts_acgt)
+    return count
 
 
 def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=30):
@@ -264,7 +263,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     homs = list(set(vcfvars_hap0) & set(vcfvars_hap1))
     for var in homs:
         # modify hap0 var info
-        vcfvars_hap0[var].qual = 0.0
+        vcfvars_hap0[var].qual = (vcfvars_hap0[var].qual + vcfvars_hap1[var].qual) / 2  # Mean of each call??
         vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
         vcfvars_hap0[var].window_trans_vars -= 1  # one less trans var for hap0
         vcfvars_hap0[var].window_var_count -= 1  # one less overall var for hap0
@@ -312,7 +311,7 @@ def init_vcf(path, sample_name="sample", lowcov=30):
     # Create a VCF header
     vcfh = pysam.VariantHeader()
     # Add a sample named "sample"
-    vcfh.add_sample("sample")
+    vcfh.add_sample(sample_name)
     # Add contigs
     vcfh.add_meta('contig', items=[('ID', 1)])
     vcfh.add_meta('contig', items=[('ID', 2)])
@@ -355,12 +354,12 @@ def init_vcf(path, sample_name="sample", lowcov=30):
                                  ('Description', 'Total cis variants called in same window(s)')])
     vcfh.add_meta('INFO', items=[('ID', "WIN_TRANS_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Total cis variants called in same window(s)')])
-    vcfh.add_meta('INFO', items=[('ID', "QUAL"), ('Number', "."), ('Type', 'float'),
+    vcfh.add_meta('INFO', items=[('ID', "QUAL"), ('Number', "."), ('Type', 'Float'),
                                  ('Description', 'QUAL value(s) for calls in window(s)')])
     vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 0), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
     # write to new vcf file object
-    return pysam.VariantFile("example.vcf", "w", header=vcfh)
+    return pysam.VariantFile(path, "w", header=vcfh)
 
 
 def create_vcf_rec(var, vcf_file):
