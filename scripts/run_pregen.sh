@@ -18,10 +18,10 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
 #CONF=$HOME/arup-storage4/u0064568/seq2seq/run_exome_av_valspc_pregen_nochr20or21/exome_av_valspc_pregen_nochr20or21.yaml
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/exome_val_conf_tns_only.yaml
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/multivar_novaav_conf.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/arup-storage4/u0064568/seq2seq/run_exome_av_valspc_pregen_chr20and21/exome_av_valspc_pregen_chr20and21.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_exome_valspc_chr20and21_tns_ONLY/
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_multivar_nova_losmall/
 
 BATCH_SIZE=64
 
