@@ -61,7 +61,7 @@ def bed_to_windows(pr_bed, bed_slack=0, window_spacing=1000, window_overlap=0):
     :param window_overlap: right side overlap between windows
     :return: yields Chromosome, Start, End of window
     """
-    # merge an slack/pad bed file regions
+    # merge and slack/pad bed file regions
     pr_slack = pr_bed.slack(bed_slack)
     df_windows = pr_slack.window(window_spacing).df
     df_windows["End"] = df_windows["End"] + window_overlap
@@ -326,7 +326,19 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     Currently, we exclude all variants in the downstream half of the window, and retain only the remaining
     variants that are called in more than one window
 
-    TODO: Handle haplotypes appropriately
+    TODO:
+      - any changes to overlapping method?
+      - key dictionary by (chrom, pos, ref) tuple (rather than just pos)
+      - include overall prob of alt sequence in the variant probabilities? or at least return additional prob to vcf?
+      - add depth to variant dicts
+      - overlap consolidation
+        - manage/reconcile haplotypes
+        - remove duplicates
+        - keep running total of times called
+        - keep running total of windows
+        - combine probs and depths before removing duplicates (lists or averages?)
+        - create new prob
+      - remove variants below min number of calls or min combined probability?
     """
     window_step = 50
     var_retain_window_size = 150
