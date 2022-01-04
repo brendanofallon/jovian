@@ -133,7 +133,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
 
     attention_heads = 2
     transformer_dim = 400  # todo reset to 500
-    encoder_layers = 8  # todo reset to 6
+    encoder_layers = 4  # todo reset to 6
     embed_dim_factor = 200  # todo reset to 120
     model = VarTransformer(read_depth=max_read_depth,
                            feature_count=feats_per_read,
