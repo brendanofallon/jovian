@@ -1,5 +1,7 @@
 
 import logging
+from collections import defaultdict
+
 import yaml
 from datetime import datetime
 import os
@@ -8,14 +10,13 @@ from pygit2 import Repository
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.tensorboard import SummaryWriter
+
 
 logger = logging.getLogger(__name__)
 
 import vcf
 import loader
 import util
-from bam import string_to_tensor, target_string_to_tensor, encode_pileup3, reads_spanning, alnstart, ensure_dim
 from model import VarTransformer
 from swloss import SmithWatermanLoss
 
@@ -202,19 +203,22 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
 
 
-def _calc_hap_accuracy(src, seq_preds, tgt, width=100):
+def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
     # Compute val accuracy
     mid = seq_preds.shape[1] // 2
     midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
                              dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
                 ).float().mean()
 
-    # Compute mean variant counts
     var_count = 0
     batch_size = 0
-    tp_total = 0
-    fp_total = 0
-    fn_total = 0
+    if result_totals is None:
+        result_totals = {
+            'del': defaultdict(int),
+            'ins': defaultdict(int),
+            'snv': defaultdict(int),
+            'mnv': defaultdict(int),
+        }
     for b in range(src.shape[0]):
         predstr = util.readstr(seq_preds[b, :, :])
         tgtstr = util.tgt_str(tgt[b, :])
@@ -222,12 +226,9 @@ def _calc_hap_accuracy(src, seq_preds, tgt, width=100):
         batch_size += 1
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
-        tps, fps, fns = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, :])
-        tp_total += len(tps)
-        fp_total += len(fps)
-        fn_total += len(fns)
+        result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, :], midwidth=300, counts=result_totals)
 
-    return midmatch, var_count, tp_total, fp_total, fn_total
+    return midmatch, var_count, result_totals
 
 
 def calc_val_accuracy(loader, model, criterion):
@@ -239,17 +240,22 @@ def calc_val_accuracy(loader, model, criterion):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
-    width = 20
+
     with torch.no_grad():
         match_sum0 = 0
         match_sum1 = 0
-        count = 0
-        tp_tot0 = 0
-        fp_tot0 = 0
-        fn_tot0 = 0
-        tp_tot1 = 0
-        fp_tot1 = 0
-        fn_tot1 = 0
+        result_totals0 = {
+            'del': defaultdict(int),
+            'ins': defaultdict(int),
+            'snv': defaultdict(int),
+            'mnv': defaultdict(int),
+        }
+        result_totals1 = {
+            'del': defaultdict(int),
+            'ins': defaultdict(int),
+            'snv': defaultdict(int),
+            'mnv': defaultdict(int),
+        }
 
         var_counts_sum0 = 0
         var_counts_sum1 = 0
@@ -291,16 +297,10 @@ def calc_val_accuracy(loader, model, criterion):
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :, :]
 
 
-            midmatch0, varcount0, tps0, fps0, fns0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :])
-            midmatch1, varcount1, tps1, fps1, fns1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :])
+            midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :], result_totals0)
+            midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :], result_totals1)
             match_sum0 += midmatch0
-            tp_tot0 += tps0
-            fp_tot0 += fps0
-            fn_tot0 += fns0
             match_sum1 += midmatch1
-            tp_tot1 += tps1
-            fp_tot1 += fps1
-            fn_tot1 += fns1
 
             var_counts_sum0 += varcount0
             var_counts_sum1 += varcount1
@@ -309,14 +309,13 @@ def calc_val_accuracy(loader, model, criterion):
             match_sum1 / total_batches,
             var_counts_sum0 / tot_samples,
             var_counts_sum1 / tot_samples,
-            tp_tot0, fp_tot0, fn_tot0,
-            tp_tot1, fp_tot1, fn_tot1, )
+            result_totals0, result_totals1)
 
 
 def train_epochs(epochs,
                  dataloader,
                  max_read_depth=50,
-                 feats_per_read=8,
+                 feats_per_read=9,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  statedict=None,
@@ -330,8 +329,8 @@ def train_epochs(epochs,
 ):
     attention_heads = 2
     transformer_dim = 400
-    encoder_layers = 8
-    embed_dim_factor = 200
+    encoder_layers = 4
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                                     feature_count=feats_per_read, 
                                     out_dim=4,
@@ -378,25 +377,12 @@ def train_epochs(epochs,
 
 
     trainlogger = TrainLogger(trainlogpath, [
-            "epoch",
-            "trainingloss",
-            "train_accuracy",
-            "val_accuracy",
-            "mean_var_count",
-            "ppa0",
-            "ppv0",
-            "learning_rate",
-            "epochtime",
-            "batch_time_mean",
-            "decompress_frac",
-            "train_frac",
-            "io_frac",
-            "zero_grad_frac",
-            "forward_pass_frac",
-            "loss_frac",
-            "midmatch_frac",
-            "backward_pass_frac",
-            "optimize_frac",
+            "epoch", "trainingloss", "train_accuracy", "val_accuracy",
+            "mean_var_count", "ppa_dels", "ppa_ins", "ppa_snv",
+            "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
+            "batch_time_mean", "decompress_frac", "train_frac", "io_frac",
+            "zero_grad_frac", "forward_pass_frac", "loss_frac", "midmatch_frac",
+            "backward_pass_frac", "optimize_frac",
     ])
 
     if ENABLE_WANDB:
@@ -461,20 +447,26 @@ def train_epochs(epochs,
 
             elapsed = datetime.now() - starttime
 
-            acc0, acc1, var_count0, var_count1, tps0, fps0, fns0, tps1, fps1, fns1 = calc_val_accuracy(val_loader, model, criterion)
+            acc0, acc1, var_count0, var_count1, results0, results1 = calc_val_accuracy(val_loader, model, criterion)
 
             try:
-                ppa0 = tps0/(tps0+fns0)
-                ppv0 = tps0/(tps0+fps0)
-                ppa1 = tps1/(tps1+fns1)
-                ppv1 = tps1/(tps1+fps1)
-            except ZeroDivisionError:
-                ppa0 = 0
-                ppv0 = 0
-                ppa1 = 0
-                ppv1 = 0
+                ppa_dels = (results0['del']['tp'] + results1['del']['tp']) / (results0['del']['tp'] + results1['del']['tp'] + results0['del']['fn'] + results1['del']['fn'])
+                ppa_ins = (results0['ins']['tp'] + results1['ins']['tp']) / (results0['ins']['tp'] + results1['ins']['tp'] + results0['ins']['fn'] + results1['ins']['fn'])
+                ppa_snv = (results0['snv']['tp'] + results1['snv']['tp']) / (results0['snv']['tp'] + results1['snv']['tp'] + results0['snv']['fn'] + results1['snv']['fn'])
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_acc0:.4f} / {train_acc1:.4f}, val acc: {acc0:.3f} / {acc1:.3f} var counts: {var_count0:.3f} / {var_count1:.3f}, ppa: {ppa0:.3f} / {ppa1:.3f}, ppv: {ppv0:.3f} / {ppv1:.3f}")
+                ppv_dels = (results0['del']['tp'] + results1['del']['tp']) / (results0['del']['tp'] + results1['del']['tp'] + results0['del']['fp'] + results1['del']['fp'])
+                ppv_ins = (results0['ins']['tp'] + results1['ins']['tp']) / (results0['ins']['tp'] + results1['ins']['tp'] + results0['ins']['fp'] + results1['ins']['fp'])
+                ppv_snv = (results0['snv']['tp'] + results1['snv']['tp']) / (results0['snv']['tp'] + results1['snv']['tp'] + results0['snv']['fp'] + results1['snv']['fp'])
+
+            except ZeroDivisionError:
+                ppa_dels = 0
+                ppa_ins = 0
+                ppa_snv = 0
+                ppv_dels = 0
+                ppv_ins = 0
+                ppv_snv = 0
+
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_acc0:.4f} / {train_acc1:.4f}, val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
 
             if epoch_times.get("batch_count", 0) > 0:
@@ -512,10 +504,12 @@ def train_epochs(epochs,
                     "accuracy/val_acc_hap1": acc1,
                     "accuracy/var_count0": var_count0,
                     "accuracy/var_count1": var_count1,
-                    "accuracy/ppa hap0": ppa0,
-                    "accuracy/ppv hap0": ppv0,
-                    "accuracy/ppa hap1": ppa1,
-                    "accuracy/ppv hap1": ppv1,
+                    "accuracy/ppa dels": ppa_dels,
+                    "accuracy/ppa ins": ppa_ins,
+                    "accuracy/ppa snv": ppa_snv,
+                    "accuracy/ppv dels": ppv_dels,
+                    "accuracy/ppv ins": ppv_ins,
+                    "accuracy/ppv snv": ppv_snv,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
                     "batch_time_mean": mean_batch_time,
@@ -537,8 +531,12 @@ def train_epochs(epochs,
                 "train_accuracy": train_acc0,
                 "val_accuracy": acc0,
                 "mean_var_count": var_count0,
-                "ppa0": ppa0,
-                "ppv0": ppv0,
+                "ppa_dels": ppa_dels,
+                "ppa_ins": ppa_ins,
+                "ppa_snv": ppa_snv,
+                "ppv_dels": ppv_dels,
+                "ppv_ins": ppv_ins,
+                "ppv_snv": ppv_snv,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
                 "batch_time_mean": mean_batch_time,
@@ -579,7 +577,7 @@ def load_train_conf(confyaml):
     return conf
 
 
-def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
+def eval_prediction(refseqstr, altseq, predictions, midwidth=None, counts=None):
     """
     Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
     detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
@@ -589,8 +587,18 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
     :param midwidth:
     :return: Sets of TP, FP, and FN vars
     """
+    if midwidth is None:
+        midwidth = len(refseqstr)
+
     midstart = len(refseqstr) // 2 - midwidth // 2
     midend  =  len(refseqstr) // 2 + midwidth // 2
+    if counts is None:
+        counts = {
+            'del': defaultdict(int),
+            'ins': defaultdict(int),
+            'snv': defaultdict(int),
+            'mnv': defaultdict(int),
+        }
     known_vars = []
     for v in vcf.aln_to_vars(refseqstr, altseq):
         if midstart < v.pos < midend:
@@ -600,24 +608,21 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=100):
     predstr = util.readstr(predictions)
     for v in vcf.aln_to_vars(refseqstr, predstr):
         if midstart < v.pos < midend:
-            v.qual = predictions[v.pos:v.pos + max(1, min(len(v.ref), len(v.alt))), :].max(dim=1)[0].min().item()
             pred_vars.append(v)
 
-    tps = [] # True postive - real and detected variant
-    fns = [] # False negatives - real variant but not detected
-    fps = [] # False positives - detected but not a real variant
     for true_var in known_vars:
+        true_var_type = util.var_type(true_var)
         if true_var in pred_vars:
-            tps.append(true_var)
+            counts[true_var_type]['tp'] += 1
         else:
-            fns.append(true_var)
+            counts[true_var_type]['fn'] += 1
 
     for detected_var in pred_vars:
         if detected_var not in known_vars:
-            #logger.info(f"FP: {detected_var}")
-            fps.append(detected_var)
+            vartype = util.var_type(detected_var)
+            counts[vartype]['fp'] += 1
 
-    return tps, fps, fns
+    return counts
 
 
 def eval_batch(src, tgt, predictions):

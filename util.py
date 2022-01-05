@@ -18,6 +18,17 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+def var_type(variant):
+    if len(variant.ref) == 1 and len(variant.alt) == 1:
+        return 'snv'
+    elif len(variant.ref) == 0 and len(variant.alt) > 0:
+        return 'ins'
+    elif len(variant.ref) > 0 and len(variant.alt) == 0:
+        return 'del'
+    elif len(variant.ref) > 0 and len(variant.alt) > 0:
+        return 'mnv'
+    print(f"Whoa, unknown variant type: {variant}")
+    return 'unknown'
 
 def concat_metafile(sample_metafile, dest_metafh):
     """
