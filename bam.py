@@ -1,7 +1,7 @@
 
 import random
 import traceback
-
+import numpy as np
 import torch
 import logging
 
@@ -353,7 +353,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     return encoded_with_ref, refseq, altseq
 
 
-def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples):
+def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples, downsample_frac=0.3):
     """
     Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
     chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the
@@ -370,7 +370,10 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
     logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
     for i in range(num_samples):
-        reads = random.sample(allreads, min(len(allreads), maxreads))
+        reads_to_sample = maxreads
+        if np.random.rand() < downsample_frac:
+            reads_to_sample = maxreads // 2
+        reads = random.sample(allreads, min(len(allreads), reads_to_sample))
         reads = util.sortreads(reads)
         minref = min(alnstart(r) for r in reads)
         maxref = max(alnstart(r) + r.query_length for r in reads)
