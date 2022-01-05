@@ -9,6 +9,8 @@ You probably want to do this to all BED files prior to generating 'labels' BED f
 
 targetsize = 300
 
+stepsize = 150
+
 for line in open(sys.argv[1]):
     toks = line.split("\t")
     start = int(toks[1])
@@ -16,14 +18,13 @@ for line in open(sys.argv[1]):
     mid = (start + end) // 2
 
     # If the region is smaller than 2x targetsize, just put the region in the middle?
-    if end-start < 2*targetsize:
+    if end-start < targetsize:
         print(f"{toks[0]}\t{mid - targetsize // 2}\t{mid + targetsize // 2}")
 
     # If the region is bigger than the target size, create regions that tile across it
     # Maybe these should be overlapping a little? 
     else:
-        p = start + targetsize
-        while start < end:
+        while start < (end - stepsize):
             print(f"{toks[0]}\t{start}\t{start+targetsize}")
-            start += targetsize
+            start += stepsize
             
