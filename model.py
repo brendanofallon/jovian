@@ -105,12 +105,12 @@ class VarTransformer(nn.Module):
         self.conv_out_channels = 10
         self.fc1_hidden = 12
 
-        self.conv1 = nn.Conv2d(in_channels=feature_count,
+        self.conv1 = nn.Conv2d(in_channels=feature_count + 1,
                                out_channels=self.conv_out_channels,
                                kernel_size=(1, 10),
                                padding='same')
 
-        self.fc1 = nn.Linear(feature_count + self.conv_out_channels, self.fc1_hidden)
+        self.fc1 = nn.Linear(feature_count + 1 + self.conv_out_channels, self.fc1_hidden)
         self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
 
         # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
@@ -123,8 +123,8 @@ class VarTransformer(nn.Module):
     def forward(self, src):
 
         # r contains a 1 if the read base matches the reference base, 0 otherwise
-        #r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
-        #src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
+        r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
+        src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
 
         conv_out = self.elu(self.conv1(src.transpose(3,1))).transpose(1,3)
         src = torch.cat((src, conv_out), dim=3)
