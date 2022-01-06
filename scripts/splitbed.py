@@ -9,7 +9,7 @@ You probably want to do this to all BED files prior to generating 'labels' BED f
 
 targetsize = 300
 
-stepsize = 150
+stepsize = 300
 
 for line in open(sys.argv[1]):
     toks = line.split("\t")
