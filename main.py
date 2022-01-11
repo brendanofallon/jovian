@@ -82,7 +82,7 @@ def reconcile_current_window(prev_win, current_win):
     overlap_vars = set(prev_win) & set(current_win)
 
     # swap haplotypes if supported by previous window
-    same_hap_var_count, opposite_hap_var_count = 0
+    same_hap_var_count, opposite_hap_var_count = 0, 0
     for v in overlap_vars:
         if prev_win[v].het and current_win[v].het:
             if prev_win[v].haplotype == current_win[v].haplotype:
@@ -398,8 +398,8 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
             stepvars1, stepvars0 = stepvars0, stepvars1
 
         # add this step's vars to allvars
-        [allvars0[key].append(v) for key, v in stepvars0]
-        [allvars1[key].append(v) for key, v in stepvars1]
+        [allvars0[key].append(v) for key, v in stepvars0.items()]
+        [allvars1[key].append(v) for key, v in stepvars1.items()]
 
         # continue
         window_start += window_step

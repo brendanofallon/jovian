@@ -10,8 +10,8 @@ class Variant:
     alt: str
     pos: int
     qual: float
-    hap_model: int
-    step = int
+    hap_model: int = None
+    step: int = None
 
 
     def __eq__(self, other):
@@ -38,20 +38,21 @@ class VcfVar:
     pos: int
     ref: str
     alt: str
-    quals: list[float]
+    quals: list
     qual: float
-    filter: list[str]
+    filter: list
     depth: int
     phased: bool
     phase_set: int
-    model_haps: list[int]
+    model_haps: list
     haplotype: int
-    step_indexes: list[int]
+    step_indexes: list
     window_idx: int
     window_var_count: int
     window_cis_vars: int
     window_trans_vars: int
     call_count: int
+    step_count: int
     genotype: tuple
     het: bool
     duplicate: bool
@@ -193,7 +194,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
 def var_depth(var, chrom, aln):
     """
     Get read depth at variant start position from bam  pysam AlignmentFile to get depth at
-    :param var: local variant object with just pos ref alt
+    :param var: local variant tuple just (pos, ref, alt)
     :param chrom:
     :param aln: bam pysam AlignmentFile
     :return:
@@ -201,8 +202,8 @@ def var_depth(var, chrom, aln):
     # get bam depths for now, not same as tensor depth
     count = aln.count(
          contig=chrom,
-         start=var.pos,
-         stop=var.pos + 1,
+         start=var[0],  # pos of var
+         stop=var[0] + 1,  # pos - 1
          read_callback="all",
     )
     return count
@@ -226,50 +227,52 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     # index vars by (pos, ref, alt) to make dealing with homozygous easier
     vcfvars_hap0 = {}
     for var, depth in zip(vars_hap0, depths_hap0):
-        vcfvars_hap0[(var.pos, var.ref, var.alt)] = VcfVar(
+        vcfvars_hap0[var] = VcfVar(
             chrom=chrom,
-            pos=var.pos + 1,
-            ref=var.ref,
-            alt=var.alt,
+            pos=var[0] + 1,
+            ref=var[1],
+            alt=var[2],
             quals=[call.qual for call in vars_hap0[var]],
             qual=float(np.mean([call.qual for call in vars_hap0[var]])),
             filter=[],
             depth=depth,
             phased=False,  # default for now
-            phase_set=min(v.pos for v in (vars_hap0 + vars_hap1)),  # default to first var in window for now
+            phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var in window for now
             model_haps=[call.hap_model for call in vars_hap0[var]],
             haplotype=0,  # defalt vars_hap0 to haplotype 0 for now
             step_indexes=[call.step for call in vars_hap0[var]],  # in which steps across window was var detected?
             window_idx=window_idx,
-            window_var_count=len(set(vars_hap0.keys() + vars_hap1.keys())),
+            window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=len(vars_hap0),
             window_trans_vars=len(vars_hap1),
             call_count=len(vars_hap0[var]),
+            step_count=len(vars_hap0[var]),
             genotype=(0, 1),  # default to haplotype 0
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
         )
     vcfvars_hap1 = {}
     for var, depth in zip(vars_hap1, depths_hap1):
-        vcfvars_hap1[(var.pos, var.ref, var.alt)] = VcfVar(
+        vcfvars_hap1[var] = VcfVar(
             chrom=chrom,
-            pos=var.pos + 1,
-            ref=var.ref,
-            alt=var.alt,
+            pos=var[0] + 1,
+            ref=var[1],
+            alt=var[2],
             quals=[call.qual for call in vars_hap1[var]],
             qual=float(np.mean([call.qual for call in vars_hap1[var]])),
             filter=[],
             depth=depth,
             phased=False,  # default value for now
-            phase_set=min(v.pos for v in (vars_hap0 + vars_hap1)),  # default to first var position in window
+            phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var position in window
             model_haps=[call.hap_model for call in vars_hap1[var]],
             haplotype=1,  # defalt vars_hap1 to haplotype 1 for now
             step_indexes=[call.step for call in vars_hap1[var]],  # in which steps across window was var detected?
             window_idx=window_idx,
-            window_var_count=len(set(vars_hap0.keys() + vars_hap1.keys())),
+            window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=len(vars_hap1),
             window_trans_vars=len(vars_hap0),
             call_count=len(vars_hap1[var]),
+            step_count=len(vars_hap1[var]),
             genotype=(1, 0),  # default to haplotype 1
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
@@ -285,6 +288,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
         vcfvars_hap0[var].window_trans_vars = 0  # moved all vars to cis
         vcfvars_hap0[var].call_count += vcfvars_hap1[var].call_count  # combine call counts in both haplotypes
+        vcfvars_hap0[var].step_count = len(set(vcfvars_hap0[var].step_indexes))  # combine call counts in both haplotypes
         vcfvars_hap0[var].genotype = (1, 1)
         vcfvars_hap0[var].het = False
         # then remove from hap1 vars
@@ -301,7 +305,9 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         if var.depth < mindepth:
             var.filter.append("LowCov")
         if var.call_count < 2:
-            var.filter.append("SingleCall")
+            var.filter.append("SingleCallHet")
+        elif var.step_count < 2:
+            var.filter.append("SingleCallHom")
 
         # adjust insertions and deletions so no blank ref or alt
         if var.ref == "" or var.alt == "":
@@ -358,8 +364,10 @@ def init_vcf(path, sample_name="sample", lowcov=30):
     # FILTER values other than "PASS"
     vcfh.add_meta('FILTER', items=[('ID', "LowCov"),
                                    ('Description', f'cov depth at var start pos < {lowcov}')])
-    vcfh.add_meta('FILTER', items=[('ID', "SingleCall"),
-                                   ('Description', f'var had single call in the multi-step detection')])
+    vcfh.add_meta('FILTER', items=[('ID', "SingleCallHet"),
+                                   ('Description', f'var had single het call in the multi-step detection')])
+    vcfh.add_meta('FILTER', items=[('ID', "SingleCallHom"),
+                                   ('Description', f'var had single hom call in the multi-step detection')])
     # FORMAT items
     vcfh.add_meta('FORMAT', items=[('ID', "GT"), ('Number', 1), ('Type', 'String'),
                                    ('Description', 'Genotype')])
@@ -383,7 +391,9 @@ def init_vcf(path, sample_name="sample", lowcov=30):
     vcfh.add_meta('INFO', items=[('ID', "STEP_INDEXES"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Step indexes of all model calls of this var in multi-step detection')])
     vcfh.add_meta('INFO', items=[('ID', "CALL_COUNT"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'number of model calls of this var in multi-step detection')])
+                                 ('Description', 'Number of model haplotype calls of this var in multi-step detection')])
+    vcfh.add_meta('INFO', items=[('ID', "STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Number of overlapping steps where var detected in multi-step detection')])
 
     vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 0), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
@@ -399,7 +409,7 @@ def create_vcf_rec(var, vcf_file):
     :return:
     """
     # Create record
-    vcf_filter = ";".join(var["filter"]) if var["filter"] else "PASS"
+    vcf_filter = var["filter"] if var["filter"] else "PASS"
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
                        alleles=(var.ref, var.alt), filter=vcf_filter, qual=var.qual)
     # Set FORMAT values
@@ -412,11 +422,13 @@ def create_vcf_rec(var, vcf_file):
     r.info['WIN_VAR_COUNT'] = var.window_var_count
     r.info['WIN_CIS_COUNT'] = var.window_cis_vars
     r.info['WIN_TRANS_COUNT'] = var.window_trans_vars
-    r.info['QUALS'] = var.quals
+    r.info['QUALS'] = [float(x) for x in var.quals]
     r.info['MODEL_HAPS'] = var.model_haps
     r.info['STEP_INDEXES'] = var.step_indexes
     r.info['CALL_COUNT'] = var.call_count
-    r.info['DUPLICATE'] = var.duplicate
+    r.info['STEP_COUNT'] = var.step_count
+    if var.duplicate:
+        r.info['DUPLICATE'] = ()
     return r
 
 
