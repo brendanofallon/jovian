@@ -328,7 +328,7 @@ def train_epochs(epochs,
                  cl_args = {}
 ):
     attention_heads = 4
-    encoder_layers = 6
+    encoder_layers = 8
     transformer_dim = 400
     embed_dim_factor = 125
     model = VarTransformer(read_depth=max_read_depth,
