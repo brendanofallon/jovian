@@ -80,6 +80,23 @@ def reconcile_current_window(prev_win, current_win):
     :return: modified variant dict for current window
     """
     overlap_vars = set(prev_win) & set(current_win)
+
+    # swap haplotypes if supported by previous window
+    same_hap_var_count, opposite_hap_var_count = 0
+    for v in overlap_vars:
+        if prev_win[v].het and current_win[v].het:
+            if prev_win[v].haplotype == current_win[v].haplotype:
+                same_hap_var_count += 1
+            else:
+                opposite_hap_var_count += 1
+    if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
+        for k, v in current_win.items():
+            current_win[v].genotype = tuple(reversed(current_win[v].genotype))
+            if v.het and v.haplotype == 0:
+                v.haplotype = 1
+            elif v.het and v.haplotype == 1:
+                v.haplotype = 0
+
     for var in overlap_vars:
         # if hom in both windows
         #   - just mark as DUPLICATE
@@ -98,9 +115,6 @@ def reconcile_current_window(prev_win, current_win):
         #   - reverse genotype of all current window vars (i.e., (0,1) to (1,0))
         if prev_win[var].het and current_win[var].het and prev_win[var].genotype != current_win[var].genotype:
             current_win[var].duplicate = True
-            for v in current_win:
-                current_win[v].phase_set = prev_win[v].phase_set
-                current_win[v].genotype = tuple(reversed(current_win[v].genotype))
     return current_win
 
 
@@ -186,7 +200,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     df_vars["Start"] = df_vars.pos - 1
     pr_vars = pr.PyRanges(df_vars).sort()
 
-    # intersect pyranges vars with pyranges bed file
+    # intersect vars with bed file
     pr_vars = pr_vars.intersect(pr_bed)
 
     # generate vcf out
@@ -322,31 +336,27 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
 def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
-    tallying all of the variants called, and them making a choice about which ones are 'real'
-    Currently, we exclude all variants in the downstream half of the window, and retain only the remaining
-    variants that are called in more than one window
+    tallying all of the variants called, and passing back all call and repeat count info
+    for further exploration
+    Currently:
+    - exclude all variants in the downstream half of the window
+    - retain all remaining var calls noting how many time each one was called, qualities, etc.
+    - call with no repeats are mostly false positives but they are retained
+    - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
 
     TODO:
-      - any changes to overlapping method?
-      - key dictionary by (chrom, pos, ref) tuple (rather than just pos)
-      - include overall prob of alt sequence in the variant probabilities? or at least return additional prob to vcf?
-      - add depth to variant dicts
-      - overlap consolidation
-        - manage/reconcile haplotypes
-        - remove duplicates
-        - keep running total of times called
-        - keep running total of windows
-        - combine probs and depths before removing duplicates (lists or averages?)
-        - create new prob
-      - remove variants below min number of calls or min combined probability?
+      - add prob info from alt sequence to vars?
+      - add depth derived from tensor to vars?
+      - create new prob from all duplicate calls?
     """
     window_step = 50
     var_retain_window_size = 150
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
+    step_count = 0  # initialize
     while window_start <= (end - window_step):
-        # print(f"Window {window_start}-{window_start + var_retain_window_size}")
+        # call vars
         try:
             hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
                                               max_read_depth=max_read_depth, min_reads=min_reads)
@@ -354,6 +364,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
             hap1 = util.readstr(hap1_t)
             hap0_probs = hap0_t.detach().numpy().max(axis=-1)
             hap1_probs = hap1_t.detach().numpy().max(axis=-1)
+
             refseq = reference.fetch(chrom, offset, offset + window_size)
             vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
             vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
@@ -364,25 +375,43 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
             )
             vars_hap0, vars_hap1 = [], []
 
+        # put vars into hap0 and hap1 dicts
+        stepvars0 = {}
         for v in vars_hap0:
             if v.pos < (window_start + var_retain_window_size):
-                allvars0[v.pos].append(v)
+                v.hap_model = 0
+                v.step = step_count
+                stepvars0[(v.pos, v.ref, v.alt)] = v
+        stepvars1 = {}
         for v in vars_hap1:
             if v.pos < (window_start + var_retain_window_size):
-                allvars1[v.pos].append(v)
+                v.hap_model = 1
+                v.step = step_count
+                stepvars1[(v.pos, v.ref, v.alt)] = v
 
+        # swap haplotypes if supported by previous vars
+        same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
+        same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
+        opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
+        opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
+        if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
+            stepvars1, stepvars0 = stepvars0, stepvars1
+
+        # add this step's vars to allvars
+        [allvars0[key].append(v) for key, v in stepvars0]
+        [allvars1[key].append(v) for key, v in stepvars1]
+
+        # continue
         window_start += window_step
-    # print("Hap0 vars:")
-    # for pos, variants in allvars0.items():
-    #     print(f"{pos} : {variants}")
-    # print("Hap1 vars:")
-    # for pos, variants in allvars1.items():
-    #     print(f"{pos} : {variants}")
+        step_count += 1
 
-    # Return variants that occur more than once?
-    hap0_passing = list(v[0] for k, v in allvars0.items() if len(v) > 1 and start < v[0].pos < end)
-    hap1_passing = list(v[0] for k, v in allvars1.items() if len(v) > 1 and start < v[0].pos < end)
-    return hap0_passing, hap1_passing
+    # Old method, only return vars that are called multiple times
+    # hap0_passing = list(v[0] for k, v in allvars0.items() if len(v) > 1 and start < v[0].pos < end)
+    # hap1_passing = list(v[0] for k, v in allvars1.items() if len(v) > 1 and start < v[0].pos < end)
+    # return hap0_passing, hap1_passing
+
+    # Return all vars even if they occur only once?
+    return allvars0, allvars1
 
 
 def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
@@ -434,8 +463,12 @@ def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
         fp_varpos = []
         tp_varpos = []
         try:
-            vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth=100,
+            allvars0, allvars1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth=100,
                                                    window_size=300)
+            # TODO   Keep only vars that occur more than once?
+            vars_hap0 = list(v[0] for k, v in allvars0.items() if len(v) > 1 and start < v[0].pos < end)
+            vars_hap1 = list(v[0] for k, v in allvars1.items() if len(v) > 1 and start < v[0].pos < end)
+
         except Exception as ex:
             logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
             logger.warning(ex)
