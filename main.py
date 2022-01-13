@@ -13,6 +13,7 @@ import tempfile
 from datetime import datetime
 import re
 import pandas as pd
+import pyranges
 import pyranges as pr
 
 import pysam
@@ -103,6 +104,15 @@ def reconcile_current_window(prev_win, current_win):
                 current_win[v].genotype = tuple(reversed(current_win[v].genotype))
     return current_win
 
+def _parseregion(regionstr):
+    """
+    Parse chrom, start, end from input string
+    Excepts form chr:start-end
+    """
+    chrom, startend = regionstr.split(":", maxsplit=1)
+    start, end = startend.split("-")
+    return chrom, int(start), int(end)
+
 
 def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spacing=1000, window_overlap=0, **kwargs):
     """
@@ -127,14 +137,15 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
       """
 
     # window_size = 300
+    min_coverage = kwargs.get("min_cov", 10) # Minimum read depth for any call to be emitted
     max_read_depth = 100
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
 
-    attention_heads = 2
+    attention_heads = 4
     transformer_dim = 400  # todo reset to 500
-    encoder_layers = 8  # todo reset to 6
-    embed_dim_factor = 200  # todo reset to 120
+    encoder_layers = 6  # todo reset to 6
+    embed_dim_factor = 125  # todo reset to 120
     model = VarTransformer(read_depth=max_read_depth,
                            feature_count=feats_per_read,
                            out_dim=4,
@@ -148,14 +159,21 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
 
     reference = pysam.FastaFile(reference_fasta)
     aln = pysam.AlignmentFile(bam)
-    pr_bed = pr.PyRanges(pd.read_csv(
-        bed, sep="\t", names="Chromosome Start End".split(), usecols=[0, 1, 2], dtype=dict(chrom=str)
-    )).merge()
+    if bed:
+        pr_bed = pr.PyRanges(pd.read_csv(
+            bed, sep="\t", names="Chromosome Start End".split(), usecols=[0, 1, 2], dtype=dict(chrom=str)
+        )).merge()
+    elif kwargs.get("region"):
+        chrom, start, end = _parseregion(kwargs.get("region"))
+        pr_bed = pyranges.PyRanges(df=pd.DataFrame({"Chromosome": [chrom], "Start": [start], "End": [end]}))
+    else:
+        raise ValueError("Couldnt find BED file or region")
     # make window generator from bed
     windows, windows_total_count = bed_to_windows(pr_bed, bed_slack=bed_slack, window_spacing=window_spacing, window_overlap=window_overlap)
 
     var_windows = []
     for i, (chrom, start, end) in enumerate(windows):
+        logger.info(f"Calling {chrom}:{start}-{end}")
         vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300)
 
         # group vcf variants by window (list of dicts)
@@ -168,7 +186,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
             var_windows[-1] = reconcile_current_window(var_windows[-2], var_windows[-1])
 
         # add log update every so often
-        log_spacing = 5000
+        log_spacing = 1
         if (i + 1) % log_spacing == 0:
             logger.info(f"Called variants up to {chrom}:{start}, in {i + 1}  of {windows_total_count} total windows")
 
@@ -191,7 +209,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
 
     # generate vcf out
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=30)
-    vcf.vars_to_vcf(vcf_file, pr_vars)
+    vcf.vars_to_vcf(vcf_file, pr_vars, min_cov=min_coverage)
     vcf_file.close()
 
 
@@ -312,9 +330,10 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
     if padded_reads.shape[1] > window_width:
         padded_reads = padded_reads[:, midstart:midend, :, :]
 
+    depths = padded_reads[:, :, :, 0:4].sum(dim=-1).sum(dim=2) # read coverage in tensor
     #masked_reads = padded_reads * fullmask
     seq_preds = model(padded_reads.float().to(DEVICE))
-    return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], start
+    return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], depths, start
 
 
 
@@ -334,9 +353,9 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     allvars1 = defaultdict(list)
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     while window_start <= (end - window_step):
-        # print(f"Window {window_start}-{window_start + var_retain_window_size}")
+        print(f"Window {window_start}-{window_start + var_retain_window_size}")
         try:
-            hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
+            hap0_t, hap1_t, depths, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
                                               max_read_depth=max_read_depth, min_reads=min_reads)
             hap0 = util.readstr(hap0_t)
             hap1 = util.readstr(hap1_t)
@@ -566,7 +585,8 @@ def main():
     callparser.add_argument("-m", "--statedict", help="Stored model", required=True)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
-    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=True)
+    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
+    callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.set_defaults(func=call)
 

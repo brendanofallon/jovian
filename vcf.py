@@ -361,6 +361,15 @@ def init_vcf(path, sample_name="sample", lowcov=30):
     # write to new vcf file object
     return pysam.VariantFile(path, "w", header=vcfh)
 
+def prob_to_phred(p, max_qual=1000.0):
+    """
+    Convert a probability in 0..1 to phred scale
+    """
+    assert 0.0 <= p <= 1.0, f"Probability must be in [0, 1], but found {p}"
+    if p == 1.0:
+        return max_qual
+    else:
+        return min(max_qual, -10 * np.log10(1.0 - p))
 
 def create_vcf_rec(var, vcf_file):
     """
@@ -371,7 +380,7 @@ def create_vcf_rec(var, vcf_file):
     """
     # Create record
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
-                       alleles=(var.ref, var.alt), filter=var["filter"], qual=var.qual)
+                       alleles=(var.ref, var.alt), filter=var["filter"], qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
     r.samples['sample'].phased = var.phased  # note: need to set phased after setting genotype
@@ -385,13 +394,15 @@ def create_vcf_rec(var, vcf_file):
     return r
 
 
-def vars_to_vcf(vcf_file, pr_vars):
+def vars_to_vcf(vcf_file, pr_vars, min_cov):
     """
     create variant records from pyranges variant table and write all to pysam VariantFile
     :param vcf_file:
     :param pr_vars:
+    :param min_cov: Minimum coverage for variant to be written
     :return: None
     """
     for i, var in pr_vars.df.iterrows():
         r = create_vcf_rec(var, vcf_file)
-        vcf_file.write(r)
+        if r.samples['sample']['DP'] > min_cov:
+            vcf_file.write(r)

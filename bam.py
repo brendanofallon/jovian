@@ -6,6 +6,7 @@ import torch
 import logging
 
 import util
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -13,37 +14,67 @@ logger = logging.getLogger(__name__)
 
 EMPTY_TENSOR = torch.zeros(9)
 
-class MockRead:
+class ReadWindow:
 
-    def __init__(self, bases, quals, start, end, cigartups):
-        assert len(bases) == len(quals)
-        self.query_sequence = bases
-        self.query_qualities = quals
-        self.reference_start = start
-        self.query_alignment_start = self.reference_start
-        self.reference_end = end
-        self.query_length = len(self.query_sequence)
-        self.cigartuples = cigartups
-        n_cig_bases = sum(a[1] for a in self.cigartuples)
-        assert n_cig_bases == len(bases), "Cigar bases count doesn't match actual number of bases"
+    def __init__(self, aln, chrom, start, end):
+        self.aln = aln
+        self.start = start
+        self.end = end
+        self.chrom = chrom
+        self.bypos = defaultdict(list)
 
-    def get_aligned_pairs(self):
-        refpos = self.reference_start
-        readpos = 0
-        result = []
-        for cigop, nbases in self.cigartuples:
-            ref_base_consumed = cigop in {0, 2, 4, 5, 7}
-            seq_base_consumed = cigop in {0, 1, 3, 4,5,7}
-            for i in range(nbases):
-                read_emit = readpos if seq_base_consumed else None
-                ref_emit = refpos if ref_base_consumed else None
-                result.append((read_emit, ref_emit))
-                if ref_base_consumed:
-                    refpos += 1
-                if seq_base_consumed:
-                    readpos += 1
-        return result
+    def _fill(self):
+        for i, read in enumerate(self.aln.fetch(self.chrom, self.start, self.end)):
+            self.bypos[alnstart(read)].append(encode_read(read))
+        return i
 
+    def get_window(self, start, end, max_reads):
+        assert self.start <= start < end, f"Start coordinate must be between beginning and end of window"
+        assert self.start < end <= end, f"End coordinate must be between beginning and end of window"
+        allreads = []
+        for p in range(start, end):
+            reads = self.bypos[p]
+            for read in reads:
+                allreads.append((p, read))
+
+        if len(allreads) > max_reads:
+            allreads = random.sample(allreads, max_reads)
+            allreads = sorted(allreads, key=lambda x: x[0])
+        t = torch.zeros(end-start, len(allreads), 9)
+        for i, p, read in enumerate(allreads):
+            t[p-start:p-start+read.shape[0], i, :] = read
+
+        return t
+
+
+
+
+def encode_read(read, prepad=0, tot_length=None):
+    """
+    Encode the given read into a tensor
+    :param read: Read to be encoded (typically pysam.AlignedSegment)
+    :param prepad: Leading zeros to prepend
+    :param tot_length: If not None, desired total 'length' (dimension 0) of tensor
+    """
+    if tot_length:
+        assert prepad < tot_length, f"Cant have more padding than total length"
+    bases = []
+    for i in range(prepad):
+        bases.append(EMPTY_TENSOR)
+
+    try:
+        for t in iterate_bases(read):
+            bases.append(t)
+            if tot_length is not None:
+                if len(bases) >= tot_length:
+                    break
+    except StopIteration:
+        pass
+
+    if tot_length is not None:
+        while len(bases) < tot_length:
+            bases.append(EMPTY_TENSOR)
+    return torch.stack(tuple(bases)).char()
 
 
 def base_index(base):
@@ -92,16 +123,6 @@ def decode(t):
         return '-'
     else:
         return util.INDEX_TO_BASE[t[0:4].argmax()]
-
-
-# def encode_cigop(readpos, refpos):
-#     if readpos == refpos:
-#         return 0
-#     elif readpos is None:
-#         return -1
-#     elif refpos is None:
-#         return 1
-#     return 0
 
 
 
@@ -183,7 +204,7 @@ def iterate_bases(rec):
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
         readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -198,7 +219,7 @@ def iterate_bases(rec):
 
 def rec_tensor_it(read, minref):
     for i in range(alnstart(read) - minref):
-        yield EMPTY_TENSOR, True
+        yield EMPTY_TENSOR
 
     try:
         for t in iterate_bases(read):
@@ -207,7 +228,7 @@ def rec_tensor_it(read, minref):
         pass
 
     while True:
-        yield EMPTY_TENSOR, True
+        yield EMPTY_TENSOR
 
 
 def emit_tensor_aln(t):
@@ -253,7 +274,7 @@ def encode_pileup3(reads, start, end):
     everything = []
     for readnum, read in enumerate(reads):
         try:
-            readencoded = [enc.char() for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
+            readencoded = [enc.char() for enc in _consume_n(rec_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))
         except Exception as ex:
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")
@@ -315,7 +336,7 @@ def reads_spanning_range(bam, chrom, start, end):
     reads in which 'pos' is approximately in the middle of the read
     :return : list of reads spanning the given position
     """
-    bamit = bam.fetch(chrom, start - 10)
+    bamit = bam.fetch(chrom, start)
     reads = []
     try:
         read = next(bamit)
