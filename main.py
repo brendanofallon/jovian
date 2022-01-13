@@ -307,7 +307,7 @@ def pregen(config, **kwargs):
 
 def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
     """
-    Call variants in a region of a BAM file using the given altpredictor and model
+    Call variants in a region of a BAM file
     and return a list of vcf.Variant objects
     """
     reads = reads_spanning_range(aln, chrom, start, end)
@@ -331,7 +331,7 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
         padded_reads = padded_reads[:, midstart:midend, :, :]
 
     depths = padded_reads[:, :, :, 0:4].sum(dim=-1).sum(dim=2) # read coverage in tensor
-    #masked_reads = padded_reads * fullmask
+
     seq_preds = model(padded_reads.float().to(DEVICE))
     return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], depths, start
 
