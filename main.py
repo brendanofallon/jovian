@@ -145,10 +145,10 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
 
-    attention_heads = 2
+    attention_heads = 4
     transformer_dim = 400  # todo reset to 500?
-    encoder_layers = 4  # todo reset to 6?
-    embed_dim_factor = 200  # todo reset to 120?
+    encoder_layers = 6  # todo reset to 6?
+    embed_dim_factor = 125  # todo reset to 120?
     model = VarTransformer(read_depth=max_read_depth,
                            feature_count=feats_per_read,
                            out_dim=4,
