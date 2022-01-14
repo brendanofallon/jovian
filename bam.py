@@ -2,6 +2,7 @@
 import random
 import traceback
 import numpy as np
+import pysam
 import torch
 import logging
 
@@ -10,9 +11,44 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-
-
 EMPTY_TENSOR = torch.zeros(9)
+
+
+class ReadCache:
+
+    def __init__(self):
+        self.cache = {}
+
+    def __getitem__(self, read):
+        if read.query_name not in self.cache:
+            self.cache[read.query_name] = (alnstart(read), encode_read(read))
+
+        return self.cache[read.query_name]
+
+    def min_ref_start(self):
+        """
+        Returns the minimum start value of all reads in the cache
+        """
+        return min(v[0] for v in self.cache.values())
+
+    def expire_from_pos(self, min_pos):
+        """
+        Remove any items from the cache that have a alnstart of less than min_pos
+        """
+        newcache = {}
+        for key, val in self.cache.items():
+            if val[0] >= min_pos:
+                newcache[key] = val
+        self.cache = newcache
+
+    def __contains__(self, item):
+        if type(item) == str:
+            return item in self.cache
+        elif type(item) == pysam.AlignedSegment:
+            return item.query_name in self.cache
+        else:
+            return False
+
 
 class ReadWindow:
 
@@ -21,12 +57,15 @@ class ReadWindow:
         self.start = start
         self.end = end
         self.chrom = chrom
-        self.bypos = defaultdict(list)
+        self.cache = ReadCache()  # Cache for encoded reads
+        self.bypos = self._fill()
 
     def _fill(self):
+        bypos = defaultdict(list)
         for i, read in enumerate(self.aln.fetch(self.chrom, self.start, self.end)):
-            self.bypos[alnstart(read)].append(encode_read(read))
-        return i
+            if read is not None:
+                bypos[alnstart(read)].append(read)
+        return bypos
 
     def get_window(self, start, end, max_reads):
         assert self.start <= start < end, f"Start coordinate must be between beginning and end of window"
@@ -41,8 +80,10 @@ class ReadWindow:
             allreads = random.sample(allreads, max_reads)
             allreads = sorted(allreads, key=lambda x: x[0])
         t = torch.zeros(end-start, len(allreads), 9)
-        for i, p, read in enumerate(allreads):
-            t[p-start:p-start+read.shape[0], i, :] = read
+
+        for i, (p, read) in enumerate(allreads):
+            _, encoded = self.cache[read.query_name]
+            t[p-start:p-start+encoded.shape[0], i, :] = encoded
 
         return t
 
@@ -247,7 +288,7 @@ def alnstart(read):
     If the first cigar element is hard or soft clip, return read.reference_start - size of first cigar element,
     otherwise return read.reference_start
     """
-    if read.cigartuples[0][0] in {4, 5}:
+    if read.cigartuples is not None and read.cigartuples[0][0] in {4, 5}:
         return read.reference_start - read.cigartuples[0][1]
     else:
         return read.reference_start
@@ -404,3 +445,11 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
         yield encoded_with_ref, (minref, maxref)
+
+
+if __name__=="__main__":
+    aln = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram",
+                              reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    rw = ReadWindow(aln, "21", 35914884, 35915068)
+    t = rw.get_window(35914900, 35915000, max_reads=100)
+    print(t.shape)

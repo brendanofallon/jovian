@@ -188,7 +188,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     var_windows = []
     for i, (chrom, start, end) in enumerate(windows):
         logger.info(f"Calling {chrom}:{start}-{end}")
-        vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300)
+        vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, window_step=50)
 
         # group vcf variants by window (list of dicts)
         # may get mostly empty dicts?
@@ -227,97 +227,6 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     vcf_file.close()
 
 
-def load_conf(confyaml):
-    logger.info(f"Loading configuration from {confyaml}")
-    conf = yaml.safe_load(open(confyaml).read())
-    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
-    assert 'data' in conf, "Expected 'data' entry in training configuration"
-    return conf
-
-
-def pregen_one_sample(dataloader, batch_size, output_dir):
-    """
-    Pregenerate tensors for a single sample
-    """
-    uid = "".join(random.choices(ascii_letters + digits, k=8))
-    src_prefix = "src"
-    tgt_prefix = "tgt"
-    vaf_prefix = "vaftgt"
-    metafile = tempfile.NamedTemporaryFile(
-        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
-    )
-    logger.info(f"Saving tensors to {output_dir}/")
-    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
-        logger.info(f"Saving batch {i} with uid {uid}")
-        for data, prefix in zip([src, tgt, vaftgt],
-                                [src_prefix, tgt_prefix, vaf_prefix]):
-            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
-                torch.save(data, fh)
-        for idx, varinfo in enumerate(varsinfo):
-            meta_str = "\t".join([
-                f"{idx}", f"{uid}-{i}", "\t".join(varinfo), dataloader.csv
-            ]) 
-            print(meta_str, file=metafile)
-        metafile.flush()
-
-    metafile.close()
-    return metafile.name
-
-
-def default_vals_per_class():
-    """
-    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
-    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
-    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
-    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
-    """
-    return 0
-
-
-def pregen(config, **kwargs):
-    """
-    Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
-    (this takes a long time)
-    """
-    conf = load_conf(config)
-    batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 100)
-    samples_per_pos = kwargs.get('samples_per_pos', 8)
-    vals_per_class = defaultdict(default_vals_per_class)
-    vals_per_class.update(conf['vals_per_class'])
-
-    output_dir = Path(kwargs.get('dir'))
-    metadata_file = kwargs.get("metadata_file", None)
-    if metadata_file is None:
-        str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
-        metadata_file = f"pregen_{str_time}.csv"
-    processes = kwargs.get('threads', 1)
-
-    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
-    dataloaders = [
-            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
-        for c in conf['data']
-    ]
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
-
-    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "vaf", "label"]
-    with open(metadata_file, "wb") as metafh:
-        metafh.write(("\t".join(meta_headers) + "\n").encode())
-        if processes == 1:
-            for dl in dataloaders:
-                sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
-                util.concat_metafile(sample_metafile, metafh)
-        else:
-            futures = []
-            with ProcessPoolExecutor(max_workers=processes) as executor:
-                for dl in dataloaders:
-                    futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
-            for fut in futures:
-                sample_metafile = fut.result()
-                util.concat_metafile(sample_metafile, metafh)
-
 
 def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
     """
@@ -352,7 +261,7 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
 
 
 
-def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5):
+def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
     tallying all of the variants called, and passing back all call and repeat count info
@@ -368,7 +277,6 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
       - add depth derived from tensor to vars?
       - create new prob from all duplicate calls?
     """
-    window_step = 50
     var_retain_window_size = 150
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
@@ -431,6 +339,98 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
 
     # Return all vars even if they occur only once?
     return allvars0, allvars1
+
+
+def default_vals_per_class():
+    """
+    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
+    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
+    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
+    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
+    """
+    return 0
+
+
+def load_conf(confyaml):
+    logger.info(f"Loading configuration from {confyaml}")
+    conf = yaml.safe_load(open(confyaml).read())
+    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
+    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    return conf
+
+
+def pregen_one_sample(dataloader, batch_size, output_dir):
+    """
+    Pregenerate tensors for a single sample
+    """
+    uid = "".join(random.choices(ascii_letters + digits, k=8))
+    src_prefix = "src"
+    tgt_prefix = "tgt"
+    vaf_prefix = "vaftgt"
+    metafile = tempfile.NamedTemporaryFile(
+        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
+    )
+    logger.info(f"Saving tensors to {output_dir}/")
+    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+        logger.info(f"Saving batch {i} with uid {uid}")
+        for data, prefix in zip([src, tgt, vaftgt],
+                                [src_prefix, tgt_prefix, vaf_prefix]):
+            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
+                torch.save(data, fh)
+        for idx, varinfo in enumerate(varsinfo):
+            meta_str = "\t".join([
+                f"{idx}", f"{uid}-{i}", "\t".join(varinfo), dataloader.csv
+            ])
+            print(meta_str, file=metafile)
+        metafile.flush()
+
+    metafile.close()
+    return metafile.name
+
+
+def pregen(config, **kwargs):
+    """
+    Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
+    (this takes a long time)
+    """
+    conf = load_conf(config)
+    batch_size = kwargs.get('batch_size', 64)
+    reads_per_pileup = kwargs.get('read_depth', 100)
+    samples_per_pos = kwargs.get('samples_per_pos', 8)
+    vals_per_class = defaultdict(default_vals_per_class)
+    vals_per_class.update(conf['vals_per_class'])
+
+    output_dir = Path(kwargs.get('dir'))
+    metadata_file = kwargs.get("metadata_file", None)
+    if metadata_file is None:
+        str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
+        metadata_file = f"pregen_{str_time}.csv"
+    processes = kwargs.get('threads', 1)
+
+    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
+    dataloaders = [
+            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+        for c in conf['data']
+    ]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
+
+    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "vaf", "label"]
+    with open(metadata_file, "wb") as metafh:
+        metafh.write(("\t".join(meta_headers) + "\n").encode())
+        if processes == 1:
+            for dl in dataloaders:
+                sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
+                util.concat_metafile(sample_metafile, metafh)
+        else:
+            futures = []
+            with ProcessPoolExecutor(max_workers=processes) as executor:
+                for dl in dataloaders:
+                    futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
+            for fut in futures:
+                sample_metafile = fut.result()
+                util.concat_metafile(sample_metafile, metafh)
 
 
 def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
