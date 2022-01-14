@@ -106,7 +106,7 @@ class VarTransformer(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels=feature_count + 1,
                                out_channels=self.conv_out_channels,
-                               kernel_size=(1, 10),
+                               kernel_size=(10, 10),
                                padding='same')
 
         self.fc1 = nn.Linear(feature_count + 1 + self.conv_out_channels, self.fc1_hidden)
