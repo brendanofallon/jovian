@@ -95,7 +95,6 @@ class TwoHapDecoder(nn.Module):
         return torch.stack((x0, x1), dim=1)
 
 
-
 class VarTransformer(nn.Module):
 
     def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, embed_dim_factor=40, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
