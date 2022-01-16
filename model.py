@@ -109,7 +109,8 @@ class VarTransformer(nn.Module):
                                kernel_size=(1, 10),
                                padding='same')
 
-        self.fc1 = nn.Linear(feature_count + 1 + self.conv_out_channels, self.fc1_hidden)
+        #self.fc1 = nn.Linear(feature_count + 1 + self.conv_out_channels, self.fc1_hidden)
+        self.fc1 = nn.Linear(feature_count + 1, self.fc1_hidden)
         self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
 
         # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
@@ -125,8 +126,8 @@ class VarTransformer(nn.Module):
         r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
         src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
 
-        conv_out = self.elu(self.conv1(src.transpose(3,1))).transpose(1,3)
-        src = torch.cat((src, conv_out), dim=3)
+        #conv_out = self.elu(self.conv1(src.transpose(3,1))).transpose(1,3)
+        #src = torch.cat((src, conv_out), dim=3)
 
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
