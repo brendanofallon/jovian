@@ -200,7 +200,7 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
             var_windows[-1] = reconcile_current_window(var_windows[-2], var_windows[-1])
 
         # add log update every so often
-        log_spacing = 1
+        log_spacing = 1  
         if (i + 1) % log_spacing == 0:
             logger.info(f"Called variants up to {chrom}:{start}, in {i + 1}  of {windows_total_count} total windows")
 

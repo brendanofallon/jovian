@@ -15,6 +15,9 @@ EMPTY_TENSOR = torch.zeros(9)
 
 
 class ReadCache:
+    """
+    Simple cache to store read encodings
+    """
 
     def __init__(self):
         self.cache = {}
@@ -23,15 +26,9 @@ class ReadCache:
         if read.query_name not in self.cache:
             self.cache[read.query_name] = (alnstart(read), encode_read(read))
 
-        return self.cache[read.query_name]
+        return self.cache[read.query_name][1]
 
-    def min_ref_start(self):
-        """
-        Returns the minimum start value of all reads in the cache
-        """
-        return min(v[0] for v in self.cache.values())
-
-    def expire_from_pos(self, min_pos):
+    def clear_to_pos(self, min_pos):
         """
         Remove any items from the cache that have a alnstart of less than min_pos
         """
@@ -82,8 +79,10 @@ class ReadWindow:
         t = torch.zeros(end-start, len(allreads), 9)
 
         for i, (p, read) in enumerate(allreads):
-            _, encoded = self.cache[read.query_name]
-            t[p-start:p-start+encoded.shape[0], i, :] = encoded
+            encoded = self.cache[read]
+            enc_start_offset = max(0, start - read.reference_start)
+            enc_end_offset = min(t.shape[0], (read.reference_start + encoded.shape[0]) - end)
+            t[p-start:p-start+(enc_end_offset - enc_start_offset), i, :] = encoded[enc_start_offset:enc_end_offset]
 
         return t
 
