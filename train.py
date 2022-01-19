@@ -327,18 +327,18 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 4
+    attention_heads = 8
     transformer_dim = 400
     encoder_layers = 8
-    embed_dim_factor = 200
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
-                                    feature_count=feats_per_read, 
-                                    out_dim=4,
-                                    embed_dim_factor=embed_dim_factor,
-                                    nhead=attention_heads, 
-                                    d_hid=transformer_dim, 
-                                    n_encoder_layers=encoder_layers,
-                                    device=DEVICE)
+                            feature_count=feats_per_read, 
+                            out_dim=4,
+                            embed_dim_factor=embed_dim_factor,
+                            nhead=attention_heads, 
+                            d_hid=transformer_dim, 
+                            n_encoder_layers=encoder_layers,
+                            device=DEVICE)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
@@ -356,9 +356,9 @@ def train_epochs(epochs,
         criterion = nn.CrossEntropyLoss()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     elif lossfunc == 'sw':
-        gap_open_penalty = -2
+        gap_open_penalty = -5
         gap_exend_penalty = -1
-        temperature = 1.0
+        temperature = 2.0
         trim_width = 100
         logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,

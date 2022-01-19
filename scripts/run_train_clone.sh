@@ -5,7 +5,7 @@
 #SBATCH --time=2-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1 --constraint="v100|3090"
 
 
 
