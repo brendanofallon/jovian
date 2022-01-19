@@ -27,8 +27,8 @@ for line in open(sys.argv[2]):
     ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
     multi_count = len([v for v in variants if len(v.alts) > 1])
      
-    if del_count and ins_count:
-        label = "ins-del"
+    if (del_count and ins_count) or (del_count > 1) or (ins_count > 1):
+        label = "multi_indel"
     elif (ins_count > 0 or del_count > 0) and snv_count > 0:
         label = "indel-snv"
     elif multi_count:
