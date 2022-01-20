@@ -91,7 +91,7 @@ def reconcile_current_window(prev_win, current_win):
                 opposite_hap_var_count += 1
     if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
         for k, v in current_win.items():
-            current_win[v].genotype = tuple(reversed(current_win[v].genotype))
+            current_win[k].genotype = tuple(reversed(current_win[k].genotype))
             if v.het and v.haplotype == 0:
                 v.haplotype = 1
             elif v.het and v.haplotype == 1:
@@ -108,7 +108,7 @@ def reconcile_current_window(prev_win, current_win):
         if prev_win[var].het and current_win[var].het and prev_win[var].genotype == current_win[var].genotype:
             current_win[var].duplicate = True
             for v in current_win:
-                current_win[v].phase_set = prev_win[v].phase_set
+                current_win[v].phase_set = prev_win[var].phase_set
         # if het in both windows and different haplotype (hap0 or hap1)
         #   - change phase set (PS) of current window to prev window
         #   - mark var as DUPLICATE in current window

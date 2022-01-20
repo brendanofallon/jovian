@@ -343,7 +343,8 @@ def train_epochs(epochs,
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
 
-    logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
+    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Creating model with {model_tot_params} trainable params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
@@ -369,8 +370,6 @@ def train_epochs(epochs,
                                     reduction=None,
                                     window_mode="random")
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
-
-    vaf_crit = None #nn.MSELoss()
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -401,6 +400,7 @@ def train_epochs(epochs,
             encoder_layers=encoder_layers,
             git_branch=git_repo.head.name,
             git_target=git_repo.head.target,
+            model_param_count=model_tot_params,
             git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
             loss_func=str(criterion),
         )
