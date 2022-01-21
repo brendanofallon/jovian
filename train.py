@@ -440,7 +440,7 @@ def train_epochs(epochs,
             loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
                                                                  optimizer,
                                                                  criterion,
-                                                                 vaf_crit,
+                                                                 None,
                                                                  dataloader,
                                                                  batch_size=batch_size,
                                                                  max_alt_reads=max_read_depth)
