@@ -31,12 +31,12 @@ PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mul
 
 
 
-LEARNING_RATE=0.0002
+LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_w_onemore"
-RUN_NOTES="WGS with one more sample and a bigger model"
+RUN_NAME="wgs_abitbigger_cont1"
+RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation after epoch 2"
 
 set -x
 
@@ -59,7 +59,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+# export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
@@ -71,6 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 8 \
     --max-decomp-batches 8 \
+    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_abitbigger/wgs_abitbigger_epoch1.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
