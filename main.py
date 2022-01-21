@@ -91,7 +91,7 @@ def reconcile_current_window(prev_win, current_win):
                 opposite_hap_var_count += 1
     if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
         for k, v in current_win.items():
-            current_win[v].genotype = tuple(reversed(current_win[v].genotype))
+            current_win[k].genotype = tuple(reversed(current_win[k].genotype))
             if v.het and v.haplotype == 0:
                 v.haplotype = 1
             elif v.het and v.haplotype == 1:
@@ -108,7 +108,7 @@ def reconcile_current_window(prev_win, current_win):
         if prev_win[var].het and current_win[var].het and prev_win[var].genotype == current_win[var].genotype:
             current_win[var].duplicate = True
             for v in current_win:
-                current_win[v].phase_set = prev_win[v].phase_set
+                current_win[v].phase_set = prev_win[var].phase_set
         # if het in both windows and different haplotype (hap0 or hap1)
         #   - change phase set (PS) of current window to prev window
         #   - mark var as DUPLICATE in current window
@@ -145,10 +145,10 @@ def call(statedict, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spac
     feats_per_read = 9
     logger.info(f"Found torch device: {DEVICE}")
 
-    attention_heads = 2
+    attention_heads = 4
     transformer_dim = 400  # todo reset to 500?
-    encoder_layers = 4  # todo reset to 6?
-    embed_dim_factor = 200  # todo reset to 120?
+    encoder_layers = 6  # todo reset to 6?
+    embed_dim_factor = 125  # todo reset to 120?
     model = VarTransformer(read_depth=max_read_depth,
                            feature_count=feats_per_read,
                            out_dim=4,
