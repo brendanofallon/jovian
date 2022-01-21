@@ -74,7 +74,8 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
     return pairs
 
 def tensor_from_lz4(path, device):
-    return torch.load(io.BytesIO(lz4.frame.decompress(path)), map_location=device)
+    with io.BytesIO(lz4.frame.decompress(path)) as bfh:
+        return torch.load(bfh, map_location=device)
 
 
 def tensor_from_gzip(path, device):
