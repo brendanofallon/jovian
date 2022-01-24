@@ -327,10 +327,17 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
+<<<<<<< HEAD
     attention_heads = 8
     transformer_dim = 400
     encoder_layers = 8
     embed_dim_factor = 100
+=======
+    attention_heads = 2
+    encoder_layers = 2
+    transformer_dim = 400
+    embed_dim_factor = 25
+>>>>>>> d639468b3c9506db29b9624293857b338c0de7fb
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=4,
@@ -558,6 +565,10 @@ def train_epochs(epochs,
                 logger.info(f"Saving model state dict to {checkpoint_name}")
                 m = model.module if isinstance(model, nn.DataParallel) else model
                 torch.save(m.state_dict(), checkpoint_name)
+                scripted_filename = modelparts[0] + f"_epoch{epoch}.pt"
+                logger.info(f"Saving scripted model to {scripted_filename}")
+                model_scripted = torch.jit.script(m)
+                model_scripted.save(scripted_filename)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
@@ -567,6 +578,10 @@ def train_epochs(epochs,
         logger.info(f"Saving model state dict to {model_dest}")
         m = model.module if isinstance(model, nn.DataParallel) else model
         torch.save(m.to('cpu').state_dict(), model_dest)
+        scripted_filename = modelparts[0] + f"_final.pt"
+        logger.info(f"Saving scripted model to {scripted_filename}")
+        model_scripted = torch.jit.script(m)
+        model_scripted.save(scripted_filename)
 
 
 def load_train_conf(confyaml):
