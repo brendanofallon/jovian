@@ -568,6 +568,7 @@ def train_epochs(epochs,
         pass
 
     if model_dest is not None:
+        modelparts = str(model_dest).rsplit(".", maxsplit=1)
         logger.info(f"Saving model state dict to {model_dest}")
         m = model.module if isinstance(model, nn.DataParallel) else model
         torch.save(m.to('cpu').state_dict(), model_dest)
