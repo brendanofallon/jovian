@@ -35,8 +35,8 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_abitbigger_cont1"
-RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation after epoch 2"
+RUN_NAME="wgs_abitbigger_cont3"
+RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation after epoch 1 of round 3!"
 
 set -x
 
@@ -59,7 +59,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-# export ENABLE_WANDB=1
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
@@ -69,9 +69,9 @@ $PYTHON $ds2s train \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    --threads 8 \
-    --max-decomp-batches 8 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_abitbigger/wgs_abitbigger_epoch1.model \
+    --threads 4 \
+    --max-decomp-batches 4 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont2/wgs_abitbigger_cont2_epoch1.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
