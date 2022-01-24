@@ -59,7 +59,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+#export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
