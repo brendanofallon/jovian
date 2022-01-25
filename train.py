@@ -327,10 +327,10 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 4
-    encoder_layers = 6
+    attention_heads = 8
     transformer_dim = 400
-    embed_dim_factor = 125
+    encoder_layers = 8
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=4,
@@ -558,15 +558,27 @@ def train_epochs(epochs,
                 logger.info(f"Saving model state dict to {checkpoint_name}")
                 m = model.module if isinstance(model, nn.DataParallel) else model
                 torch.save(m.state_dict(), checkpoint_name)
+                scripted_filename = modelparts[0] + f"_epoch{epoch}.pt"
+                logger.info(f"Saving scripted model to {scripted_filename}")
+                model_scripted = torch.jit.script(m)
+                model_scripted.save(scripted_filename)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
         pass
 
     if model_dest is not None:
+        modelparts = str(model_dest).rsplit(".", maxsplit=1)
         logger.info(f"Saving model state dict to {model_dest}")
         m = model.module if isinstance(model, nn.DataParallel) else model
         torch.save(m.to('cpu').state_dict(), model_dest)
+        scripted_filename = modelparts[0] + f"_final.pt"
+        logger.info(f"Saving scripted model to {scripted_filename}")
+        try:
+            model_scripted = torch.jit.script(m)
+            model_scripted.save(scripted_filename)
+        except Exception as ex:
+            logger.warn(f"Error saving scripted module!\n{ex}\nContinuing on with saving scripted version...")
 
 
 def load_train_conf(confyaml):
@@ -670,24 +682,11 @@ def train(config, output_model, input_model, epochs, **kwargs):
         
         dataloader = pregenloader
 
-        # If you want to use data augmentation, you need to pass options with '--data-augmentation" parameter during training, default is no augmentation.
-        data_augmentation = conf['data_augmentation'] if 'data_augmentation' in conf else kwargs.get("data_augmentation")
-        logger.info(f"Data augmentation steps provided are: {data_augmentation}")
-        if data_augmentation is not None and len(data_augmentation) != 0:
-            data_aug_options = ['shuffling', 'shortening', 'downsampling']
-            if not all(x in data_aug_options for x in data_augmentation) :
-                raise ValueError("Expected one of these options: ['shortening', 'shuffling', 'downsampling'],"
-                                 f"Instead found this {data_augmentation}")
-            else:
-                fraction_to_augment = conf['fraction_to_augment'] if "fraction_to_augment" in conf else kwargs.get("fraction_to_augment")
-                logger.info(f"Fraction to augment used is: {fraction_to_augment}")
-                if "shortening" in data_augmentation:
-                    dataloader = loader.ShorteningLoader(dataloader, seq_len=150, fraction_to_augment=fraction_to_augment)
-                if "shuffling" in data_augmentation:
-                    dataloader = loader.ShufflingLoader(dataloader, fraction_to_augment=fraction_to_augment)
-                if "downsampling" in data_augmentation:
-                    dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01, fraction_to_augment=fraction_to_augment)
-
+        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
+        if kwargs.get("data_augmentation"):
+            #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
+            dataloader = loader.ShufflingLoader(dataloader)
+            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")

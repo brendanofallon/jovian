@@ -8,7 +8,6 @@
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 
 
-module load cuda/11.3
 
 # Cant activate a conda env non-interactively, so just set the  python binary
 # to the right spot - seems to work
@@ -16,14 +15,15 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
 ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
 
-#CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/conf_nochr20_21_tns.yaml
+#CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/multindel_novaav_conf.yaml
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_conf.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_confvpc_tns/
 
-VALS_PER_CLASS=500
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_multindel_nochr21or22_morelc/
+
+BATCH_SIZE=128
 
 mkdir -p $DEST
 
-$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 10 --vals-per-class $VALS_PER_CLASS > $DEST/stdout.log 
+$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 16 --batch-size $BATCH_SIZE > $DEST/stdout.log 
 
