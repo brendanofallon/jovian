@@ -574,8 +574,11 @@ def train_epochs(epochs,
         torch.save(m.to('cpu').state_dict(), model_dest)
         scripted_filename = modelparts[0] + f"_final.pt"
         logger.info(f"Saving scripted model to {scripted_filename}")
-        model_scripted = torch.jit.script(m)
-        model_scripted.save(scripted_filename)
+        try:
+            model_scripted = torch.jit.script(m)
+            model_scripted.save(scripted_filename)
+        except Exception as ex:
+            logger.warn(f"Error saving scripted module!\n{ex}\nContinuing on with saving scripted version...")
 
 
 def load_train_conf(confyaml):
