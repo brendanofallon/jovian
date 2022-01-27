@@ -5,7 +5,7 @@
 #SBATCH --time=2-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="v100|3090"
+#SBATCH --gres=gpu:1 --constraint="a100|3090"
 
 
 
@@ -35,7 +35,7 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_50m"
+RUN_NAME="wgs_50m_2"
 RUN_NOTES="WGS with 50M param model"
 
 set -x

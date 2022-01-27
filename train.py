@@ -559,9 +559,9 @@ def train_epochs(epochs,
                 m = model.module if isinstance(model, nn.DataParallel) else model
                 torch.save(m.state_dict(), checkpoint_name)
                 scripted_filename = modelparts[0] + f"_epoch{epoch}.pt"
-                logger.info(f"Saving scripted model to {scripted_filename}")
-                model_scripted = torch.jit.script(m)
-                model_scripted.save(scripted_filename)
+                #logger.info(f"Saving scripted model to {scripted_filename}")
+                #model_scripted = torch.jit.script(m)
+                #model_scripted.save(scripted_filename)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
