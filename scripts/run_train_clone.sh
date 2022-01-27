@@ -35,8 +35,8 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_50m_2"
-RUN_NOTES="WGS with 50M param model"
+RUN_NAME="wgs_50m_2_cont"
+RUN_NOTES="WGS with 50M param model, continuation after epoch 0"
 
 set -x
 
@@ -71,6 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_50m_2/wgs_50m_2_epoch0.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
