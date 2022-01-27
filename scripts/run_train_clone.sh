@@ -35,8 +35,8 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_abitbigger_cont3"
-RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation after epoch 1 of round 3!"
+RUN_NAME="wgs_abitbigger_cont4.1"
+RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation again..."
 
 set -x
 
@@ -71,7 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 4 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont2/wgs_abitbigger_cont2_epoch1.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont4/wgs_abitbigger_cont4_epoch0.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
