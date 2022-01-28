@@ -144,7 +144,20 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
     logger.info(f"Loading model from path {model_path}")
-    model = torch.jit.load(model_path)
+
+    attention_heads = 8
+    encoder_layers = 8
+    transformer_dim = 400
+    embed_dim_factor = 100
+    model = VarTransformer(read_depth=100,
+                              feature_count=9,
+                              out_dim=4,
+                              embed_dim_factor=embed_dim_factor,
+                              nhead=attention_heads,
+                              d_hid=transformer_dim,
+                              n_encoder_layers=encoder_layers,
+                              device='cpu')
+    model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()
 
 
@@ -227,8 +240,6 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
     return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], start
 
 
-
-
 def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
@@ -309,6 +320,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
 
     # Return all vars even if they occur only once?
     return allvars0, allvars1
+
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
