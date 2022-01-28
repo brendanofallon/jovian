@@ -9,8 +9,8 @@ from pygit2 import Repository
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
-
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,19 @@ class TrainLogger:
             ",".join(str(items[k]) for k in self.headers) + "\n"
         )
         self._flush_and_fsync()
+
+
+class LogCELoss(nn.CrossEntropyLoss):
+
+    def __init__(self, weight=None, size_average=None) -> None:
+        super(LogCELoss, self).__init__(weight, size_average, None, 'none')
+
+    def forward(self, input, target):
+        ce = F.cross_entropy(input, target, weight=self.weight,
+                             ignore_index=-100, reduction='none',
+                             label_smoothing=0)
+        mce = ce.mean(axis=-1)  # Mean of each item in batch
+        return mce.log().mean()
 
 
 def calc_time_sums(
@@ -121,7 +134,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         seq_preds = model(src)
         times["forward_pass"] = datetime.now()
 
-        if type(criterion) == nn.CrossEntropyLoss:
+        if type(criterion) == nn.CrossEntropyLoss or type(criterion) == LogCELoss:
             # Compute losses in both configurations, and use the best?
             #loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
             with torch.no_grad():
@@ -132,7 +145,8 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :]
 
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1).transpose(-1, -2), tgt_seq.flatten(start_dim=0, end_dim=1))
         else:
             with torch.no_grad():
                 idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0]*seq_preds.shape[1], step=2),
@@ -267,7 +281,7 @@ def calc_val_accuracy(loader, model, criterion):
             tot_samples += src.shape[0]
             seq_preds = model(src)
 
-            if type(criterion) == nn.CrossEntropyLoss:
+            if type(criterion) == nn.CrossEntropyLoss or type(criterion) == LogCELoss:
                 # Compute losses in both configurations, and use the best?
                 # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
 
@@ -327,10 +341,10 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 2
-    encoder_layers = 2
+    attention_heads = 4
     transformer_dim = 400
-    embed_dim_factor = 25
+    encoder_layers = 2
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=4,
@@ -354,7 +368,8 @@ def train_epochs(epochs,
 
     if lossfunc == 'ce':
         logger.info("Creating CrossEntropy loss function")
-        criterion = nn.CrossEntropyLoss()
+        # criterion = nn.CrossEntropyLoss()
+        criterion = LogCELoss()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     elif lossfunc == 'sw':
         gap_open_penalty = -5
@@ -559,22 +574,26 @@ def train_epochs(epochs,
                 m = model.module if isinstance(model, nn.DataParallel) else model
                 torch.save(m.state_dict(), checkpoint_name)
                 scripted_filename = modelparts[0] + f"_epoch{epoch}.pt"
-                logger.info(f"Saving scripted model to {scripted_filename}")
-                model_scripted = torch.jit.script(m)
-                model_scripted.save(scripted_filename)
+                #logger.info(f"Saving scripted model to {scripted_filename}")
+                #model_scripted = torch.jit.script(m)
+                #model_scripted.save(scripted_filename)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
         pass
 
     if model_dest is not None:
+        modelparts = str(model_dest).rsplit(".", maxsplit=1)
         logger.info(f"Saving model state dict to {model_dest}")
         m = model.module if isinstance(model, nn.DataParallel) else model
         torch.save(m.to('cpu').state_dict(), model_dest)
         scripted_filename = modelparts[0] + f"_final.pt"
         logger.info(f"Saving scripted model to {scripted_filename}")
-        model_scripted = torch.jit.script(m)
-        model_scripted.save(scripted_filename)
+        try:
+            model_scripted = torch.jit.script(m)
+            model_scripted.save(scripted_filename)
+        except Exception as ex:
+            logger.warn(f"Error saving scripted module!\n{ex}\nContinuing on with saving scripted version...")
 
 
 def load_train_conf(confyaml):
@@ -678,24 +697,11 @@ def train(config, output_model, input_model, epochs, **kwargs):
         
         dataloader = pregenloader
 
-        # If you want to use data augmentation, you need to pass options with '--data-augmentation" parameter during training, default is no augmentation.
-        data_augmentation = conf['data_augmentation'] if 'data_augmentation' in conf else kwargs.get("data_augmentation")
-        logger.info(f"Data augmentation steps provided are: {data_augmentation}")
-        if data_augmentation is not None and len(data_augmentation) != 0:
-            data_aug_options = ['shuffling', 'shortening', 'downsampling']
-            if not all(x in data_aug_options for x in data_augmentation) :
-                raise ValueError("Expected one of these options: ['shortening', 'shuffling', 'downsampling'],"
-                                 f"Instead found this {data_augmentation}")
-            else:
-                fraction_to_augment = conf['fraction_to_augment'] if "fraction_to_augment" in conf else kwargs.get("fraction_to_augment")
-                logger.info(f"Fraction to augment used is: {fraction_to_augment}")
-                if "shortening" in data_augmentation:
-                    dataloader = loader.ShorteningLoader(dataloader, seq_len=150, fraction_to_augment=fraction_to_augment)
-                if "shuffling" in data_augmentation:
-                    dataloader = loader.ShufflingLoader(dataloader, fraction_to_augment=fraction_to_augment)
-                if "downsampling" in data_augmentation:
-                    dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01, fraction_to_augment=fraction_to_augment)
-
+        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
+        if kwargs.get("data_augmentation"):
+            #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
+            dataloader = loader.ShufflingLoader(dataloader)
+            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")

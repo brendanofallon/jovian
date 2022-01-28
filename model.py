@@ -102,12 +102,6 @@ class VarTransformer(nn.Module):
         self.device=device
         self.embed_dim = nhead * embed_dim_factor
         self.fc1_hidden = 12
-        # self.conv_out_channels = 10
-        #
-        # self.conv1 = nn.Conv2d(in_channels=feature_count + 1,
-        #                        out_channels=self.conv_out_channels,
-        #                        kernel_size=(1, 10),
-        #                        padding='same')
 
         self.fc1 = nn.Linear(feature_count + 1, self.fc1_hidden)
         self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
@@ -124,7 +118,6 @@ class VarTransformer(nn.Module):
         # r contains a 1 if the read base matches the reference base, 0 otherwise
         r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
         src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
-
 
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
