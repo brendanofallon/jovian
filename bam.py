@@ -13,6 +13,46 @@ logger = logging.getLogger(__name__)
 
 EMPTY_TENSOR = torch.zeros(9)
 
+
+class RefRead:
+
+    def __init__(self, seq, start):
+        self.seq = seq
+        self.start = start
+
+    @property
+    def reference_start(self):
+        return self.start
+
+    @property
+    def reference_end(self):
+        return self.start + len(self.seq)
+
+    @property
+    def cigartuples(self):
+        return [(0, len(self.seq))]
+
+    @property
+    def query_sequence(self):
+        return self.seq
+
+    @property
+    def query_qualities(self):
+        return [50] * len(self.seq)
+
+    @property
+    def query_alignment_start(self):
+        return self.start
+
+    @property
+    def query_length(self):
+        return len(self.seq)
+
+    @property
+    def is_reverse(self):
+        return False
+
+
 class MockRead:
 
     def __init__(self, bases, quals, start, end, cigartups):
@@ -182,7 +222,6 @@ def iterate_bases(rec):
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
-        readpos = i/150 if not rec.is_reverse else 1.0 - i/150
         yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
@@ -202,6 +241,20 @@ def rec_tensor_it(read, minref):
 
     try:
         for t in iterate_bases(read):
+            yield t
+    except StopIteration:
+        pass
+
+    while True:
+        yield EMPTY_TENSOR, True
+
+
+def cig_tensor_it(read, minref):
+    for i in range(alnstart(read) - minref):
+        yield EMPTY_TENSOR, True
+
+    try:
+        for t in iterate_cigar(read):
             yield t
     except StopIteration:
         pass
@@ -237,6 +290,50 @@ def _consume_n(it, n):
     for i in range(n):
         yield next(it)
 
+
+def encode_pileup_expanded(reads):
+    """
+    Convert a list of reads (pysam VariantRecords) into a single tensor
+    :param reads: List of pysam VariantRecords
+    :return: Tensor with shape [position, read, features]
+    """
+    minref = min(alnstart(r) for r in reads)
+    maxref = max(alnstart(r) + r.query_length for r in reads)
+    its = [cig_tensor_it(r, minref) for r in reads]
+    refpos = minref
+    pos_tensors = [next(it) for it in its]
+    everything = []
+    total_positions = 0
+    alldone = False
+    while not alldone:
+        total_positions += 1
+        any_insertion = any(not r[1] for r in pos_tensors)  # r[1] is True if ref is consumed (which implies no insertion)
+        thispos = []
+        # if any_insertion:
+        #     print(f"Found insertion(s) at refpos {refpos} in reads " + ",".join(str(i) for i,r in enumerate(pos_tensors) if not r[1]))
+        while any_insertion:
+            for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
+                if not pos_tensor[1]:
+                    thispos.append(pos_tensor[0])
+                    pos_tensors[i] = next(it)
+                else:
+                    thispos.append(EMPTY_TENSOR)
+
+            any_insertion = any(not r[1] for r in pos_tensors)
+            assert len(thispos) == len(pos_tensors), "Yikes, this pos somehow has more entries than pos_tensors"
+            all_stacked = torch.stack(thispos)
+            thispos = []
+            everything.append(all_stacked)
+
+        thispos = []
+        refpos += 1
+        for i, (it, pos_tensor) in enumerate(zip(its, pos_tensors)):
+            thispos.append(pos_tensor[0])
+            pos_tensors[i] = next(it)
+        all_stacked = torch.stack(thispos)
+        everything.append(all_stacked)
+        alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
+    return torch.stack(everything)
 
 def encode_pileup3(reads, start, end):
     """
@@ -317,12 +414,16 @@ def reads_spanning_range(bam, chrom, start, end):
     """
     bamit = bam.fetch(chrom, start - 10)
     reads = []
+    count = 0
     try:
         read = next(bamit)
         while read.reference_start < end:
             if read.reference_end is not None and read.reference_end > start:
                 reads.append(read)
+            count += 1
             read = next(bamit)
+            if count > 5000:
+                print("wha?")
     except StopIteration:
         pass
     return reads
@@ -377,9 +478,14 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         reads = util.sortreads(reads)
         minref = min(alnstart(r) for r in reads)
         maxref = max(alnstart(r) + r.query_length for r in reads)
-        reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-        refseq = refgenome.fetch(chrom, minref, maxref)
-        ref_encoded = string_to_tensor(refseq)
-        encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
+        # reads_encoded, _ = encode_pileup3(reads, minref, maxref)
+        # refseq = refgenome.fetch(chrom, minref, maxref)
+        # ref_encoded = string_to_tensor(refseq)
+        # encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
+
+        refread = RefRead(refgenome.fetch(chrom, minref, maxref), minref)
+        read_w_ref = [refread] + reads
+        encoded_with_ref = encode_pileup_expanded(read_w_ref)
+
 
         yield encoded_with_ref, (minref, maxref)
