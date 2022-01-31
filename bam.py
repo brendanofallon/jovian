@@ -52,6 +52,10 @@ class RefRead:
     def is_reverse(self):
         return False
 
+    @property
+    def query_name(self):
+        return "refread"
+
 
 class MockRead:
 
@@ -250,6 +254,9 @@ def rec_tensor_it(read, minref):
 
 
 def cig_tensor_it(read, minref):
+    """
+    This version expands out deletions
+    """
     for i in range(alnstart(read) - minref):
         yield EMPTY_TENSOR, True
 
@@ -335,6 +342,7 @@ def encode_pileup_expanded(reads):
         alldone = refpos > maxref and all(t.sum() == 0 for t in thispos)
     return torch.stack(everything)
 
+
 def encode_pileup3(reads, start, end):
     """
     Convert a list of reads (pysam VariantRecords) into a single tensor
@@ -344,20 +352,17 @@ def encode_pileup3(reads, start, end):
     :param end: Genomic end coordinate
     :return: Tensor with shape [position, read, features]
     """
-    # minref = min(alnstart(r) for r in reads)
-    # maxref = max(alnstart(r) + r.query_length for r in reads)
-    isalt = ["alt" in r.query_name for r in reads]
     everything = []
     for readnum, read in enumerate(reads):
         try:
-            readencoded = [enc.char() for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
+            readencoded = [enc.char() for enc, refconsumed in _consume_n(cig_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))
         except Exception as ex:
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")
             traceback.print_exception(type(ex), ex, ex.__traceback__)
             raise ex
 
-    return torch.stack(everything).transpose(0,1), torch.tensor(isalt)
+    return torch.stack(everything).transpose(0,1)
 
 
 def ensure_dim(readtensor, seqdim, readdim):
@@ -422,8 +427,6 @@ def reads_spanning_range(bam, chrom, start, end):
                 reads.append(read)
             count += 1
             read = next(bamit)
-            if count > 5000:
-                print("wha?")
     except StopIteration:
         pass
     return reads
@@ -478,14 +481,9 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         reads = util.sortreads(reads)
         minref = min(alnstart(r) for r in reads)
         maxref = max(alnstart(r) + r.query_length for r in reads)
-        # reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-        # refseq = refgenome.fetch(chrom, minref, maxref)
-        # ref_encoded = string_to_tensor(refseq)
-        # encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
         refread = RefRead(refgenome.fetch(chrom, minref, maxref), minref)
         read_w_ref = [refread] + reads
-        encoded_with_ref = encode_pileup_expanded(read_w_ref)
-
+        encoded_with_ref = encode_pileup3(read_w_ref, minref, maxref)
 
         yield encoded_with_ref, (minref, maxref)
