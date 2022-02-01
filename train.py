@@ -261,6 +261,7 @@ def calc_val_accuracy(loader, model, criterion):
         var_counts_sum1 = 0
         tot_samples = 0
         total_batches = 0
+        loss_tot = 0
         for src, tgt, vaf, *_ in loader.iter_once(64):
 
             total_batches += 1
@@ -279,7 +280,7 @@ def calc_val_accuracy(loader, model, criterion):
 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
-
+                loss_tot += criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt.flatten()).item()
             else:
                 idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0] * seq_preds.shape[1], step=2),
                                    torch.arange(start=1, end=seq_preds.shape[0] * seq_preds.shape[1],
@@ -309,7 +310,8 @@ def calc_val_accuracy(loader, model, criterion):
             match_sum1 / total_batches,
             var_counts_sum0 / tot_samples,
             var_counts_sum1 / tot_samples,
-            result_totals0, result_totals1)
+            result_totals0, result_totals1,
+            loss_tot)
 
 
 def train_epochs(epochs,
@@ -447,7 +449,7 @@ def train_epochs(epochs,
 
             elapsed = datetime.now() - starttime
 
-            acc0, acc1, var_count0, var_count1, results0, results1 = calc_val_accuracy(val_loader, model, criterion)
+            acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
 
             try:
                 ppa_dels = (results0['del']['tp'] + results1['del']['tp']) / (results0['del']['tp'] + results1['del']['tp'] + results0['del']['fn'] + results1['del']['fn'])
@@ -498,6 +500,7 @@ def train_epochs(epochs,
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
+                    "validation_loss": val_loss,
                     "train_acc_hap0": train_acc0,
                     "train_acc_hap1": train_acc1,
                     "accuracy/val_acc_hap0": acc0,
@@ -558,10 +561,6 @@ def train_epochs(epochs,
                 logger.info(f"Saving model state dict to {checkpoint_name}")
                 m = model.module if isinstance(model, nn.DataParallel) else model
                 torch.save(m.state_dict(), checkpoint_name)
-                scripted_filename = modelparts[0] + f"_epoch{epoch}.pt"
-                #logger.info(f"Saving scripted model to {scripted_filename}")
-                #model_scripted = torch.jit.script(m)
-                #model_scripted.save(scripted_filename)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:

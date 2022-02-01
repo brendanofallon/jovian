@@ -144,7 +144,20 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
     logger.info(f"Loading model from path {model_path}")
-    model = torch.jit.load(model_path)
+
+    attention_heads = 8
+    encoder_layers = 8
+    transformer_dim = 400
+    embed_dim_factor = 100
+    model = VarTransformer(read_depth=100,
+                              feature_count=9,
+                              out_dim=4,
+                              embed_dim_factor=embed_dim_factor,
+                              nhead=attention_heads,
+                              d_hid=transformer_dim,
+                              n_encoder_layers=encoder_layers,
+                              device='cpu')
+    model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()
 
 
