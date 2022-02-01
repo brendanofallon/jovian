@@ -75,12 +75,12 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped):
+def encode_basecall(base, qual, is_del, is_ins, strand, clipped):
     ebc = torch.zeros(9).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
     ebc = update_from_base(base, ebc)
     ebc[4] = int(round(qual / 10))
-    ebc[5] = consumes_ref_base # Consumes a base on reference seq - which means not insertion
-    ebc[6] = consumes_read_base # Consumes a base on read - so not a deletion
+    ebc[5] = is_del # Deleted relative to reference genome
+    ebc[6] = is_ins # Inserted relative to reference
     ebc[7] = 1 if strand else 0
     ebc[8] = 1 if clipped else 0
     return ebc
@@ -178,12 +178,14 @@ def iterate_bases(rec):
     cig_index = 0
     n_bases_cigop = cigtups[cig_index][1]
     cigop = cigtups[cig_index][0]
-    is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
-    is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
+    # is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
+    # is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
+    is_del = cigop in {2, }
+    is_ins = cigop in {1, 3}
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
-        readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
+        # readpos = i/150 if not rec.is_reverse else 1.0 - i/150
+        yield encode_basecall(base, qual, is_del, is_ins, rec.is_reverse, is_clipped), None
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -191,8 +193,10 @@ def iterate_bases(rec):
                 break
             n_bases_cigop = cigtups[cig_index][1]
             cigop = cigtups[cig_index][0]
-            is_ref_consumed = cigop in {0, 2, 4, 5, 7}
-            is_seq_consumed = cigop in {0, 1, 3, 4, 7}
+            # is_ref_consumed = cigop in {0, 2, 4, 5, 7}
+            # is_seq_consumed = cigop in {0, 1, 3, 4, 7}
+            is_del = cigop in {2, }
+            is_ins = cigop in {1, 3}
             is_clipped = cigop in {4, 5}
 
 
