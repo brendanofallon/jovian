@@ -322,7 +322,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         for var in het_vcfvars:
             vcfvars[var].phased = True
 
-    return vcfvars
+    return vcfvars.values()
 
 
 def init_vcf(path, sample_name="sample", lowcov=30):
@@ -409,7 +409,7 @@ def create_vcf_rec(var, vcf_file):
     :return:
     """
     # Create record
-    vcf_filter = var["filter"] if var["filter"] else "PASS"
+    vcf_filter = var.filter if var.filter else "PASS"
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
                        alleles=(var.ref, var.alt), filter=vcf_filter, qual=var.qual)
     # Set FORMAT values

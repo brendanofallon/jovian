@@ -2,6 +2,7 @@
 import logging
 from collections import defaultdict
 import random
+from tqdm import tqdm
 
 import torch
 import pysam
@@ -10,7 +11,7 @@ import pyranges as pr
 from model import VarTransformer
 import vcf
 import util
-from bam import reads_spanning_range, alnstart
+import bam
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ def gen_suspicious_spots(aln, chrom, start, stop, refseq):
                 if indel_count > 1 or base_mismatches > 2:
                     yield col.reference_pos
                     break
+
 
 def bed_to_windows(pr_bed, bed_slack=0, window_spacing=1000, window_overlap=0):
     """
@@ -126,6 +128,7 @@ def reconcile_current_window(prev_win, current_win):
             current_win[var].duplicate = True
     return current_win
 
+
 def load_model(model_path):
     logger.info(f"Loading model from path {model_path}")
     attention_heads = 4
@@ -149,12 +152,13 @@ def read_bed_regions(bedpath):
     """
     Generate chrom, start, end regions from a BED formatted file
     """
-    for line in bedpath:
-        line = line.strip()
-        if len(line) == 0 or line.startswith("#"):
-            continue
-        toks = line.split("\t")
-        yield toks[0], int(toks[1]), int(toks[2])
+    with open(bedpath) as fh:
+        for line in fh:
+            line = line.strip()
+            if len(line) == 0 or line.startswith("#"):
+                continue
+            toks = line.split("\t")
+            yield toks[0], int(toks[1]), int(toks[2])
 
 
 def split_large_regions(regions, max_region_size):
@@ -217,12 +221,14 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=30)
 
     #  Iterate over the input BED file, splitting larger regions into chunks of at most 'max_region_size'
-    for i, (chrom, start, end) in enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000)):
-        refseq = reference.fetch(chrom, start, end)
+    for i, (chrom, window_start, window_end) in tqdm(enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000))):
+        logger.info(f"Processing {chrom}:{window_start}-{window_end}")
+        refseq = reference.fetch(chrom, window_start, window_end)
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
         # For each range, run the variant calling procedure in a sliding window
-        for start, end in cluster_positions(gen_suspicious_spots(aln, chrom, start, end, refseq)):
+        for start, end in cluster_positions(gen_suspicious_spots(aln, chrom, window_start, window_end, refseq), maxdist=500):
+            logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
                                                      chrom, start, end,
                                                      max_read_depth,
@@ -241,20 +247,20 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
     Call variants in a region of a BAM file using the given altpredictor and model
     and return a list of vcf.Variant objects
     """
-    reads = reads_spanning_range(aln, chrom, start, end)
+    reads = bam.reads_spanning_range(aln, chrom, start, end)
     if len(reads) < min_reads:
         raise LowReadCountException(f"Hmm, couldn't find {min_reads} reads spanning {chrom}:{start}-{end}")
     if len(reads) > max_read_depth:
         reads = random.sample(reads, max_read_depth)
     reads = util.sortreads(reads)
-    minref = min(alnstart(r) for r in reads)
-    maxref = max(alnstart(r) + r.query_length for r in reads)
-    reads_encoded, _ = encode_pileup3(reads, minref, maxref)
+    minref = min(bam.alnstart(r) for r in reads)
+    maxref = max(bam.alnstart(r) + r.query_length for r in reads)
+    reads_encoded, _ = bam.encode_pileup3(reads, minref, maxref)
 
     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
-    reftensor = string_to_tensor(refseq)
+    reftensor = bam.string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
-    padded_reads = ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
+    padded_reads = bam.ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
     midstart = max(0, start - minref)
     midend = midstart + window_width
 
@@ -288,7 +294,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     step_count = 0  # initialize
     while window_start <= (end - window_step):
-        logger.info(f"Calling in {window_start} - {window_start + window_size}")
+        # logger.info(f"Calling in {window_start} - {window_start + window_size}")
         # call vars
         try:
             hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
