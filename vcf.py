@@ -432,13 +432,14 @@ def create_vcf_rec(var, vcf_file):
     return r
 
 
-def vars_to_vcf(vcf_file, pr_vars):
+def vars_to_vcf(vcf_file, variants):
     """
     create variant records from pyranges variant table and write all to pysam VariantFile
     :param vcf_file:
-    :param pr_vars:
+    :param pr_vars: List of variants to write
     :return: None
     """
-    for i, var in pr_vars.df.iterrows():
+    for var in variants:
         r = create_vcf_rec(var, vcf_file)
         vcf_file.write(r)
+
