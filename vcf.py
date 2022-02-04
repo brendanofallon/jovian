@@ -13,7 +13,6 @@ class Variant:
     hap_model: int = None
     step: int = None
 
-
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
 

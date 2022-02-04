@@ -53,40 +53,48 @@ class ReadWindow:
         self.aln = aln
         self.start = start
         self.end = end
+        self.margin_size = 150 # Should be about a read length
         self.chrom = chrom
         self.cache = ReadCache()  # Cache for encoded reads
-        self.bypos = self._fill()
+        self.bypos = self._fill() # Maps read start positions to actual reads
 
     def _fill(self):
         bypos = defaultdict(list)
-        for i, read in enumerate(self.aln.fetch(self.chrom, self.start, self.end)):
+        for i, read in enumerate(self.aln.fetch(self.chrom, self.start - self.margin_size, self.end)):
             if read is not None:
                 bypos[alnstart(read)].append(read)
         return bypos
 
-    def get_window(self, start, end, max_reads):
-        assert self.start <= start < end, f"Start coordinate must be between beginning and end of window"
-        assert self.start < end <= end, f"End coordinate must be between beginning and end of window"
+    def get_window(self, start, end, max_reads, downsample_read_count=None):
+        assert self.start <= start < self.end, f"Start coordinate must be between beginning and end of window"
+        assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window"
         allreads = []
-        for p in range(start, end):
-            reads = self.bypos[p]
+        for pos in range(start - self.margin_size, end):
+            reads = self.bypos[pos]
             for read in reads:
-                allreads.append((p, read))
+                if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
+                    continue
+                allreads.append((pos, read))
 
-        if len(allreads) > max_reads:
-            allreads = random.sample(allreads, max_reads)
+        assert len(allreads) > 0, f"Couldn't find any reads in region {start}-{end}"
+        if downsample_read_count:
+            num_reads_to_sample = downsample_read_count
+        else:
+            num_reads_to_sample = max_reads
+        if len(allreads) > num_reads_to_sample:
+            allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
-        t = torch.zeros(end-start, len(allreads), 9)
+        t = torch.zeros(end-start, max_reads, 9)
 
-        for i, (p, read) in enumerate(allreads):
+        for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
-            enc_start_offset = max(0, start - read.reference_start)
-            enc_end_offset = min(t.shape[0], (read.reference_start + encoded.shape[0]) - end)
-            t[p-start:p-start+(enc_end_offset - enc_start_offset), i, :] = encoded[enc_start_offset:enc_end_offset]
+            enc_start_offset = max(0,  start - readstart)
+            enc_end_offset = min(encoded.shape[0], t.shape[0] - (readstart - start))
+            t_start_offset = max(0, readstart - start)
+            t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
+            t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]
 
         return t
-
-
 
 
 def encode_read(read, prepad=0, tot_length=None):
@@ -234,6 +242,8 @@ def iterate_bases(rec):
     :return: Generator for encoded base calls
     """
     cigtups = rec.cigartuples
+    if cigtups is None:
+        cigtups = [(0, len(rec.query_sequence))]
     bases = rec.query_sequence
     quals = rec.query_qualities
     cig_index = 0
@@ -430,25 +440,23 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         num_samples = max(1, len(allreads) // maxreads)
         # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
     logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
+    readwindow = ReadWindow(bam, chrom, start, end)
     for i in range(num_samples):
         reads_to_sample = maxreads
         if np.random.rand() < downsample_frac:
             reads_to_sample = maxreads // 2
-        reads = random.sample(allreads, min(len(allreads), reads_to_sample))
-        reads = util.sortreads(reads)
-        minref = min(alnstart(r) for r in reads)
-        maxref = max(alnstart(r) + r.query_length for r in reads)
-        reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-        refseq = refgenome.fetch(chrom, minref, maxref)
+        reads_encoded = readwindow.get_window(start, end, max_reads=maxreads, downsample_read_count=reads_to_sample)
+        refseq = refgenome.fetch(chrom, start, end)
         ref_encoded = string_to_tensor(refseq)
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
-        yield encoded_with_ref, (minref, maxref)
+        yield encoded_with_ref, (start, end)
 
 
 if __name__=="__main__":
     aln = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram",
                               reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    rw = ReadWindow(aln, "21", 35914884, 35915068)
-    t = rw.get_window(35914900, 35915000, max_reads=100)
+    rw = ReadWindow(aln, "21", 34914500, 34915268)
+    t = rw.get_window(34914620, 34914720, max_reads=100)
     print(t.shape)
+    print(util.to_pileup(t))
