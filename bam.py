@@ -457,6 +457,6 @@ if __name__=="__main__":
     aln = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram",
                               reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
     rw = ReadWindow(aln, "21", 34914500, 34915268)
-    t = rw.get_window(34914620, 34914720, max_reads=100)
+    t = rw.get_window(34914630, 34914730, max_reads=100)
     print(t.shape)
     print(util.to_pileup(t))
