@@ -2,7 +2,6 @@
 import logging
 from collections import defaultdict
 import random
-from tqdm import tqdm
 
 import torch
 import pysam
@@ -145,6 +144,7 @@ def load_model(model_path):
                            device=DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()
+    model.to(DEVICE)
     return model
 
 
@@ -216,18 +216,18 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
 
     model = load_model(model_path)
     reference = pysam.FastaFile(reference_fasta)
-    aln = pysam.AlignmentFile(bam)
+    aln = pysam.AlignmentFile(bam, reference_filename=reference_fasta)
 
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=30)
 
     #  Iterate over the input BED file, splitting larger regions into chunks of at most 'max_region_size'
-    for i, (chrom, window_start, window_end) in tqdm(enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000))):
+    for i, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000)):
         logger.info(f"Processing {chrom}:{window_start}-{window_end}")
         refseq = reference.fetch(chrom, window_start, window_end)
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
         # For each range, run the variant calling procedure in a sliding window
-        for start, end in cluster_positions(gen_suspicious_spots(aln, chrom, window_start, window_end, refseq), maxdist=500):
+        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=500):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
                                                      chrom, start, end,
@@ -301,8 +301,8 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
                                               max_read_depth=max_read_depth, min_reads=min_reads)
             hap0 = util.readstr(hap0_t)
             hap1 = util.readstr(hap1_t)
-            hap0_probs = hap0_t.detach().numpy().max(axis=-1)
-            hap1_probs = hap1_t.detach().numpy().max(axis=-1)
+            hap0_probs = hap0_t.detach().cpu().numpy().max(axis=-1)
+            hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
 
             refseq = reference.fetch(chrom, offset, offset + window_size)
             vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
