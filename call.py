@@ -237,7 +237,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
 
             vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
                              reference=reference)
-            vcf.vars_to_vcf(vcf_file, vcf_vars)
+            vcf.vars_to_vcf(vcf_file, sorted(vcf_vars, key=lambda x: x.pos))
 
     vcf_file.close()
 
@@ -344,11 +344,9 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
         window_start += window_step
         step_count += 1
 
-    # Old method, only return vars that are called multiple times
-    # hap0_passing = list(v[0] for k, v in allvars0.items() if len(v) > 1 and start < v[0].pos < end)
-    # hap1_passing = list(v[0] for k, v in allvars1.items() if len(v) > 1 and start < v[0].pos < end)
-    # return hap0_passing, hap1_passing
+    # Only return variants that are actually in the window
+    hap0_passing = {k: v for k, v in allvars0.items() if start < v[0].pos < end}
+    hap1_passing = {k: v for k, v in allvars1.items() if start < v[0].pos < end}
 
-    # Return all vars even if they occur only once?
-    return allvars0, allvars1
+    return hap0_passing, hap1_passing
 
