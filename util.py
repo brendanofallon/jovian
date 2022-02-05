@@ -167,3 +167,16 @@ def writeseqtensor(t):
             base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
         print(f"{base}", end="")
     print()
+
+def count_bases(bedpath):
+    """
+    Return total number of bases in a BED file
+    """
+    tot = 0
+    with open(bedpath) as fh:
+        for line in fh:
+            if len(line.strip())==0 or line.startswith("#"):
+                continue
+            toks = line.split("\t")
+            tot += int(toks[2]) - int(toks[1])
+    return tot

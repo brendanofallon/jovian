@@ -220,9 +220,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
 
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=30)
 
+    totbases = util.count_bases(bed)
+    bases_processed = 0 
     #  Iterate over the input BED file, splitting larger regions into chunks of at most 'max_region_size'
     for i, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000)):
-        logger.info(f"Processing {chrom}:{window_start}-{window_end}")
+        prog = bases_processed / totbases
+        logger.info(f"Processing {chrom}:{window_start}-{window_end}   [{100 * prog :.2f}%]")
         refseq = reference.fetch(chrom, window_start, window_end)
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
@@ -238,7 +241,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
             vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
                              reference=reference)
             vcf.vars_to_vcf(vcf_file, vcf_vars)
-
+        
+        bases_processed += window_end - window_start
     vcf_file.close()
 
 
