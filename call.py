@@ -298,7 +298,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     step_count = 0  # initialize
     while window_start <= (end - window_step):
-        # logger.info(f"Calling in {window_start} - {window_start + window_size}")
+        #logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
         # call vars
         try:
             hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
@@ -349,8 +349,8 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
         step_count += 1
 
     # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in allvars0.items() if start < v[0].pos < end}
-    hap1_passing = {k: v for k, v in allvars1.items() if start < v[0].pos < end}
-
+    hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
+    hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
+    #logger.warning(f"Only returning variants in {start} - {end}")
     return hap0_passing, hap1_passing
 
