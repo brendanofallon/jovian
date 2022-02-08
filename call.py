@@ -233,7 +233,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
         for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=500):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
-                                                     chrom, start, end,
+                                                     chrom, start-2, end+2,
                                                      max_read_depth,
                                                      window_size=300,
                                                      window_step=33)
@@ -298,7 +298,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     step_count = 0  # initialize
     while window_start <= (end - window_step):
-        #logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
+        logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
         # call vars
         try:
             hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
