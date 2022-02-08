@@ -338,6 +338,7 @@ def project_vars(variants, allele_indexes, ref_sequence, ref_offset):
     for var, allele_index in zip(variants, allele_indexes):
         trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
         vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
+        assert vref_start >= 0, f"Negative start coord for variant {var}!"
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
         displacement += len(valt) - len(vref)
@@ -452,8 +453,8 @@ def main():
 
 
     chrom = '21'
-    start = 20844437
-    end = 20844528
+    start = 15208465
+    end =   15208520
     variants = list(v for v in vcf.fetch(chrom, start, end))
 
     hap0, hap1 = gen_haplotypes(bam, ref, chrom, start, end, variants)
