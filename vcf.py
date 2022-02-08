@@ -300,7 +300,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         vcfvars_hap0[var].step_count = len(set(vcfvars_hap0[var].step_indexes))  # combine call counts in both haplotypes
         vcfvars_hap0[var].genotype = (1, 1)
         vcfvars_hap0[var].het = False
-        vcfvars_hap0[var].window_offset = [sorted(set(vcfvars_hap0[var].window_offset + vcfvars_hap1[var].window_offset))]
+        vcfvars_hap0[var].window_offset = sorted(set(vcfvars_hap0[var].window_offset + vcfvars_hap1[var].window_offset))
         # then remove from hap1 vars
         vcfvars_hap1.pop(var)
 
@@ -440,7 +440,7 @@ def create_vcf_rec(var, vcf_file):
     r.info['STEP_INDEXES'] = var.step_indexes
     r.info['CALL_COUNT'] = var.call_count
     r.info['STEP_COUNT'] = var.step_count
-    r.info['WIN_OFFSETS'] = var.window_offset
+    r.info['WIN_OFFSETS'] = [int(x) for x in var.window_offset]
     if var.duplicate:
         r.info['DUPLICATE'] = ()
     return r
