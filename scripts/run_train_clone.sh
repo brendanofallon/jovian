@@ -15,7 +15,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="master"
+GIT_BRANCH="25m"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -27,7 +27,7 @@ CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
 VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_multindel_nova_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_multindel_nova_nochr21or22
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_multindel_nochr21or22_multialtfix_bams
 
 
 
@@ -35,8 +35,8 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_abitbigger_cont4.1"
-RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation again..."
+RUN_NAME="wgs_abitbigger_cont5"
+RUN_NOTES="WGS with all BAM samples continued from wgs_abitbigger_4.1"
 
 set -x
 
@@ -59,7 +59,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-#export ENABLE_WANDB=1
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
@@ -69,9 +69,9 @@ $PYTHON $ds2s train \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    --threads 4 \
+    --threads 1 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont4/wgs_abitbigger_cont4_epoch0.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont4/wgs_abitbigger_cont4_epoch3.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
