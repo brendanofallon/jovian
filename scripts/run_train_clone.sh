@@ -2,7 +2,7 @@
 
 #SBATCH --account=notchpeak-gpu
 #SBATCH --partition=notchpeak-gpu
-#SBATCH --time=2-0
+#SBATCH --time=1-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 #SBATCH --gres=gpu:1 --constraint="v100|3090"
@@ -35,8 +35,8 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_abitbigger_cont5"
-RUN_NOTES="WGS with all BAM samples continued from wgs_abitbigger_4.1"
+RUN_NAME="wgs_abitbigger_cont6"
+RUN_NOTES="WGS with all BAM samples continued from wgs_abitbigger_cont5"
 
 set -x
 
@@ -71,7 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont4/wgs_abitbigger_cont4_epoch3.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont5/wgs_abitbigger_cont5_epoch2.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
