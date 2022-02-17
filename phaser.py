@@ -383,11 +383,8 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
 
     elif het_count == 1 and len(variants) > 1:
         # All homs except 1 het
-        hap0_indices = [0] * len(variants)
-        hap1_indices = [1] * len(variants)
-        if multialt_indices:
-            hap0_indices[multialt_indices[0]] = variants[multialt_indices[0]].samples[0]['GT'][0]
-            hap1_indices[multialt_indices[0]] = variants[multialt_indices[0]].samples[0]['GT'][1]
+        hap0_indices = [v.samples[0]['GT'][0] for v in variants]
+        hap1_indices = [v.samples[0]['GT'][1] for v in variants]
 
         hap0 = project_vars(variants,
                             hap0_indices,
@@ -453,8 +450,8 @@ def main():
 
 
     chrom = '21'
-    start = 15208465
-    end =   15208520
+    start = 20005685
+    end =   20005869
     variants = list(v for v in vcf.fetch(chrom, start, end))
 
     hap0, hap1 = gen_haplotypes(bam, ref, chrom, start, end, variants)
