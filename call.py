@@ -246,11 +246,14 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     vcf_file.close()
 
 
-def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
+def region_to_tensor(aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
     """
-    Call variants in a region of a BAM file using the given altpredictor and model
-    and return a list of vcf.Variant objects
+    Convert the reads in the given region into a tensor with appropriate padding, etc, suitable
+    for input into the model
+
+    :returns : Tensor of dimension [genomic position (window_width), read (max_read_depth), features (9)]
     """
+    assert window_width == (end - start), f"Cant handle window_with not being exactly end-start"
     reads = bam.reads_spanning_range(aln, chrom, start, end)
     if len(reads) < min_reads:
         raise LowReadCountException(f"Hmm, couldn't find {min_reads} reads spanning {chrom}:{start}-{end}")
@@ -265,16 +268,81 @@ def callvars(model, aln, reference, chrom, start, end, window_width, max_read_de
     reftensor = bam.string_to_tensor(refseq)
     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
     padded_reads = bam.ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
+
+    # TODO DOES THIS MAKE SENSE?? SEEMS LIKE IT DOESNT!
     midstart = max(0, start - minref)
     midend = midstart + window_width
 
     if padded_reads.shape[1] > window_width:
         padded_reads = padded_reads[:, midstart:midend, :, :]
+    return padded_reads
 
-    #masked_reads = padded_reads * fullmask
-    seq_preds = model(padded_reads.float().to(DEVICE))
-    return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], start
 
+# def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
+#     """
+#     Generate a tensor of the reads and then conduct a forward pass through the model
+#     and return a list of vcf.Variant objects
+#     """
+#     encodedreads = region_to_tensor(aln, reference, chrom, start, end, window_width, max_read_depth, min_reads)
+#     seq_preds = model(encodedreads.float().to(DEVICE))
+#     return seq_preds[0, 0, :, :], seq_preds[0, 1, :, :], start
+
+
+def call_batch(batch, batch_pos_offsets, model, reference, chrom, window_size):
+    """
+    Call variants in a batch (list) of regions, by running a forward pass of the model and
+    then aligning the predicted sequences to the reference genome and picking out any
+    mismatching parts
+    :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
+    """
+    logger.info(f"Forward pass of batch with size {len(batch)}")
+    encodedreads = torch.cat(batch, dim=0).to(DEVICE).float()
+    seq_preds = model(encodedreads)
+    calledvars = []
+    for b in range(seq_preds.shape[0]):
+        hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
+        offset = batch_pos_offsets[b]
+        hap0 = util.readstr(hap0_t)
+        hap1 = util.readstr(hap1_t)
+        hap0_probs = hap0_t.detach().cpu().numpy().max(axis=-1)
+        hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
+
+        refseq = reference.fetch(chrom, offset, offset + window_size)
+        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
+        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        calledvars.append((vars_hap0, vars_hap1))
+    return calledvars
+
+
+def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
+    for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
+        stepvars0 = {}
+        for v in vars_hap0:
+            if v.pos < (window_start + window_retain_size):
+                v.hap_model = 0
+                v.step = step_count
+                stepvars0[(v.pos, v.ref, v.alt)] = v
+        stepvars1 = {}
+        for v in vars_hap1:
+            if v.pos < (window_start + window_retain_size):
+                v.hap_model = 1
+                v.step = step_count
+                stepvars1[(v.pos, v.ref, v.alt)] = v
+
+        # swap haplotypes if supported by previous vars
+        same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
+        same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
+        opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
+        opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
+        if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
+            stepvars1, stepvars0 = stepvars0, stepvars1
+
+        # add this step's vars to allvars
+        [allvars0[key].append(v) for key, v in stepvars0.items()]
+        [allvars1[key].append(v) for key, v in stepvars1.items()]
+        step_count = step_count + 1
+
+    return allvars0, allvars1
 
 def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50):
     """
@@ -297,56 +365,37 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     allvars1 = defaultdict(list)
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     step_count = 0  # initialize
+    batch_size = 32
+    batch = []
+    batch_offsets = []
     while window_start <= (end - window_step):
         logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
-        # call vars
+        # Generate encoded reads and group them into batches for faster forward passes
         try:
-            hap0_t, hap1_t, offset = callvars(model, aln, reference, chrom, window_start, window_start + window_size, window_size,
-                                              max_read_depth=max_read_depth, min_reads=min_reads)
-            hap0 = util.readstr(hap0_t)
-            hap1 = util.readstr(hap1_t)
-            hap0_probs = hap0_t.detach().cpu().numpy().max(axis=-1)
-            hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
-
-            refseq = reference.fetch(chrom, offset, offset + window_size)
-            vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
-            vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+            enc_reads = region_to_tensor(aln, reference, chrom, window_start, window_start + window_size, window_size, max_read_depth, min_reads)
+            batch.append(enc_reads)
+            batch_offsets.append(window_start)
         except LowReadCountException:
             logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-            vars_hap0, vars_hap1 = [], []
 
-        # put vars into hap0 and hap1 dicts
-        stepvars0 = {}
-        for v in vars_hap0:
-            if v.pos < (window_start + var_retain_window_size):
-                v.hap_model = 0
-                v.step = step_count
-                stepvars0[(v.pos, v.ref, v.alt)] = v
-        stepvars1 = {}
-        for v in vars_hap1:
-            if v.pos < (window_start + var_retain_window_size):
-                v.hap_model = 1
-                v.step = step_count
-                stepvars1[(v.pos, v.ref, v.alt)] = v
-
-        # swap haplotypes if supported by previous vars
-        same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
-        same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
-        opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
-        opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
-        if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-            stepvars1, stepvars0 = stepvars0, stepvars1
-
-        # add this step's vars to allvars
-        [allvars0[key].append(v) for key, v in stepvars0.items()]
-        [allvars1[key].append(v) for key, v in stepvars1.items()]
+        if len(batch) > batch_size:
+            batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
+            batch = []
+            batch_offsets = []
+            allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count - len(batch), var_retain_window_size)
 
         # continue
         window_start += window_step
         step_count += 1
+
+    # Process any remaining items
+    if batch:
+        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
+        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count - len(batch),
+                                              var_retain_window_size)
 
     # Only return variants that are actually in the window
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
