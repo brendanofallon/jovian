@@ -14,7 +14,6 @@ class Variant:
     step: int = None
     window_offset: int = None
 
-
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
 
@@ -413,6 +412,15 @@ def init_vcf(path, sample_name="sample", lowcov=30):
     # write to new vcf file object
     return pysam.VariantFile(path, "w", header=vcfh)
 
+def prob_to_phred(p, max_qual=1000.0):
+    """
+    Convert a probability in 0..1 to phred scale
+    """
+    assert 0.0 <= p <= 1.0, f"Probability must be in [0, 1], but found {p}"
+    if p == 1.0:
+        return max_qual
+    else:
+        return min(max_qual, -10 * np.log10(1.0 - p))
 
 def create_vcf_rec(var, vcf_file):
     """
@@ -424,7 +432,7 @@ def create_vcf_rec(var, vcf_file):
     # Create record
     vcf_filter = var.filter if var.filter else "PASS"
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
-                       alleles=(var.ref, var.alt), filter=vcf_filter, qual=var.qual)
+                       alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
     r.samples['sample'].phased = var.phased  # note: need to set phased after setting genotype
@@ -445,12 +453,12 @@ def create_vcf_rec(var, vcf_file):
         r.info['DUPLICATE'] = ()
     return r
 
-
 def vars_to_vcf(vcf_file, variants):
     """
     create variant records from pyranges variant table and write all to pysam VariantFile
     :param vcf_file:
     :param pr_vars: List of variants to write
+
     :return: None
     """
     for var in variants:
