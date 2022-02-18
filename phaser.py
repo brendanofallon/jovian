@@ -361,7 +361,6 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
         return hap0, hap1
 
     het_count = sum(1 if len(set(v.samples[0]['GT']))>1 else 0 for v in variants )
-    multialt_indices = [i for i, v in enumerate(variants) if 2 in v.samples[0]['GT']]
 
     if het_count == 0:  # Every variant is homozygous
         hap_alt = project_vars(variants,
