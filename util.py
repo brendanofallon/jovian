@@ -74,7 +74,8 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
     return pairs
 
 def tensor_from_lz4(path, device):
-    return torch.load(io.BytesIO(lz4.frame.decompress(path)), map_location=device)
+    with io.BytesIO(lz4.frame.decompress(path)) as bfh:
+        return torch.load(bfh, map_location=device)
 
 
 def tensor_from_gzip(path, device):
@@ -166,3 +167,16 @@ def writeseqtensor(t):
             base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
         print(f"{base}", end="")
     print()
+
+def count_bases(bedpath):
+    """
+    Return total number of bases in a BED file
+    """
+    tot = 0
+    with open(bedpath) as fh:
+        for line in fh:
+            if len(line.strip())==0 or line.startswith("#"):
+                continue
+            toks = line.split("\t")
+            tot += int(toks[2]) - int(toks[1])
+    return tot

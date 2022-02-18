@@ -261,6 +261,7 @@ def calc_val_accuracy(loader, model, criterion):
         var_counts_sum1 = 0
         tot_samples = 0
         total_batches = 0
+        loss_tot = 0
         for src, tgt, vaf, *_ in loader.iter_once(64):
 
             total_batches += 1
@@ -279,7 +280,7 @@ def calc_val_accuracy(loader, model, criterion):
 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
-
+                loss_tot += criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt.flatten()).item()
             else:
                 idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0] * seq_preds.shape[1], step=2),
                                    torch.arange(start=1, end=seq_preds.shape[0] * seq_preds.shape[1],
@@ -309,7 +310,8 @@ def calc_val_accuracy(loader, model, criterion):
             match_sum1 / total_batches,
             var_counts_sum0 / tot_samples,
             var_counts_sum1 / tot_samples,
-            result_totals0, result_totals1)
+            result_totals0, result_totals1,
+            loss_tot)
 
 
 def train_epochs(epochs,
@@ -327,23 +329,24 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 4
+    attention_heads = 8
     transformer_dim = 400
-    encoder_layers = 6
-    embed_dim_factor = 125
+    encoder_layers = 8
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
-                                    feature_count=feats_per_read, 
-                                    out_dim=4,
-                                    embed_dim_factor=embed_dim_factor,
-                                    nhead=attention_heads, 
-                                    d_hid=transformer_dim, 
-                                    n_encoder_layers=encoder_layers,
-                                    device=DEVICE)
+                            feature_count=feats_per_read, 
+                            out_dim=4,
+                            embed_dim_factor=embed_dim_factor,
+                            nhead=attention_heads, 
+                            d_hid=transformer_dim, 
+                            n_encoder_layers=encoder_layers,
+                            device=DEVICE)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
 
-    logger.info(f"Creating model with {sum(p.numel() for p in model.parameters() if p.requires_grad)} params")
+    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Creating model with {model_tot_params} trainable params")
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
@@ -356,9 +359,9 @@ def train_epochs(epochs,
         criterion = nn.CrossEntropyLoss()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     elif lossfunc == 'sw':
-        gap_open_penalty = -2
+        gap_open_penalty = -5
         gap_exend_penalty = -1
-        temperature = 1.0
+        temperature = 2.0
         trim_width = 100
         logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
@@ -369,8 +372,6 @@ def train_epochs(epochs,
                                     reduction=None,
                                     window_mode="random")
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
-
-    vaf_crit = None #nn.MSELoss()
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -401,6 +402,7 @@ def train_epochs(epochs,
             encoder_layers=encoder_layers,
             git_branch=git_repo.head.name,
             git_target=git_repo.head.target,
+            model_param_count=model_tot_params,
             git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
             loss_func=str(criterion),
         )
@@ -440,14 +442,14 @@ def train_epochs(epochs,
             loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
                                                                  optimizer,
                                                                  criterion,
-                                                                 vaf_crit,
+                                                                 None,
                                                                  dataloader,
                                                                  batch_size=batch_size,
                                                                  max_alt_reads=max_read_depth)
 
             elapsed = datetime.now() - starttime
 
-            acc0, acc1, var_count0, var_count1, results0, results1 = calc_val_accuracy(val_loader, model, criterion)
+            acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
 
             try:
                 ppa_dels = (results0['del']['tp'] + results1['del']['tp']) / (results0['del']['tp'] + results1['del']['tp'] + results0['del']['fn'] + results1['del']['fn'])
@@ -498,6 +500,7 @@ def train_epochs(epochs,
                 wandb.log({
                     "epoch": epoch,
                     "trainingloss": loss,
+                    "validation_loss": val_loss,
                     "train_acc_hap0": train_acc0,
                     "train_acc_hap1": train_acc1,
                     "accuracy/val_acc_hap0": acc0,
@@ -564,9 +567,17 @@ def train_epochs(epochs,
         pass
 
     if model_dest is not None:
+        modelparts = str(model_dest).rsplit(".", maxsplit=1)
         logger.info(f"Saving model state dict to {model_dest}")
         m = model.module if isinstance(model, nn.DataParallel) else model
         torch.save(m.to('cpu').state_dict(), model_dest)
+        scripted_filename = modelparts[0] + f"_final.pt"
+        logger.info(f"Saving scripted model to {scripted_filename}")
+        try:
+            model_scripted = torch.jit.script(m)
+            model_scripted.save(scripted_filename)
+        except Exception as ex:
+            logger.warn(f"Error saving scripted module!\n{ex}\nContinuing on with saving scripted version...")
 
 
 def load_train_conf(confyaml):
@@ -670,24 +681,11 @@ def train(config, output_model, input_model, epochs, **kwargs):
         
         dataloader = pregenloader
 
-        # If you want to use data augmentation, you need to pass options with '--data-augmentation" parameter during training, default is no augmentation.
-        data_augmentation = conf['data_augmentation'] if 'data_augmentation' in conf else kwargs.get("data_augmentation")
-        logger.info(f"Data augmentation steps provided are: {data_augmentation}")
-        if data_augmentation is not None and len(data_augmentation) != 0:
-            data_aug_options = ['shuffling', 'shortening', 'downsampling']
-            if not all(x in data_aug_options for x in data_augmentation) :
-                raise ValueError("Expected one of these options: ['shortening', 'shuffling', 'downsampling'],"
-                                 f"Instead found this {data_augmentation}")
-            else:
-                fraction_to_augment = conf['fraction_to_augment'] if "fraction_to_augment" in conf else kwargs.get("fraction_to_augment")
-                logger.info(f"Fraction to augment used is: {fraction_to_augment}")
-                if "shortening" in data_augmentation:
-                    dataloader = loader.ShorteningLoader(dataloader, seq_len=150, fraction_to_augment=fraction_to_augment)
-                if "shuffling" in data_augmentation:
-                    dataloader = loader.ShufflingLoader(dataloader, fraction_to_augment=fraction_to_augment)
-                if "downsampling" in data_augmentation:
-                    dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01, fraction_to_augment=fraction_to_augment)
-
+        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
+        if kwargs.get("data_augmentation"):
+            #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
+            dataloader = loader.ShufflingLoader(dataloader)
+            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
     else:
         logger.info(f"Using on-the-fly training data from sim loader")
