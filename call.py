@@ -246,36 +246,36 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     vcf_file.close()
 
 
-def region_to_tensor(aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
-    """
-    Convert the reads in the given region into a tensor with appropriate padding, etc, suitable
-    for input into the model
-
-    :returns : Tensor of dimension [genomic position (window_width), read (max_read_depth), features (9)]
-    """
-    assert window_width == (end - start), f"Cant handle window_with not being exactly end-start"
-    reads = bam.reads_spanning_range(aln, chrom, start, end)
-    if len(reads) < min_reads:
-        raise LowReadCountException(f"Hmm, couldn't find {min_reads} reads spanning {chrom}:{start}-{end}")
-    if len(reads) > max_read_depth:
-        reads = random.sample(reads, max_read_depth)
-    reads = util.sortreads(reads)
-    minref = min(bam.alnstart(r) for r in reads)
-    maxref = max(bam.alnstart(r) + r.query_length for r in reads)
-    reads_encoded, _ = bam.encode_pileup3(reads, minref, maxref)
-
-    refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
-    reftensor = bam.string_to_tensor(refseq)
-    reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
-    padded_reads = bam.ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
-
-    # TODO DOES THIS MAKE SENSE?? SEEMS LIKE IT DOESNT!
-    midstart = max(0, start - minref)
-    midend = midstart + window_width
-
-    if padded_reads.shape[1] > window_width:
-        padded_reads = padded_reads[:, midstart:midend, :, :]
-    return padded_reads
+# def region_to_tensor(aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
+#     """
+#     Convert the reads in the given region into a tensor with appropriate padding, etc, suitable
+#     for input into the model
+#
+#     :returns : Tensor of dimension [genomic position (window_width), read (max_read_depth), features (9)]
+#     """
+#     assert window_width == (end - start), f"Cant handle window_with not being exactly end-start"
+#     reads = bam.reads_spanning_range(aln, chrom, start, end)
+#     if len(reads) < min_reads:
+#         raise LowReadCountException(f"Hmm, couldn't find {min_reads} reads spanning {chrom}:{start}-{end}")
+#     if len(reads) > max_read_depth:
+#         reads = random.sample(reads, max_read_depth)
+#     reads = util.sortreads(reads)
+#     minref = min(bam.alnstart(r) for r in reads)
+#     maxref = max(bam.alnstart(r) + r.query_length for r in reads)
+#     reads_encoded, _ = bam.encode_pileup3(reads, minref, maxref)
+#
+#     refseq = reference.fetch(chrom, minref, minref + reads_encoded.shape[0])
+#     reftensor = bam.string_to_tensor(refseq)
+#     reads_w_ref = torch.cat((reftensor.unsqueeze(1), reads_encoded), dim=1)
+#     padded_reads = bam.ensure_dim(reads_w_ref, maxref - minref, max_read_depth).unsqueeze(0).to(DEVICE)
+#
+#     # TODO DOES THIS MAKE SENSE?? SEEMS LIKE IT DOESNT!
+#     midstart = max(0, start - minref)
+#     midend = midstart + window_width
+#
+#     if padded_reads.shape[1] > window_width:
+#         padded_reads = padded_reads[:, midstart:midend, :, :]
+#     return padded_reads
 
 
 # def callvars(model, aln, reference, chrom, start, end, window_width, max_read_depth, min_reads=5):
@@ -296,7 +296,7 @@ def call_batch(batch, batch_pos_offsets, model, reference, chrom, window_size):
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     logger.info(f"Forward pass of batch with size {len(batch)}")
-    encodedreads = torch.cat(batch, dim=0).to(DEVICE).float()
+    encodedreads = torch.stack(batch, dim=0).to(DEVICE).float()
     seq_preds = model(encodedreads)
     calledvars = []
     for b in range(seq_preds.shape[0]):
@@ -368,12 +368,17 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     batch_size = 32
     batch = []
     batch_offsets = []
+    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
     while window_start <= (end - window_step):
         logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
         # Generate encoded reads and group them into batches for faster forward passes
         try:
-            enc_reads = region_to_tensor(aln, reference, chrom, window_start, window_start + window_size, window_size, max_read_depth, min_reads)
-            batch.append(enc_reads)
+            # enc_reads = region_to_tensor(aln, reference, chrom, window_start, window_start + window_size, window_size, max_read_depth, min_reads)
+            enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
+            refseq = reference.fetch(chrom, window_start, window_start + window_size)
+            ref_encoded = bam.string_to_tensor(refseq)
+            encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), enc_reads), dim=1)[:, 0:max_read_depth, :]
+            batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
         except LowReadCountException:
             logger.debug(
