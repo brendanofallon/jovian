@@ -274,14 +274,6 @@ def main():
     printpileupparser.add_argument("-i", "--idx", help="Index of item in batch to emit", required=True, type=int)
     printpileupparser.set_defaults(func=print_pileup)
 
-    evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")
-    evalbamparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
-    evalbamparser.add_argument("-m", "--statedict", help="Stored model", required=True)
-    evalbamparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
-    evalbamparser.add_argument("-v", "--truth-vcf", help="Truth VCF", required=True)
-    evalbamparser.add_argument("-l", "--labels", help="CSV file with truth variants", required=True)
-    evalbamparser.set_defaults(func=eval_labeled_bam)
-
     trainparser = subparser.add_parser("train", help="Train a model")
     trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
