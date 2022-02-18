@@ -115,7 +115,7 @@ def construct_haplotype(variants, allele_indexes, ref_sequence, ref_offset):
     displacement = 0
     seq = ref_sequence
     for var, allele_index in zip(variants, allele_indexes):
-        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[var.samples[0]['GT'][allele_index]])
+        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
         vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
