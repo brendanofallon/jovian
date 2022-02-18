@@ -1,4 +1,4 @@
-
+import datetime
 import logging
 from collections import defaultdict
 import random
@@ -337,12 +337,15 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
+    enctime_total = 0
+    calltime_total = 0
     while window_start <= (end - window_step):
         logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
         # Generate encoded reads and group them into batches for faster forward passes
+        encstart = datetime.datetime.now()
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
-            encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size)
+            encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size, max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
         except LowReadCountException:
@@ -350,26 +353,29 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-
+        enctime_total += (datetime.datetime.now() - encstart)
+        callstart = datetime.datetime.now()
         if len(batch) > batch_size:
             batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
             batch = []
             batch_offsets = []
             allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count - len(batch), var_retain_window_size)
-
+        calltime_total += (datetime.datetime.now() - callstart)
         # continue
         window_start += window_step
         step_count += 1
 
     # Process any remaining items
     if batch:
+        callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
         allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count - len(batch),
                                               var_retain_window_size)
-
+        calltime_total += (datetime.datetime.now() - callstart)
     # Only return variants that are actually in the window
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
     hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
     #logger.warning(f"Only returning variants in {start} - {end}")
+    logger.info(f"Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return hap0_passing, hap1_passing
 
