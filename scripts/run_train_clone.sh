@@ -35,7 +35,7 @@ LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_multaltfixfix"
+RUN_NAME="wgs_25m_multaltfixfix_cont1"
 RUN_NOTES="WGS after multialt fix, 25M model, from scratch"
 
 set -x
@@ -71,6 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_25m_multaltfixfix/wgs_25m_multaltfixfix_epoch5.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
