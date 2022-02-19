@@ -71,7 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_50m_multaltfixfix/wgs_50m_multaltfixfix_epoch2.model \ 
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_50m_multaltfixfix/wgs_50m_multaltfixfix_epoch2.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
