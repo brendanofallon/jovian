@@ -56,6 +56,7 @@ def gen_suspicious_spots(aln, chrom, start, stop, refseq):
                         base_mismatches += 1
 
                 if indel_count > 1 or base_mismatches > 2:
+                    logger.info(f"Yielding pos {col.reference_pos}")
                     yield col.reference_pos
                     break
 
@@ -337,9 +338,9 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
-    enctime_total = 0
-    calltime_total = 0
-    while window_start <= (end - window_step):
+    enctime_total = datetime.timedelta(0)
+    calltime_total = datetime.timedelta(0)
+    while window_start <= (end):
         logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
         # Generate encoded reads and group them into batches for faster forward passes
         encstart = datetime.datetime.now()
