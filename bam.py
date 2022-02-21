@@ -89,17 +89,15 @@ class ReadWindow:
             allreads = sorted(allreads, key=lambda x: x[0])
         t = torch.zeros(end-start, max_reads, 9)
 
-        reads = []
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
-            reads.append(read)
             enc_start_offset = max(0,  start - readstart)
             enc_end_offset = min(encoded.shape[0], t.shape[0] - (readstart - start))
             t_start_offset = max(0, readstart - start)
             t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
             t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]
 
-        return t, reads
+        return t
 
 
 def encode_read(read, prepad=0, tot_length=None):
