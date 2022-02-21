@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 EMPTY_TENSOR = torch.zeros(9)
 
+def readkey(read):
+    suf = "-1" if read.is_read1 else "-2"
+    return read.query_name + suf
 
 class ReadCache:
     """
@@ -23,10 +26,11 @@ class ReadCache:
         self.cache = {}
 
     def __getitem__(self, read):
-        if read.query_name not in self.cache:
-            self.cache[read.query_name] = (alnstart(read), encode_read(read))
+        key = readkey(read)
+        if key not in self.cache:
+            self.cache[key] = (alnstart(read), encode_read(read))
 
-        return self.cache[read.query_name][1]
+        return self.cache[key][1]
 
     def clear_to_pos(self, min_pos):
         """
@@ -85,15 +89,17 @@ class ReadWindow:
             allreads = sorted(allreads, key=lambda x: x[0])
         t = torch.zeros(end-start, max_reads, 9)
 
+        reads = []
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
+            reads.append(read)
             enc_start_offset = max(0,  start - readstart)
             enc_end_offset = min(encoded.shape[0], t.shape[0] - (readstart - start))
             t_start_offset = max(0, readstart - start)
             t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
             t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]
 
-        return t
+        return t, reads
 
 
 def encode_read(read, prepad=0, tot_length=None):

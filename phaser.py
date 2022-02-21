@@ -115,7 +115,7 @@ def construct_haplotype(variants, allele_indexes, ref_sequence, ref_offset):
     displacement = 0
     seq = ref_sequence
     for var, allele_index in zip(variants, allele_indexes):
-        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[var.samples[0]['GT'][allele_index]])
+        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
         vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
@@ -287,7 +287,7 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
         read_iterator = aln.fetch(variants[0].chrom.replace("chr", ""), ref_start, ref_end)
 
     for read in read_iterator:
-        print(f"read start: {read.reference_start} end: {read.reference_end}")
+        #print(f"read start: {read.reference_start} end: {read.reference_end}")
         # Skip reads that don't overlap the whole region of interest
         if read.reference_start is None \
                 or read.reference_end is None \
@@ -396,8 +396,8 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
         return hap0, hap1
 
     else:
-        ref_start = min(v.start for v in variants)
-        ref_end = max(v.start + len(v.ref) for v in variants)
+        ref_start = min(v.start for v in variants if len(set(v.samples[0]['GT']))>1)
+        ref_end = max(v.start + len(v.ref) for v in variants if len(set(v.samples[0]['GT']))>1)
         if ref_end - ref_start > 100:
             raise ValueError(f"Variants are too far apart to phase, skipping {chrom}:{region_start}-{region_end}")
         genotypes = score_genotypes(bam, ref_sequence, region_start, variants)
@@ -449,8 +449,8 @@ def main():
 
 
     chrom = '21'
-    start = 20005685
-    end =   20005869
+    start = 20576974
+    end =   20577105
     variants = list(v for v in vcf.fetch(chrom, start, end))
 
     hap0, hap1 = gen_haplotypes(bam, ref, chrom, start, end, variants)
