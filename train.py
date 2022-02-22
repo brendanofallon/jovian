@@ -191,7 +191,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
-        if batch % 1 == 0:
+        if batch % 10 == 0:
             logger.info(f"Batch {batch} : hap0 / 1 acc: {midmatch_hap0.item():.3f} / {midmatch_hap1.item():.3f} hap1loss: {loss.item():.3f}")
             
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
