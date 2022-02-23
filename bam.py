@@ -17,6 +17,7 @@ def readkey(read):
     suf = "-1" if read.is_read1 else "-2"
     return read.query_name + suf
 
+
 class ReadCache:
     """
     Simple cache to store read encodings
