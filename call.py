@@ -131,10 +131,10 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     logger.info(f"Loading model from path {model_path}")
-    attention_heads = 4
-    encoder_layers = 6
-    transformer_dim = 200
-    embed_dim_factor = 125
+    attention_heads = 8
+    encoder_layers = 8
+    transformer_dim = 400
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,
@@ -254,7 +254,7 @@ def call_batch(batch, batch_pos_offsets, model, reference, chrom, window_size):
     mismatching parts
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
-    logger.info(f"Forward pass of batch with size {len(batch)}")
+    #logger.info(f"Forward pass of batch with size {len(batch)}")
     encodedreads = torch.stack(batch, dim=0).to(DEVICE).float()
     seq_preds = model(encodedreads)
     calledvars = []
@@ -341,7 +341,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     while window_start <= (end):
-        logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
+        #logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
         # Generate encoded reads and group them into batches for faster forward passes
         encstart = datetime.datetime.now()
         try:
