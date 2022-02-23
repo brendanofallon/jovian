@@ -56,7 +56,6 @@ def gen_suspicious_spots(aln, chrom, start, stop, refseq):
                         base_mismatches += 1
 
                 if indel_count > 1 or base_mismatches > 2:
-                    logger.info(f"Yielding pos {col.reference_pos}")
                     yield col.reference_pos
                     break
 
