@@ -12,7 +12,7 @@ class Variant:
     qual: float
     hap_model: int = None
     step: int = None
-
+    window_offset: int = None
 
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
@@ -51,6 +51,7 @@ class VcfVar:
     window_var_count: int
     window_cis_vars: int
     window_trans_vars: int
+    window_offset: int
     call_count: int
     step_count: int
     genotype: tuple
@@ -105,7 +106,9 @@ def _mismatches_to_vars(query, target, offset, probs):
                 yield Variant(ref="".join(mismatches[0]).replace("-", ""),
                               alt="".join(mismatches[1]).replace("-", ""),
                               pos=mismatchstart,
-                              qual=_geomean(mismatch_quals))  # Geometric mean?
+                              qual=_geomean(mismatch_quals),  # Geometric mean?
+                              window_offset=mismatchstart - offset,
+                              )
             mismatches = []
             mismatch_quals = []
         else:
@@ -123,7 +126,8 @@ def _mismatches_to_vars(query, target, offset, probs):
         yield Variant(ref="".join(mismatches[0]).replace("-", ""),
                       alt="".join(mismatches[1]).replace("-", ""),
                       pos=mismatchstart,
-                      qual=_geomean(mismatch_quals))
+                      qual=_geomean(mismatch_quals),
+                      window_offset=mismatchstart - offset)
 
 def aln_to_vars(refseq, altseq, offset=0, probs=None):
     """
@@ -166,7 +170,8 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
             yield Variant(ref='',
                           alt=altseq[q_offset:q_offset+cig.len],
                           pos=offset + variant_pos_offset,
-                          qual=_geomean(probs[q_offset:q_offset+cig.len]))
+                          qual=_geomean(probs[q_offset:q_offset+cig.len]),
+                          window_offset=variant_pos_offset)
             q_offset += cig.len
             variant_pos_offset += cig.len
 
@@ -174,7 +179,8 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
             yield Variant(ref=refseq[t_offset:t_offset + cig.len],
                           alt='',
                           pos=offset + t_offset,
-                          qual=_geomean(probs[q_offset-1:q_offset+cig.len]))  # Is this right??
+                          qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
+                          window_offset=t_offset)  # Is this right??
             t_offset += cig.len
 
     # if aln.query_end+1 < len(altseq):
@@ -250,6 +256,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             genotype=(0, 1),  # default to haplotype 0
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
+            window_offset=[call.window_offset for call in vars_hap0[var]],
         )
     vcfvars_hap1 = {}
     for var, depth in zip(vars_hap1, depths_hap1):
@@ -276,6 +283,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             genotype=(1, 0),  # default to haplotype 1
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
+            window_offset=[call.window_offset for call in vars_hap1[var]],
         )
     # check for homozygous vars
     homs = list(set(vcfvars_hap0) & set(vcfvars_hap1))
@@ -291,6 +299,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         vcfvars_hap0[var].step_count = len(set(vcfvars_hap0[var].step_indexes))  # combine call counts in both haplotypes
         vcfvars_hap0[var].genotype = (1, 1)
         vcfvars_hap0[var].het = False
+        vcfvars_hap0[var].window_offset = sorted(set(vcfvars_hap0[var].window_offset + vcfvars_hap1[var].window_offset))
         # then remove from hap1 vars
         vcfvars_hap1.pop(var)
 
@@ -322,7 +331,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         for var in het_vcfvars:
             vcfvars[var].phased = True
 
-    return vcfvars
+    return vcfvars.values()
 
 
 def init_vcf(path, sample_name="sample", lowcov=30):
@@ -397,9 +406,21 @@ def init_vcf(path, sample_name="sample", lowcov=30):
 
     vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 0), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
+
+    vcfh.add_meta('INFO', items=[('ID', "WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Position of call within calling window')])
     # write to new vcf file object
     return pysam.VariantFile(path, "w", header=vcfh)
 
+def prob_to_phred(p, max_qual=1000.0):
+    """
+    Convert a probability in 0..1 to phred scale
+    """
+    assert 0.0 <= p <= 1.0, f"Probability must be in [0, 1], but found {p}"
+    if p == 1.0:
+        return max_qual
+    else:
+        return min(max_qual, -10 * np.log10(1.0 - p))
 
 def create_vcf_rec(var, vcf_file):
     """
@@ -409,9 +430,9 @@ def create_vcf_rec(var, vcf_file):
     :return:
     """
     # Create record
-    vcf_filter = var["filter"] if var["filter"] else "PASS"
+    vcf_filter = var.filter if var.filter else "PASS"
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
-                       alleles=(var.ref, var.alt), filter=vcf_filter, qual=var.qual)
+                       alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
     r.samples['sample'].phased = var.phased  # note: need to set phased after setting genotype
@@ -427,18 +448,20 @@ def create_vcf_rec(var, vcf_file):
     r.info['STEP_INDEXES'] = var.step_indexes
     r.info['CALL_COUNT'] = var.call_count
     r.info['STEP_COUNT'] = var.step_count
+    r.info['WIN_OFFSETS'] = [int(x) for x in var.window_offset]
     if var.duplicate:
         r.info['DUPLICATE'] = ()
     return r
 
-
-def vars_to_vcf(vcf_file, pr_vars):
+def vars_to_vcf(vcf_file, variants):
     """
     create variant records from pyranges variant table and write all to pysam VariantFile
     :param vcf_file:
-    :param pr_vars:
+    :param pr_vars: List of variants to write
+
     :return: None
     """
-    for i, var in pr_vars.df.iterrows():
+    for var in variants:
         r = create_vcf_rec(var, vcf_file)
         vcf_file.write(r)
+

@@ -35,8 +35,13 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
+<<<<<<< HEAD
 RUN_NAME="wgs_50m_multaltfixfix_cont3"
 RUN_NOTES="WGS after multialt fix, 50M model, from scratch"
+=======
+RUN_NAME="wgs_abitbigger_cont4.1"
+RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation again..."
+>>>>>>> batchcalls
 
 set -x
 
@@ -71,7 +76,11 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
+<<<<<<< HEAD
     -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_50m_multaltfixfix_cont2/wgs_50m_multaltfixfix_cont2_epoch2.model \
+=======
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont4/wgs_abitbigger_cont4_epoch0.model \
+>>>>>>> batchcalls
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
