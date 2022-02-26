@@ -614,7 +614,7 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
     alltgtvaf = []
     varsinfo = []
     count = 0
-    seq_len = 300
+    seq_len = 150
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
     for enc, tgt, region in load_from_csv(bampath, refpath, bed, vcf, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
         src, tgt = trim_pileuptensor(enc, tgt, seq_len)
