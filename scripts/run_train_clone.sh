@@ -31,12 +31,12 @@ PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_rea
 
 
 
-LEARNING_RATE=0.0001
+LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150"
-RUN_NOTES="150 width, batch calling"
+RUN_NAME="wgs_25m_w150_lolr"
+RUN_NOTES="150 width, batch calling, lower lr"
 
 set -x
 
