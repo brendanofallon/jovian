@@ -25,9 +25,9 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
-VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_multialtfix_fix_chr21and22
+VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_multialtfix_fix_nochr21or22
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_nochr21or22
 
 
 
@@ -35,13 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-<<<<<<< HEAD
-RUN_NAME="wgs_50m_multaltfixfix_cont3"
-RUN_NOTES="WGS after multialt fix, 50M model, from scratch"
-=======
-RUN_NAME="wgs_abitbigger_cont4.1"
-RUN_NOTES="WGS with all samples and a sorta big and 8 layers / 8 heads model, continuation again..."
->>>>>>> batchcalls
+RUN_NAME="wgs_50m_w150"
+RUN_NOTES="50M model, width 150"
 
 set -x
 
@@ -76,11 +71,6 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
-<<<<<<< HEAD
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_50m_multaltfixfix_cont2/wgs_50m_multaltfixfix_cont2_epoch2.model \
-=======
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_abitbigger_cont4/wgs_abitbigger_cont4_epoch0.model \
->>>>>>> batchcalls
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
