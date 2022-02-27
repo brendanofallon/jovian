@@ -35,8 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_lolr"
-RUN_NOTES="150 width, batch calling, lower lr"
+RUN_NAME="wgs_25m_w150_lolr_cont"
+RUN_NOTES="150 width, batch calling, lower lr, continued after epoch 8"
 
 set -x
 
@@ -70,6 +70,7 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 1 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_25m_w150_lolr/wgs_25m_w150_lolr_epoch8.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
