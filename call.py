@@ -130,10 +130,10 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     logger.info(f"Loading model from path {model_path}")
-    attention_heads = 4
-    encoder_layers = 6
-    transformer_dim = 200
-    embed_dim_factor = 125
+    attention_heads = 8
+    encoder_layers = 8
+    transformer_dim = 400
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,
@@ -235,7 +235,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
                                                      chrom, start-3, end+2,
                                                      max_read_depth,
-                                                     window_size=300,
+                                                     window_size=150,
                                                      window_step=33)
 
             vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
@@ -292,7 +292,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
       - add depth derived from tensor to vars?
       - create new prob from all duplicate calls?
     """
-    var_retain_window_size = 150
+    var_retain_window_size = 125
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
