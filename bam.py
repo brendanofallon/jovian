@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 EMPTY_TENSOR = torch.zeros(9)
 
+def readkey(read):
+    suf = "-1" if read.is_read1 else "-2"
+    return read.query_name + suf
+
 
 class ReadCache:
     """
@@ -23,10 +27,11 @@ class ReadCache:
         self.cache = {}
 
     def __getitem__(self, read):
-        if read.query_name not in self.cache:
-            self.cache[read.query_name] = (alnstart(read), encode_read(read))
+        key = readkey(read)
+        if key not in self.cache:
+            self.cache[key] = (alnstart(read), encode_read(read))
 
-        return self.cache[read.query_name][1]
+        return self.cache[key][1]
 
     def clear_to_pos(self, min_pos):
         """
@@ -70,8 +75,7 @@ class ReadWindow:
         assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window"
         allreads = []
         for pos in range(start - self.margin_size, end):
-            reads = self.bypos[pos]
-            for read in reads:
+            for read in self.bypos[pos]:
                 if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
                     continue
                 allreads.append((pos, read))
@@ -456,7 +460,8 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 if __name__=="__main__":
     aln = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram",
                               reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    rw = ReadWindow(aln, "21", 34914500, 34915268)
-    t = rw.get_window(34914630, 34914730, max_reads=100)
+    rw = ReadWindow(aln, "21", 20762200, 20762270)
+    t = rw.get_window(20762222, 20762267, max_reads=100)
+
     print(t.shape)
     print(util.to_pileup(t))

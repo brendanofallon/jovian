@@ -13,6 +13,7 @@ import tempfile
 from datetime import datetime
 import re
 import pandas as pd
+import pyranges
 import pyranges as pr
 
 import pysam
@@ -40,7 +41,6 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
-
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
@@ -97,6 +97,97 @@ def pregen(config, **kwargs):
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 100)
+    samples_per_pos = kwargs.get('samples_per_pos', 2)
+    vals_per_class = defaultdict(default_vals_per_class)
+    vals_per_class.update(conf['vals_per_class'])
+
+    output_dir = Path(kwargs.get('dir'))
+    metadata_file = kwargs.get("metadata_file", None)
+    if metadata_file is None:
+        str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
+        metadata_file = f"pregen_{str_time}.csv"
+    processes = kwargs.get('threads', 1)
+
+    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
+    dataloaders = [
+            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+        for c in conf['data']
+    ]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
+
+    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "vaf", "label"]
+    with open(metadata_file, "wb") as metafh:
+        metafh.write(("\t".join(meta_headers) + "\n").encode())
+        if processes == 1:
+            for dl in dataloaders:
+                sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
+                util.concat_metafile(sample_metafile, metafh)
+        else:
+            futures = []
+            with ProcessPoolExecutor(max_workers=processes) as executor:
+                for dl in dataloaders:
+                    futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
+            for fut in futures:
+                sample_metafile = fut.result()
+                util.concat_metafile(sample_metafile, metafh)
+
+def default_vals_per_class():
+    """
+    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
+    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
+    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
+    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
+    """
+    return 0
+
+
+def load_conf(confyaml):
+    logger.info(f"Loading configuration from {confyaml}")
+    conf = yaml.safe_load(open(confyaml).read())
+    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
+    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    return conf
+
+
+def pregen_one_sample(dataloader, batch_size, output_dir):
+    """
+    Pregenerate tensors for a single sample
+    """
+    uid = "".join(random.choices(ascii_letters + digits, k=8))
+    src_prefix = "src"
+    tgt_prefix = "tgt"
+    vaf_prefix = "vaftgt"
+    metafile = tempfile.NamedTemporaryFile(
+        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
+    )
+    logger.info(f"Saving tensors to {output_dir}/")
+    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+        logger.info(f"Saving batch {i} with uid {uid}")
+        for data, prefix in zip([src, tgt, vaftgt],
+                                [src_prefix, tgt_prefix, vaf_prefix]):
+            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
+                torch.save(data, fh)
+        for idx, varinfo in enumerate(varsinfo):
+            meta_str = "\t".join([
+                f"{idx}", f"{uid}-{i}", "\t".join(varinfo), dataloader.csv
+            ])
+            print(meta_str, file=metafile)
+        metafile.flush()
+
+    metafile.close()
+    return metafile.name
+
+
+def pregen(config, **kwargs):
+    """
+    Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
+    (this takes a long time)
+    """
+    conf = load_conf(config)
+    batch_size = kwargs.get('batch_size', 64)
+    reads_per_pileup = kwargs.get('read_depth', 100)
     samples_per_pos = kwargs.get('samples_per_pos', 8)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
@@ -133,122 +224,6 @@ def pregen(config, **kwargs):
                 sample_metafile = fut.result()
                 util.concat_metafile(sample_metafile, metafh)
 
-
-
-def eval_labeled_bam(config, bam, labels, statedict, truth_vcf, **kwargs):
-    """
-    Call variants in BAM file with given model at positions given in the labels CSV, emit useful
-    summary information about PPA / PPV, etc
-    """
-    max_read_depth = 100
-    feats_per_read = 9
-    logger.info(f"Found torch device: {DEVICE}")
-    conf = load_conf(config)
-
-    reference = pysam.FastaFile(conf['reference'])
-    truth_vcf = pysam.VariantFile(truth_vcf)
-    attention_heads = 2
-    transformer_dim = 400
-    encoder_layers = 8
-    embed_dim_factor = 200
-    model = VarTransformer(read_depth=max_read_depth,
-                                    feature_count=feats_per_read,
-                                    out_dim=4,
-                                    embed_dim_factor=embed_dim_factor,
-                                    nhead=attention_heads,
-                                    d_hid=transformer_dim,
-                                    n_encoder_layers=encoder_layers,
-                                    device=DEVICE)
-
-    model.load_state_dict(torch.load(statedict, map_location=DEVICE))
-    model.eval()
-
-    aln = pysam.AlignmentFile(bam)
-    results = defaultdict(Counter)
-    window_size = 300
-
-    tot_tps = 0
-    tot_fps = 0
-    tot_fns = 0
-    results = defaultdict(Counter)
-    for i, line in enumerate(open(labels)):
-        tps = []
-        fps = []
-        fns = []
-        toks = line.strip().split("\t")
-        chrom = toks[0]
-        start = int(toks[1])
-        end = int(toks[2])
-        label = toks[3]
-
-        fp_varpos = []
-        tp_varpos = []
-        try:
-            allvars0, allvars1 = _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth=100,
-                                                   window_size=300)
-            # TODO   Keep only vars that occur more than once?
-            vars_hap0 = list(v[0] for k, v in allvars0.items() if len(v) > 1 and start < v[0].pos < end)
-            vars_hap1 = list(v[0] for k, v in allvars1.items() if len(v) > 1 and start < v[0].pos < end)
-
-        except Exception as ex:
-            logger.warning(f"Hmm, exception processing {chrom}:{start}-{end}, skipping it")
-            logger.warning(ex)
-            continue
-
-        print(f"[{start}]  {chrom}:{start}-{start + window_size} ", end='')
-
-        refwidth = end-start
-        refseq = reference.fetch(chrom, start, start + refwidth)
-        variants = list(truth_vcf.fetch(chrom, start, start + refwidth))
-
-        # WONT ALWAYS WORK: Grab *ALL* variants and generate a single alt sequence with everything???
-        pseudo_altseq = phaser.project_vars(variants, [np.argmax(v.samples[0]['GT']) for v in variants], refseq, start)
-        pseudo_vars = list(vcf.aln_to_vars(refseq, pseudo_altseq, start))
-
-
-        print(f" true: {len(pseudo_vars)}", end='')
-
-        var_types = set()
-        for true_var in pseudo_vars:
-            vartype = util.var_type(true_var)
-            var_types.add(vartype)
-            # print(f"{true_var} ", end='')
-            # print(f" hap0: {true_var in vars_hap0}, hap1: {true_var in vars_hap1}")
-            if true_var in vars_hap0 or true_var in vars_hap1:
-                tps.append(true_var)
-                tot_tps += 1
-                results[vartype]['tp'] += 1
-                tp_varpos.append(true_var.pos - start)
-            else:
-                fns.append(true_var)
-                tot_fns += 1
-                results[vartype]['fn'] += 1
-        print(f" {', '.join(var_types)} TP: {len(tps)} FN: {len(fns)}", end='')
-
-        for var0 in vars_hap0:
-            vartype = util.var_type(var0)
-            if var0 not in pseudo_vars:
-                fps.append(var0)
-                fp_varpos.append(var0.pos - start)
-                tot_fps += 1
-                results[vartype]['fp'] += 1
-        for var1 in vars_hap1:
-            vartype = util.var_type(var1)
-            if var1 not in pseudo_vars and var1 not in vars_hap0:
-                fps.append(var1)
-                fp_varpos.append(var1.pos - start)
-                tot_fps += 1
-                results[vartype]['fp'] += 1
-
-
-        tp_pos = ", ".join(str(s) for s in tp_varpos)
-        fp_pos = ", ".join(str(s) for s in fp_varpos[0:10])
-        print(f" FP: {len(fps)}\t[{tp_pos}]  [{fp_pos}]")
-
-    for key, val in results.items():
-        print(f"{key} : total entries: {sum(val.values())}")
-        for t, count in val.items():
-            print(f"\t{t} : {count}")
 
 
 def print_pileup(path, idx, target=None, **kwargs):
@@ -299,14 +274,6 @@ def main():
     printpileupparser.add_argument("-i", "--idx", help="Index of item in batch to emit", required=True, type=int)
     printpileupparser.set_defaults(func=print_pileup)
 
-    evalbamparser = subparser.add_parser("evalbam", help="Evaluate a BAM with labels")
-    evalbamparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
-    evalbamparser.add_argument("-m", "--statedict", help="Stored model", required=True)
-    evalbamparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
-    evalbamparser.add_argument("-v", "--truth-vcf", help="Truth VCF", required=True)
-    evalbamparser.add_argument("-l", "--labels", help="CSV file with truth variants", required=True)
-    evalbamparser.set_defaults(func=eval_labeled_bam)
-
     trainparser = subparser.add_parser("train", help="Train a model")
     trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
@@ -332,7 +299,8 @@ def main():
     callparser.add_argument("-m", "--model-path", help="Stored model", required=True)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
-    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=True)
+    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
+    callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.set_defaults(func=call)
 
