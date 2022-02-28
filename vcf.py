@@ -334,7 +334,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     return vcfvars.values()
 
 
-def init_vcf(path, sample_name="sample", lowcov=30):
+def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     """
     Initialize pysam VariantFile vcf object and create it's header
     :param path: vcf file path
@@ -345,6 +345,8 @@ def init_vcf(path, sample_name="sample", lowcov=30):
 
     # Create a VCF header
     vcfh = pysam.VariantHeader()
+    if cmdline is not None:
+        vcfh.add_meta('COMMAND', )
     # Add a sample named "sample"
     vcfh.add_sample(sample_name)
     # Add contigs
