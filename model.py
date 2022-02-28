@@ -115,6 +115,9 @@ class VarTransformer(nn.Module):
 
     def forward(self, src):
 
+        # r contains a 1 if the read base matches the reference base, 0 otherwise
+        #r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
+        #src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
 
 
         src = self.elu(self.fc1(src))

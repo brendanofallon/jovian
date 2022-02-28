@@ -3,6 +3,9 @@
 
 import sys
 import pysam
+from collections import defaultdict
+import gzip
+from quicksect import IntervalTree
 
 
 """
@@ -14,14 +17,38 @@ they contain snvs, indels, etc etc. Anything goes, really
 
 """
 
+
+def buildforest(bedpath):
+    forest = defaultdict(IntervalTree)
+    if bedpath.endswith(".gz"):
+        fh = gzip.open(bedpath, mode='rt')
+    else:
+        fh = open(bedpath)
+    for line in fh:
+        if len(line.strip()) == 0 or line.startswith("#"):
+            continue
+        toks = line.split("\t")
+        chrom = toks[0]
+        start = int(toks[1])
+        end = int(toks[2])
+        forest[chrom].add(start, end)
+    return forest
+
+
+
+
 vcf = pysam.VariantFile(sys.argv[1])
 
-for line in open(sys.argv[2]):
+sys.stderr.write("Loading forest from " + sys.argv[2])
+forest = buildforest(sys.argv[2])
+
+for line in open(sys.argv[3]):
     toks = line.split("\t")
     start = int(toks[1])
     end = int(toks[2])
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
+    interval_count = len(list(forest[chrom].search(start, end)))
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
     del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
     ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
@@ -39,6 +66,8 @@ for line in open(sys.argv[2]):
         label = "ins"
     elif snv_count:
         label = "snv"
+    elif interval_count:
+        label = "tn-flag"
     else:
         label = "tn"
     print(f"{line.strip()}\t{label}")

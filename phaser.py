@@ -115,7 +115,7 @@ def construct_haplotype(variants, allele_indexes, ref_sequence, ref_offset):
     displacement = 0
     seq = ref_sequence
     for var, allele_index in zip(variants, allele_indexes):
-        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[var.samples[0]['GT'][allele_index]])
+        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
         vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
@@ -287,7 +287,7 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
         read_iterator = aln.fetch(variants[0].chrom.replace("chr", ""), ref_start, ref_end)
 
     for read in read_iterator:
-        print(f"read start: {read.reference_start} end: {read.reference_end}")
+        #print(f"read start: {read.reference_start} end: {read.reference_end}")
         # Skip reads that don't overlap the whole region of interest
         if read.reference_start is None \
                 or read.reference_end is None \
@@ -336,8 +336,9 @@ def project_vars(variants, allele_indexes, ref_sequence, ref_offset):
     displacement = 0
     seq = ref_sequence
     for var, allele_index in zip(variants, allele_indexes):
-        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[var.samples[0]['GT'][allele_index]])
+        trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
         vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
+        assert vref_start >= 0, f"Negative start coord for variant {var}!"
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
         displacement += len(valt) - len(vref)
@@ -369,27 +370,34 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
         return hap_alt, hap_alt
 
     elif het_count == 1 and len(variants) == 1:
-        hap_alt = project_vars(variants,
-                               [1] * len(variants),
+        hap0 = project_vars(variants,
+                               [variants[0].samples[0]['GT'][0]],
                                ref_sequence,
                                region_start)
-        return ref_sequence, hap_alt
+        hap1 = project_vars(variants,
+                               [variants[0].samples[0]['GT'][1]],
+                               ref_sequence,
+                               region_start)
+        return hap0, hap1
 
     elif het_count == 1 and len(variants) > 1:
         # All homs except 1 het
+        hap0_indices = [v.samples[0]['GT'][0] for v in variants]
+        hap1_indices = [v.samples[0]['GT'][1] for v in variants]
+
         hap0 = project_vars(variants,
-                            [0] * len(variants),
+                            hap0_indices,
                             ref_sequence,
                             region_start)
         hap1 = project_vars(variants,
-                            [1] * len(variants),
+                            hap1_indices,
                             ref_sequence,
                             region_start)
         return hap0, hap1
 
     else:
-        ref_start = min(v.start for v in variants)
-        ref_end = max(v.start + len(v.ref) for v in variants)
+        ref_start = min(v.start for v in variants if len(set(v.samples[0]['GT']))>1)
+        ref_end = max(v.start + len(v.ref) for v in variants if len(set(v.samples[0]['GT']))>1)
         if ref_end - ref_start > 100:
             raise ValueError(f"Variants are too far apart to phase, skipping {chrom}:{region_start}-{region_end}")
         genotypes = score_genotypes(bam, ref_sequence, region_start, variants)
@@ -435,15 +443,15 @@ def parse_rows_classes(bed):
 
 def main():
 
-    ref = pysam.FastaFile("/Users/brendanofallon/Reference/B37/GATKBundle/2.8_subset_arup_v0.1/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
-    vcf = pysam.VariantFile("/Volumes/rd_share$/RD_RW/brendan/revdirs/98006000001_EXO_81fbae67/var/final_variants.vcf.gz")
-    bam = pysam.AlignmentFile("/Volumes/rd_share$/RD_RW/brendan/revdirs/98006000001_EXO_81fbae67/bam/roi.bam")
+    ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    vcf = pysam.VariantFile("/Volumes/Share/genomics/GIAB/4.2.1/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")
+    bam = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram")
 
 
-    chrom = '14'
-    start = 105414225
-    end = 105414290
-    variants = list(v for v in vcf.fetch(chrom, start, end) if v.info['set'] != "MNPoster")
+    chrom = '21'
+    start = 20576974
+    end =   20577105
+    variants = list(v for v in vcf.fetch(chrom, start, end))
 
     hap0, hap1 = gen_haplotypes(bam, ref, chrom, start, end, variants)
     print(hap0)
@@ -451,14 +459,5 @@ def main():
     print("".join( ' ' if a==b else '*' for a,b in zip(hap0, hap1)))
 
 
-
 if __name__=="__main__":
-    rows, classes, class_names = parse_rows_classes("testregions.bed")
-    vpc = {
-        'classA': 10,
-        'classB': 1,
-        'classC': 2,
-    }
-    out_classes, out_rows = loader.resample_classes(classes, class_names, rows, vpc)
-
-    print(out_classes)
+    main()

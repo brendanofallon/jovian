@@ -7,9 +7,9 @@ Splits a BED file into chunks of size *targetsize*
 You probably want to do this to all BED files prior to generating 'labels' BED files for pregen
 """
 
-targetsize = 300
+targetsize = 150
 
-stepsize = 300
+stepsize = 100
 
 for line in open(sys.argv[1]):
     toks = line.split("\t")
