@@ -190,7 +190,7 @@ def cluster_positions(poslist, maxdist=500):
         yield min(cluster), max(cluster)
 
 
-def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spacing=1000, window_overlap=0, **kwargs):
+def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -205,20 +205,18 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     :param bed:
     :param reference_fasta:
     :param vcf_out:
-    :param bed_slack:
-    :param window_spacing:
-    :param window_overlap:
-    :param kwargs:
-    :return:
       """
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
+    if 'cuda' in str(DEVICE):
+        for idev in range(torch.cuda.device_count()):
+            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
 
     model = load_model(model_path)
     reference = pysam.FastaFile(reference_fasta)
     aln = pysam.AlignmentFile(bam, reference_filename=reference_fasta)
 
-    vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=30)
+    vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
 
     totbases = util.count_bases(bed)
     bases_processed = 0 

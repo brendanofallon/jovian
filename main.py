@@ -1,36 +1,23 @@
 #!/usr/bin/env python
 
-
+import sys
 import logging
 import random
-from collections import defaultdict, Counter
-from dataclasses import dataclass
+from collections import defaultdict
 from pathlib import Path
 from string import ascii_letters, digits
-import gzip
 import lz4.frame
 import tempfile
 from datetime import datetime
 import re
-import pandas as pd
-import pyranges
-import pyranges as pr
-
-import pysam
 import torch
 
-
-import torch.multiprocessing as mp
 from concurrent.futures.process import ProcessPoolExecutor
-import numpy as np
 import argparse
 import yaml
 
-import phaser
 import util
-import vcf
 import loader
-from model import VarTransformer
 from train import train
 from call import call
 
@@ -305,6 +292,7 @@ def main():
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
+    args.cmdline = " ".join(sys.argv[1:])
     args.cl_args = vars(args).copy()  # command line copy for logging
     args.func(**vars(args))
 
