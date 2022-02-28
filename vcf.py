@@ -346,7 +346,7 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     # Create a VCF header
     vcfh = pysam.VariantHeader()
     if cmdline is not None:
-        vcfh.add_meta('COMMAND', )
+        vcfh.add_meta('COMMAND', cmdline)
     # Add a sample named "sample"
     vcfh.add_sample(sample_name)
     # Add contigs
