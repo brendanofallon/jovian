@@ -65,3 +65,6 @@ def main(conf_file, output):
     conf = yaml.safe_load(open(conf_file).read())
     model = train_model(conf)
     save_model(model, output)
+
+if __name__=="__main__":
+    main(sys.argv[1], sys.argv[2])
