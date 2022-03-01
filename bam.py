@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 EMPTY_TENSOR = torch.zeros(9)
 
+
+
+class LowReadCountException(Exception):
+    """
+    Region of bam file has too few spanning reads for variant detection
+    """
+    pass
+
 def readkey(read):
     suf = "-1" if read.is_read1 else "-2"
     return read.query_name + suf
@@ -80,7 +88,9 @@ class ReadWindow:
                     continue
                 allreads.append((pos, read))
 
-        assert len(allreads) > 0, f"Couldn't find any reads in region {start}-{end}"
+        if len(allreads) < 5:
+            raise LowReadCountException(f"Only {len(allreads)} reads in window")
+            
         if downsample_read_count:
             num_reads_to_sample = downsample_read_count
         else:
