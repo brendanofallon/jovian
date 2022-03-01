@@ -282,6 +282,7 @@ def main():
                              help="Weights & Biases run notes, longer description of run (like 'git commit -m')")
     trainparser.add_argument("--loss", help="Loss function to use, use 'ce' for CrossEntropy or 'sw' for Smith-Waterman", choices=['ce', 'sw'], default='ce')
     trainparser.set_defaults(func=train)
+
     callparser = subparser.add_parser("call", help="Call variants")
     callparser.add_argument("-m", "--model-path", help="Stored model", required=True)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
