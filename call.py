@@ -18,12 +18,6 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
-class LowReadCountException(Exception):
-    """
-    Region of bam file has too few spanning reads for variant detection
-    """
-    pass
-
 
 def gen_suspicious_spots(aln, chrom, start, stop, refseq):
     """
