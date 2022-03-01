@@ -340,7 +340,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size, max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
-        except LowReadCountException:
+        except bam.LowReadCountException:
             logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
