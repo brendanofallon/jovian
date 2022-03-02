@@ -75,16 +75,15 @@ def predict(model, vcf, **kwargs):
     for var in vcf:
         feats = var_feats(var)
         prediction = model.predict_proba(feats[np.newaxis, ...])
-        print(prediction)
         var.qual = prediction[0, 1]
-        print(var)
+        print(var, end='')
 
 
 
 
-def train(conf_file, output, **kwargs):
+def train(conf, output, **kwargs):
     logger.info("Loading configuration from {conf_file}")
-    conf = yaml.safe_load(open(conf_file).read())
+    conf = yaml.safe_load(open(conf).read())
     model = train_model(conf)
     save_model(model, output)
 
