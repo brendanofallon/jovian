@@ -80,8 +80,6 @@ def predict(model, vcf, **kwargs):
         print(var)
 
 
-
-
 def train(conf_file, output, **kwargs):
     logger.info("Loading configuration from {conf_file}")
     conf = yaml.safe_load(open(conf_file).read())
