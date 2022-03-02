@@ -67,6 +67,8 @@ for line in open(sys.argv[3]):
         label = "ins"
     elif snv_count:
         label = "snv"
+    elif interval_count:
+        label = "tn-flag"
     else:
         label = "tn"
 

@@ -572,7 +572,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
                                                  max_reads_per_aln,
                                                  samples_per_pos):
 
-                hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, minref, maxref, variants)
+                hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, minref, maxref + 100, variants)
                 regionsize = end - start
                 midstart = max(0, start - minref)
                 midend = midstart + regionsize
