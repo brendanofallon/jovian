@@ -25,12 +25,17 @@ def var_feats(var):
     feats.append(1 if "LowCov" in var.filter else 0)
     feats.append(1 if "SingleCallHet" in var.filter else 0)
     feats.append(1 if "SingleCallHom" in var.filter else 0)
+    feats.append(len(var.ref))
+    feats.append(max(len(a) for a in var.alts)))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
     feats.append(var.info['WIN_TRANS_COUNT'][0])
     feats.append(var.info['STEP_COUNT'][0])
+    feats.append(var.info['CALL_COUNT'][0])
+    feats.append(min(var.info['VAR_INDEX']))
+    feats.append(max(var.info['VAR_INDEX']))
     feats.append(min(var.info['WIN_OFFSETS']))
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
@@ -71,14 +76,12 @@ def train_model(conf):
 def predict(model, vcf, **kwargs):
     model = load_model(model)
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
-    print(vcf.header)
+    print(vcf.header, end='')
     for var in vcf:
         feats = var_feats(var)
         prediction = model.predict_proba(feats[np.newaxis, ...])
         var.qual = prediction[0, 1]
         print(var, end='')
-
-
 
 
 def train(conf, output, **kwargs):

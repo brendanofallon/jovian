@@ -48,14 +48,15 @@ for line in open(sys.argv[3]):
     end = int(toks[2])
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
-    interval_count = len(list(forest[chrom].search(start, end)))
+    intervals = list(forest[chrom].search(start, end))
+    interval_count = len(intervals)
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
     del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
     ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
     multi_count = len([v for v in variants if len(v.alts) > 1])
      
-    if (del_count and ins_count) or (del_count > 1) or (ins_count > 1):
-        label = "multi_indel"
+    if del_count and ins_count:
+        label = "ins-del"
     elif (ins_count > 0 or del_count > 0) and snv_count > 0:
         label = "indel-snv"
     elif multi_count:
@@ -70,5 +71,14 @@ for line in open(sys.argv[3]):
         label = "tn-flag"
     else:
         label = "tn"
-    print(f"{line.strip()}\t{label}")
+
+    found = False
+    for i in intervals:
+        if any(i.start < v.pos < i.end for v in variants):
+            found = True
+
+    if found:
+        label = label + "-lc"
+    toks = '\t'.join(line.strip().split('\t')[0:3])
+    print(f"{toks}\t{label}")
 

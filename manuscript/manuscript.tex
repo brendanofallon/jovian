@@ -75,6 +75,12 @@ Given an alignment file in BAM or CRAM format,
  \section{Discussion}
  
  Convolutions - do they make sense? 
+
+Recent years have seen the transformer architecture, originally designed for language modelling, expand to multiple new areas, including vision (Dosovitskiy et al. 2020, Liu et al. 2021), video (Arnab et al. 2021), and others. To our knowledge this is the first use of transformers for use of haplotype construction or variant detection in next generation sequencing data. 
+
+Modern variant detection tools are extremely accurate, and generally result in very high sensitivity and specificity. 
+
+ In his essay "The Bitter Lesson" Richard Sutton remarked that "methods that leverage general computation" often outperform methods with handcrafted statistical or heuristic techniques.  Our work continues in this tradition, replacing the myriad finely tuned algorithms with a single model, learned end-to-end. 
  
  \section{Availability}
  
@@ -83,11 +89,16 @@ Given an alignment file in BAM or CRAM format,
  \section{References}
  
  \vspace{8pt}
+ Arnab, Anurag, et al. "Vivit: A video vision transformer." Proceedings of the IEEE/CVF International Conference on Computer Vision. 2021.
+
+ \vspace{8pt}
  Conrad, Donald F., et al. "Origins and functional impact of copy number variation in the human genome." Nature 464.7289 (2010): 704.
  
 \vspace{8pt}
 DePristo, Mark A., et al. "A framework for variation discovery and genotyping using next-generation DNA sequencing data." Nature genetics 43.5 (2011): 491-498.
 
+\vspace{8pt}
+Dosovitskiy, Alexey, et al. "An image is worth 16x16 words: Transformers for image recognition at scale." arXiv preprint arXiv:2010.11929 (2020).
 
 \vspace{8pt}
 Kim, Sangtae, et al. "Strelka2: fast and accurate calling of germline and somatic variants." Nature methods 15.8 (2018): 591-594.
@@ -97,6 +108,9 @@ Li, Heng, et al. "The sequence alignment/map format and SAMtools." Bioinformatic
 
 \vspace{8pt}
 Li, Heng, and Richard Durbin. "Fast and accurate short read alignment with Burrows–Wheeler transform." Bioinformatics 25.14 (2009): 1754-1760.
+
+\vspace{8pt}
+Liu, Ze, et al. "Swin transformer: Hierarchical vision transformer using shifted windows." Proceedings of the IEEE/CVF International Conference on Computer Vision. 2021.
 
 \vspace{8pt}
 Marco-Sola S., Sammeth M., Guigó R., Ribeca P. "The GEM mapper: fast, accurate and versatile alignment by filtration". Nat Methods. (2012);9(12):1185-1188. doi:10.1038/nmeth.2221
@@ -111,8 +125,7 @@ Paszke, A., et al. "PyTorch: An Imperative Style, High-Performance Deep Learning
 Ramachandran, Anand, et al. "HELLO: A hybrid variant calling approach." bioRxiv (2020).
  
 
- \vspace{8pt}
- \subsection{Ablation experiments}
+\vspace{8pt}
 Vaswani, Ashish, et al. "Attention is all you need." Advances in neural information processing systems 30 (2017).
 
 \end{document}
