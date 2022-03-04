@@ -24,9 +24,7 @@ import torch
 import torch.multiprocessing as mp
 import pysam
 
-import bwasim
 from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample, ensure_dim
-import sim
 import util
 
 
