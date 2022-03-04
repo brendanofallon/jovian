@@ -1,7 +1,6 @@
 import datetime
 import logging
 from collections import defaultdict
-import random
 
 import torch
 import pysam
@@ -125,10 +124,10 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     logger.info(f"Loading model from path {model_path}")
-    attention_heads = 8
-    encoder_layers = 8
-    transformer_dim = 400
-    embed_dim_factor = 100
+    attention_heads = 4
+    encoder_layers = 6
+    transformer_dim = 200
+    embed_dim_factor = 125
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,
@@ -341,7 +340,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size, max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
-        except LowReadCountException:
+        except bam.LowReadCountException:
             logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
