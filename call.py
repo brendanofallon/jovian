@@ -123,10 +123,10 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     logger.info(f"Loading model from path {model_path}")
-    attention_heads = 4
-    encoder_layers = 6
-    transformer_dim = 200
-    embed_dim_factor = 125
+    attention_heads = 8
+    encoder_layers = 8
+    transformer_dim = 400
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,

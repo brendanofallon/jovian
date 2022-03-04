@@ -35,8 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_bigger"
-RUN_NOTES="150 width, 'bigger' training data"
+RUN_NAME="wgs_25m_w150_bigger_cont"
+RUN_NOTES="150 width, 'bigger' training data, continued"
 
 set -x
 
@@ -70,6 +70,7 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 1 \
+    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_bigger/wgs_25m_w150_bigger_epoch2.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"

@@ -71,13 +71,12 @@ def train_model(conf):
 def predict(model, vcf, **kwargs):
     model = load_model(model)
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
-    print(vcf.header)
+    print(vcf.header, end='')
     for var in vcf:
         feats = var_feats(var)
         prediction = model.predict_proba(feats[np.newaxis, ...])
-        print(prediction)
         var.qual = prediction[0, 1]
-        print(var)
+        print(var, end='')
 
 
 def train(conf_file, output, **kwargs):

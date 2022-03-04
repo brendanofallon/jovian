@@ -428,6 +428,7 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     # write to new vcf file object
     return pysam.VariantFile(path, "w", header=vcfh)
 
+
 def prob_to_phred(p, max_qual=1000.0):
     """
     Convert a probability in 0..1 to phred scale
@@ -437,6 +438,7 @@ def prob_to_phred(p, max_qual=1000.0):
         return max_qual
     else:
         return min(max_qual, -10 * np.log10(1.0 - p))
+
 
 def create_vcf_rec(var, vcf_file):
     """
@@ -469,6 +471,7 @@ def create_vcf_rec(var, vcf_file):
     if var.duplicate:
         r.info['DUPLICATE'] = ()
     return r
+
 
 def vars_to_vcf(vcf_file, variants):
     """
