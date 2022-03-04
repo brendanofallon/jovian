@@ -19,7 +19,6 @@ import io
 
 import scipy.stats as stats
 import numpy as np
-import pandas as pd
 import torch
 import torch.multiprocessing as mp
 import pysam
