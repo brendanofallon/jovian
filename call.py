@@ -123,10 +123,10 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     logger.info(f"Loading model from path {model_path}")
-    attention_heads = 8
-    encoder_layers = 8
-    transformer_dim = 400
-    embed_dim_factor = 100
+    attention_heads = 4
+    encoder_layers = 6
+    transformer_dim = 200
+    embed_dim_factor = 125
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,
@@ -212,7 +212,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
 
     totbases = util.count_bases(bed)
-    bases_processed = 0 
+    bases_processed = 0
+    suspicious_region_bases = 0
     #  Iterate over the input BED file, splitting larger regions into chunks of at most 'max_region_size'
     for i, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000)):
         prog = bases_processed / totbases
@@ -221,8 +222,11 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
         # For each range, run the variant calling procedure in a sliding window
-        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=500):
+        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta),
+                                                                 chrom, window_start, window_end, refseq),
+                                            maxdist=100):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
+            suspicious_region_bases += end-start
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
                                                      chrom, start-25, end+2,
                                                      max_read_depth,
@@ -234,6 +238,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
             vcf.vars_to_vcf(vcf_file, sorted(vcf_vars, key=lambda x: x.pos))
 
         bases_processed += window_end - window_start
+    logger.info(f"Total bases run in model: {suspicious_region_bases}")
+    logger.info(f"Total bases in BED: {bases_processed}")
     vcf_file.close()
 
 

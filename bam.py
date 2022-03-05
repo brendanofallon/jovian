@@ -11,7 +11,7 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-EMPTY_TENSOR = torch.zeros(9)
+EMPTY_TENSOR = torch.zeros(10)
 
 
 
@@ -98,7 +98,7 @@ class ReadWindow:
         if len(allreads) > num_reads_to_sample:
             allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
-        t = torch.zeros(end-start, max_reads, 9)
+        t = torch.zeros(end-start, max_reads, EMPTY_TENSOR.shape[0])
 
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
@@ -168,14 +168,15 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped):
-    ebc = torch.zeros(9).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
+def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped, mapq):
+    ebc = torch.zeros(10).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
     ebc = update_from_base(base, ebc)
-    ebc[4] = int(round(qual / 10))
+    ebc[4] = int(round(qual / 10)) - 3
     ebc[5] = consumes_ref_base # Consumes a base on reference seq - which means not insertion
     ebc[6] = consumes_read_base # Consumes a base on read - so not a deletion
     ebc[7] = 1 if strand else 0
     ebc[8] = 1 if clipped else 0
+    ebc[9] = int(mapq / 10) - 3
     return ebc
 
 
@@ -189,7 +190,7 @@ def decode(t):
 
 
 def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0) for b in bases])
+    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0, 0) for b in bases])
 
 
 def target_string_to_tensor(bases):
@@ -267,8 +268,7 @@ def iterate_bases(rec):
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
-        readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped)
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped, rec.mapping_quality)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
