@@ -26,7 +26,7 @@ def var_feats(var):
     feats.append(1 if "SingleCallHet" in var.filter else 0)
     feats.append(1 if "SingleCallHom" in var.filter else 0)
     feats.append(len(var.ref))
-    feats.append(max(len(a) for a in var.alts)))
+    feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
