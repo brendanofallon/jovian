@@ -5,7 +5,7 @@
 #SBATCH --time=1-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a100|3090"
+#SBATCH --gres=gpu:1 --constraint="v100|3090"
 
 
 
@@ -15,7 +15,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="25m"
+GIT_BRANCH="mq_feature"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -31,12 +31,12 @@ PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_w15
 
 
 
-LEARNING_RATE=0.00005
+LEARNING_RATE=0.0001
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_bigger_cont"
-RUN_NOTES="150 width, 'bigger' training data, continued"
+RUN_NAME="wgs_10m_w150_mqfeat"
+RUN_NOTES="150 width, 10M params, new mq feature"
 
 set -x
 
@@ -70,7 +70,6 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 1 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_bigger/wgs_25m_w150_bigger_epoch2.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"

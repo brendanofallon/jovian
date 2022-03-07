@@ -19,7 +19,7 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_conf.yaml
 
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_w150_nochr21or22_bigger/
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mq_nochr21or22_big_forrealnochr21or22/
 
 BATCH_SIZE=256
 
