@@ -31,12 +31,12 @@ PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mq_
 
 
 
-LEARNING_RATE=0.0001
+LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_10m_w150_mqfeat"
-RUN_NOTES="150 width, 10M params, new mq feature"
+RUN_NAME="wgs_25m_w150_mqfeat"
+RUN_NOTES="150 width, 25M params, new mq feature"
 
 set -x
 
