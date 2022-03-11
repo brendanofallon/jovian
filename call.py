@@ -221,7 +221,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
         # For each range, run the variant calling procedure in a sliding window
-        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=500):
+        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=100):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
                                                      chrom, start-25, end+2,
