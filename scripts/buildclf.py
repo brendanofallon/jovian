@@ -8,6 +8,7 @@ import scipy.stats as stats
 import pysam
 import pickle
 import sklearn
+import random
 from sklearn.ensemble import RandomForestClassifier
 
 import logging
@@ -41,21 +42,25 @@ def var_feats(var):
     feats.append(var.samples[0]['DP'])
     return np.array(feats)
 
+
 def extract_feats(vcf):
     allfeats = []
     for var in pysam.VariantFile(vcf, ignore_truncation=True):
         allfeats.append(var_feats(var))
     return allfeats
 
+
 def save_model(mdl, path):
     logger.info(f"Saving model to {path}")
     with open(path, 'wb') as fh:
         pickle.dump(mdl, fh)
-        
+
+
 def load_model(path):
     logger.info(f"Loading model from {path}")
     with open(path, 'rb') as fh:
         return pickle.load(fh)
+
 
 def train_model(conf):
     alltps = []
@@ -64,6 +69,10 @@ def train_model(conf):
         alltps.extend(extract_feats(tpf))
     for fpf in conf['fps']:
         allfps.extend(extract_feats(fpf))
+
+    if len(alltps) > 2 * len(allfps):
+        logger.info(f"Downsampling TPs from {len(alltps)} to about {len(allfps)}")
+        alltps = random.sample(alltps, k=2*len(allfps))
 
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps

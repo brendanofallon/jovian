@@ -171,12 +171,12 @@ def update_from_base(base, tensor):
 def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped, mapq):
     ebc = torch.zeros(10).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
     ebc = update_from_base(base, ebc)
-    ebc[4] = int(round(qual / 10)) - 3
+    ebc[4] = int(round(qual / 10))
     ebc[5] = consumes_ref_base # Consumes a base on reference seq - which means not insertion
     ebc[6] = consumes_read_base # Consumes a base on read - so not a deletion
     ebc[7] = 1 if strand else 0
     ebc[8] = 1 if clipped else 0
-    ebc[9] = int(mapq / 10) - 3
+    ebc[9] = 1 if mapq > 9 else 0
     return ebc
 
 
