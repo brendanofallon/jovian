@@ -35,8 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_mqfeat_cont2"
-RUN_NOTES="150 width, 25M params, new mq feature, continuation #2"
+RUN_NAME="wgs_25m_w150_mqfeat_cont3"
+RUN_NOTES="150 width, 25M params, new mq feature, continuation #3"
 
 set -x
 
@@ -70,7 +70,7 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 1 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_mqfeat_cont/wgs_25m_w150_mqfeat_cont_epoch6.model \
+    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_mqfeat_cont2/wgs_25m_w150_mqfeat_cont2_epoch4.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
