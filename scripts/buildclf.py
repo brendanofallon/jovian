@@ -25,12 +25,17 @@ def var_feats(var):
     feats.append(1 if "LowCov" in var.filter else 0)
     feats.append(1 if "SingleCallHet" in var.filter else 0)
     feats.append(1 if "SingleCallHom" in var.filter else 0)
+    feats.append(len(var.ref))
+    feats.append(max(len(a) for a in var.alts)))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
     feats.append(var.info['WIN_TRANS_COUNT'][0])
     feats.append(var.info['STEP_COUNT'][0])
+    feats.append(var.info['CALL_COUNT'][0])
+    feats.append(min(var.info['VAR_INDEX']))
+    feats.append(max(var.info['VAR_INDEX']))
     feats.append(min(var.info['WIN_OFFSETS']))
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
@@ -79,9 +84,9 @@ def predict(model, vcf, **kwargs):
         print(var, end='')
 
 
-def train(conf_file, output, **kwargs):
+def train(conf, output, **kwargs):
     logger.info("Loading configuration from {conf_file}")
-    conf = yaml.safe_load(open(conf_file).read())
+    conf = yaml.safe_load(open(conf).read())
     model = train_model(conf)
     save_model(model, output)
 
