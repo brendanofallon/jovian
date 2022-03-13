@@ -15,7 +15,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="mq_feature"
+GIT_BRANCH="mq_feature_take2"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -25,9 +25,9 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
-VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mq_chr21and22_big
+VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mq2_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mq_nochr21or22_big_forrealnochr21or22
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_mq2_nochr21or22
 
 
 
@@ -35,8 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_mqfeat_cont3"
-RUN_NOTES="150 width, 25M params, new mq feature, continuation #3"
+RUN_NAME="wgs_25m_w150_mq2"
+RUN_NOTES="150 width, 25M params, mq2"
 
 set -x
 
@@ -59,7 +59,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+# export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
@@ -70,7 +70,6 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 1 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_mqfeat_cont2/wgs_25m_w150_mqfeat_cont2_epoch4.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
