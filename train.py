@@ -329,17 +329,10 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-<<<<<<< HEAD
     attention_heads = 10
-    transformer_dim = 400
+    transformer_dim = 512
     encoder_layers = 10
     embed_dim_factor = 100
-=======
-    attention_heads = 4
-    transformer_dim = 200
-    encoder_layers = 6
-    embed_dim_factor = 125
->>>>>>> master
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=4,
