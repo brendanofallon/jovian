@@ -1,7 +1,6 @@
 import datetime
 import logging
 from collections import defaultdict
-import random
 
 import torch
 import pysam
@@ -17,12 +16,6 @@ logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
-
-class LowReadCountException(Exception):
-    """
-    Region of bam file has too few spanning reads for variant detection
-    """
-    pass
 
 
 def gen_suspicious_spots(aln, chrom, start, stop, refseq):
@@ -190,7 +183,7 @@ def cluster_positions(poslist, maxdist=500):
         yield min(cluster), max(cluster)
 
 
-def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spacing=1000, window_overlap=0, **kwargs):
+def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -205,20 +198,18 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
     :param bed:
     :param reference_fasta:
     :param vcf_out:
-    :param bed_slack:
-    :param window_spacing:
-    :param window_overlap:
-    :param kwargs:
-    :return:
       """
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
+    if 'cuda' in str(DEVICE):
+        for idev in range(torch.cuda.device_count()):
+            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
 
     model = load_model(model_path)
     reference = pysam.FastaFile(reference_fasta)
     aln = pysam.AlignmentFile(bam, reference_filename=reference_fasta)
 
-    vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=30)
+    vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
 
     totbases = util.count_bases(bed)
     bases_processed = 0 
@@ -230,12 +221,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, bed_slack=0, window_spa
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
         # For each range, run the variant calling procedure in a sliding window
-        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=500):
+        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=100):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
-                                                     chrom, start-3, end+2,
+                                                     chrom, start-25, end+2,
                                                      max_read_depth,
-                                                     window_size=300,
+                                                     window_size=150,
                                                      window_step=33)
 
             vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
@@ -328,7 +319,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
       - add depth derived from tensor to vars?
       - create new prob from all duplicate calls?
     """
-    var_retain_window_size = 150
+    var_retain_window_size = 125
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
     window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
@@ -348,7 +339,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size, max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
-        except LowReadCountException:
+        except bam.LowReadCountException:
             logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
