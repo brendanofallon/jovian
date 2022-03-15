@@ -13,9 +13,18 @@ logger = logging.getLogger(__name__)
 
 EMPTY_TENSOR = torch.zeros(9)
 
+
+
+class LowReadCountException(Exception):
+    """
+    Region of bam file has too few spanning reads for variant detection
+    """
+    pass
+
 def readkey(read):
     suf = "-1" if read.is_read1 else "-2"
-    return read.query_name + suf
+    suf2 = "-" + str(read.cigar) + "-" + str(read.reference_start)
+    return read.query_name + suf + suf2
 
 
 class ReadCache:
@@ -80,7 +89,9 @@ class ReadWindow:
                     continue
                 allreads.append((pos, read))
 
-        assert len(allreads) > 0, f"Couldn't find any reads in region {start}-{end}"
+        if len(allreads) < 5:
+            raise LowReadCountException(f"Only {len(allreads)} reads in window")
+            
         if downsample_read_count:
             num_reads_to_sample = downsample_read_count
         else:
@@ -88,12 +99,14 @@ class ReadWindow:
         if len(allreads) > num_reads_to_sample:
             allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
-        t = torch.zeros(end-start, max_reads, 9)
+
+        window_size = end - start
+        t = torch.zeros(window_size, max_reads, 9)
 
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
             enc_start_offset = max(0,  start - readstart)
-            enc_end_offset = min(encoded.shape[0], t.shape[0] - (readstart - start))
+            enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
             t_start_offset = max(0, readstart - start)
             t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
             t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]
