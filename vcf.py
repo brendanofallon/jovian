@@ -418,7 +418,7 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     vcfh.add_meta('INFO', items=[('ID', "STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Number of overlapping steps where var detected in multi-step detection')])
 
-    vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 0), ('Type', 'String'),
+    vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 1), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
 
     vcfh.add_meta('INFO', items=[('ID', "WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
