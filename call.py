@@ -184,7 +184,7 @@ def cluster_positions(poslist, maxdist=500):
         yield min(cluster), max(cluster)
 
 
-def call(model_path, bam, bed, reference_fasta, vcf_out, clf_model_path=None, **kwargs):
+def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -194,11 +194,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, clf_model_path=None, **
       3. call variants in each window
       4. join variants after searching for any duplicates
       5. save to vcf file
-    :param statedict:
+    :param trans_model_path:
     :param bam:
     :param bed:
     :param reference_fasta:
     :param vcf_out:
+    :param clf_model_path:
       """
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
@@ -213,8 +214,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, clf_model_path=None, **
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
 
     # initialize classifier if provided
-    if clf_model_path:
-        classifier_model = buildclf.load_model(clf_model_path)
+    if classifier_path:
+        classifier_model = buildclf.load_model(classifier_path)
 
     totbases = util.count_bases(bed)
     bases_processed = 0 
@@ -240,12 +241,14 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, clf_model_path=None, **
             # covert variants to pysam vcf records
             vcf_records = [vcf.create_vcf_rec(var, vcf_file) for var in sorted(vcf_vars, key=lambda x: x.pos)]
             # if classifier model available then use classifier quality
-            for rec in vcf_records:
-                if clf_model_path:
+            if classifier_path:
+                for rec in vcf_records:
                     rec.info["RAW_QUAL"] = rec.qual
                     rec.qual = buildclf.predict_one_record(classifier_model, rec)
+
             # write to output vcf
-            rec.write(vcf_file)
+            for rec in vcf_records:
+                vcf_file.write(rec)
 
         bases_processed += window_end - window_start
     vcf_file.close()
