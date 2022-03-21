@@ -7,6 +7,7 @@ import pysam
 import pyranges as pr
 
 from model import VarTransformer
+import buildclf
 import vcf
 import util
 import bam
@@ -183,7 +184,7 @@ def cluster_positions(poslist, maxdist=500):
         yield min(cluster), max(cluster)
 
 
-def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
+def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -193,11 +194,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
       3. call variants in each window
       4. join variants after searching for any duplicates
       5. save to vcf file
-    :param statedict:
+    :param trans_model_path:
     :param bam:
     :param bed:
     :param reference_fasta:
     :param vcf_out:
+    :param clf_model_path:
       """
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
@@ -210,6 +212,10 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
     aln = pysam.AlignmentFile(bam, reference_filename=reference_fasta)
 
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
+
+    # initialize classifier if provided
+    if classifier_path:
+        classifier_model = buildclf.load_model(classifier_path)
 
     totbases = util.count_bases(bed)
     bases_processed = 0 
@@ -231,7 +237,18 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
 
             vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
                              reference=reference)
-            vcf.vars_to_vcf(vcf_file, sorted(vcf_vars, key=lambda x: x.pos))
+
+            # covert variants to pysam vcf records
+            vcf_records = [vcf.create_vcf_rec(var, vcf_file) for var in sorted(vcf_vars, key=lambda x: x.pos)]
+            # if classifier model available then use classifier quality
+            if classifier_path:
+                for rec in vcf_records:
+                    rec.info["RAW_QUAL"] = rec.qual
+                    rec.qual = buildclf.predict_one_record(classifier_model, rec)
+
+            # write to output vcf
+            for rec in vcf_records:
+                vcf_file.write(rec)
 
         bases_processed += window_end - window_start
     vcf_file.close()

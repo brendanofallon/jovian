@@ -26,7 +26,7 @@ def var_feats(var):
     feats.append(1 if "SingleCallHet" in var.filter else 0)
     feats.append(1 if "SingleCallHom" in var.filter else 0)
     feats.append(len(var.ref))
-    feats.append(max(len(a) for a in var.alts)))
+    feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
@@ -82,6 +82,19 @@ def predict(model, vcf, **kwargs):
         prediction = model.predict_proba(feats[np.newaxis, ...])
         var.qual = prediction[0, 1]
         print(var, end='')
+
+
+def predict_one_record(loaded_model, var_rec, **kwargs):
+    """
+    given a loaded model object and a pysam variant record, return classifier quality
+    :param loaded_model: loaded model object for classifier
+    :param var_rec: single pysam vcf record
+    :param kwargs:
+    :return: classifier quality
+    """
+    feats = var_feats(var_rec)
+    prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
+    return prediction[0, 1]
 
 
 def train(conf, output, **kwargs):
