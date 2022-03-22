@@ -84,6 +84,19 @@ def predict(model, vcf, **kwargs):
         print(var, end='')
 
 
+def predict_one_record(loaded_model, var_rec, **kwargs):
+    """
+    given a loaded model object and a pysam variant record, return classifier quality
+    :param loaded_model: loaded model object for classifier
+    :param var_rec: single pysam vcf record
+    :param kwargs:
+    :return: classifier quality
+    """
+    feats = var_feats(var_rec)
+    prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
+    return prediction[0, 1]
+
+
 def train(conf, output, **kwargs):
     logger.info("Loading configuration from {conf_file}")
     conf = yaml.safe_load(open(conf).read())
