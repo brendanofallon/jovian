@@ -1,8 +1,11 @@
+import time
 import datetime
 import logging
 from collections import defaultdict
+from functools import partial
 
 import torch
+import torch.multiprocessing as mp
 import pysam
 import pyranges as pr
 
@@ -18,18 +21,21 @@ DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_availa
 
 
 
-def gen_suspicious_spots(aln, chrom, start, stop, refseq):
+def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     """
     Generator for positions of a BAM / CRAM file that may contain a variant. This should be pretty sensitive and
     trigger on anything even remotely like a variant
     This uses the pysam Pileup 'engine', which seems less than ideal but at least it's C code and is probably
     fast. May need to update to something smarter if this
-    :param aln: pysam.AlignmentFile with reads
+    :param bamfile: The alignment file in BAM format.
     :param chrom: Chromosome containing region
     :param start: Start position of region
     :param stop: End position of region (exclusive)
-    :param refseq: Reference sequence of position
+    :param reference_fasta: Reference sequences in fasta
     """
+    aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
+    ref = pysam.FastaFile(reference_fasta)
+    refseq = ref.fetch(chrom, start, stop)
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords"
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
@@ -183,6 +189,18 @@ def cluster_positions(poslist, maxdist=500):
         yield min(cluster), max(cluster)
 
 
+def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
+    chrom, window_start, window_end = window
+
+    return [
+        (chrom, start, end) 
+        for start, end in cluster_positions(
+            gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
+            maxdist=maxdist,
+        )
+    ]
+
+
 def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
@@ -202,8 +220,15 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
     if 'cuda' in str(DEVICE):
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError as err:
+            logger.error(f"pytorch.multiprocessing.set_start_method() failed: {err}")
+            return
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
+
+    start_time = time.perf_counter()
 
     model = load_model(model_path)
     reference = pysam.FastaFile(reference_fasta)
@@ -213,28 +238,45 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
 
     totbases = util.count_bases(bed)
     bases_processed = 0 
-    #  Iterate over the input BED file, splitting larger regions into chunks of at most 'max_region_size'
-    for i, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(bed), max_region_size=1000)):
-        prog = bases_processed / totbases
-        logger.info(f"Processing {chrom}:{window_start}-{window_end}   [{100 * prog :.2f}%]")
-        refseq = reference.fetch(chrom, window_start, window_end)
 
-        # Search the region for positions that may contain a variant, and cluster those into ranges
-        # For each range, run the variant calling procedure in a sliding window
-        for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=500):
-            logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
-            vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
-                                                     chrom, start-25, end+2,
-                                                     max_read_depth,
-                                                     window_size=150,
-                                                     window_step=33)
+    #  Iterate over the input BED file, splitting larger regions into chunks
+    # of at most 'max_region_size'
+    windows = [
+        (chrom, window_start, window_end) for chrom, window_start, window_end in
+        split_large_regions(read_bed_regions(bed), max_region_size=1000)
+    ]
 
-            vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
-                             reference=reference)
-            vcf.vars_to_vcf(vcf_file, sorted(vcf_vars, key=lambda x: x.pos))
+    func = partial(
+        cluster_positions_for_window,
+        bamfile=bam,
+        reference_fasta=reference_fasta,
+        maxdist=500,
+    )
 
-        bases_processed += window_end - window_start
-    vcf_file.close()
+    threads = kwargs.get('threads', 1)
+    logger.info(f"There are {threads} CPUs available")
+
+    regions = []
+    for p in mp.Pool(threads).map(func, windows):
+        regions.extend(p)
+    logger.info(f"Generated a total of {len(regions)} regions for variant calling")
+
+    for chrom, start, end in regions:
+        logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
+        start_time = time.perf_counter()
+        vars_hap0, vars_hap1 = _call_vars_region(
+            region, bam, model, reference, max_read_depth, window_size=150, window_step=33
+        )
+
+    #for vars_hap0, vars_hap1 in mp.Pool(threads).map(func, regions):
+    #        vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
+    #                                reference=reference)
+    #        vcf.vars_to_vcf(vcf_file, sorted(vcf_vars, key=lambda x: x.pos))
+    #    #bases_processed += window_end - window_start
+    #vcf_file.close()
+
+    end_time = time.perf_counter()
+    logger.info(f"Call subcommand finished in {end_time - start_time} seconds!")
 
 
 def call_batch(batch, batch_pos_offsets, model, reference, chrom, window_size):
@@ -303,7 +345,7 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50):
+def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, window_size=300, min_reads=5, window_step=50):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
     tallying all of the variants called, and passing back all call and repeat count info
@@ -319,6 +361,11 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
       - add depth derived from tensor to vars?
       - create new prob from all duplicate calls?
     """
+    chrom, start, end = region[0], region[1] - 25, region[2] + 2
+
+    reference = pysam.FastaFile(reference_fasta)
+    aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
+
     var_retain_window_size = 125
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
@@ -367,6 +414,7 @@ def _call_vars_region(aln, model, reference, chrom, start, end, max_read_depth, 
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
     hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
     #logger.warning(f"Only returning variants in {start} - {end}")
-    logger.info(f"Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+    cp = mp.current_process()
+    logger.info(f"{cp.name} {chrom}:{start}-{end} Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return hap0_passing, hap1_passing
 
