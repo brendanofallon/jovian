@@ -39,7 +39,7 @@ setup(
     packages=packages,
     package_dir={"dnaseq2seq": "dnaseq2seq"},
     package_data={
-        "dnaseq2seq": ["test/resources/*", "test/resources/build_db/*"],
+        "dnaseq2seq": ["test/resources/*", ],
         "": ["*.yaml", "*.tsv", "*.txt"],
     },  # TODO add test documents with schema samples
     include_package_data=True,
