@@ -285,6 +285,7 @@ def main():
 
     callparser = subparser.add_parser("call", help="Call variants")
     callparser.add_argument("-m", "--model-path", help="Stored model", required=True)
+    callparser.add_argument("-c", "--classifier-path", help="Stored variant classifier model", default=None, type=str)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
     callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)

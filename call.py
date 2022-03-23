@@ -10,6 +10,7 @@ import pysam
 import pyranges as pr
 
 from model import VarTransformer
+import buildclf
 import vcf
 import util
 import bam
@@ -190,6 +191,8 @@ def cluster_positions(poslist, maxdist=500):
 
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
+    """
+    """
     chrom, window_start, window_end = window
 
     return [
@@ -201,7 +204,7 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
     ]
 
 
-def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
+def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -211,11 +214,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
       3. call variants in each window
       4. join variants after searching for any duplicates
       5. save to vcf file
-    :param statedict:
+    :param trans_model_path:
     :param bam:
     :param bed:
     :param reference_fasta:
     :param vcf_out:
+    :param clf_model_path:
       """
     max_read_depth = 100
     logger.info(f"Found torch device: {DEVICE}")
@@ -236,8 +240,9 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
 
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
 
-    totbases = util.count_bases(bed)
-    bases_processed = 0 
+    # initialize classifier if provided
+    #if classifier_path:
+    #    classifier_model = buildclf.load_model(classifier_path)
 
     #  Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
@@ -261,22 +266,34 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, **kwargs):
         regions.extend(p)
     logger.info(f"Generated a total of {len(regions)} regions for variant calling")
 
-    for chrom, start, end in regions:
-        logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
-        start_time = time.perf_counter()
+    for i, (chrom, start, end) in enumerate(regions):
+        logger.info(f"Processing region {i + 1}: {chrom}:{start}-{end}")
         vars_hap0, vars_hap1 = _call_vars_region(
             region, bam, model, reference, max_read_depth, window_size=150, window_step=33
         )
 
-    #for vars_hap0, vars_hap1 in mp.Pool(threads).map(func, regions):
-    #        vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
-    #                                reference=reference)
-    #        vcf.vars_to_vcf(vcf_file, sorted(vcf_vars, key=lambda x: x.pos))
-    #    #bases_processed += window_end - window_start
-    #vcf_file.close()
+        #vcf_vars = vcf.vcf_vars(
+        #    vars_hap0=vars_hap0,
+        #    vars_hap1=vars_hap1,
+        #    chrom=chrom,
+        #    window_idx=i,
+        #    aln=aln,
+        #    reference=reference
+        #)
 
-    end_time = time.perf_counter()
-    logger.info(f"Call subcommand finished in {end_time - start_time} seconds!")
+        # covert variants to pysam vcf records
+        #vcf_records = [vcf.create_vcf_rec(var, vcf_file) for var in sorted(vcf_vars, key=lambda x: x.pos)]
+        # if classifier model available then use classifier quality
+        #if classifier_path:
+        #        for rec in vcf_records:
+        #            rec.info["RAW_QUAL"] = rec.qual
+        #            rec.qual = buildclf.predict_one_record(classifier_model, rec)
+
+        # write to output vcf
+        #for rec in vcf_records:
+        #        vcf_file.write(rec)
+
+    #vcf_file.close()
 
 
 def call_batch(batch, batch_pos_offsets, model, reference, chrom, window_size):
@@ -345,6 +362,59 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
+def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
+    """
+    Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
+    batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
+    CPU.
+    Each item in the batch represents a pileup in a single 'window' into the given region of size 'window_size', and
+    subsequent elements are encoded from a sliding window that advances by 'window_step' after each item.
+    If start=100, window_size is 50, and window_step is 10, then the items will include data from regions:
+    100-150
+    110-160
+    120-170,
+    etc
+
+    The start positions for each item in the batch are returned in the 'batch_offsets' element, which is required
+    when variant calling to determine the genomic coordinates of the called variants.
+
+    If the full region size is small this will probably generate just a single batch, but if the region is very large
+    (or batch_size is small) this could generate multiple batches
+
+    :param window_size: Size of region in bp to generate for each item
+    :returns: Generator for tuples of (batch tensor, list of start positions)
+    """
+    window_start = start - 2 * window_step  # We start with regions a bit upstream of the focal / target region
+    batch = []
+    batch_offsets = []
+    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
+    while window_start <= end:
+        try:
+            enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
+            encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
+                                             max_read_depth=max_read_depth)
+            batch.append(encoded_with_ref)
+            batch_offsets.append(window_start)
+        except bam.LowReadCountException:
+            logger.debug(
+                f"Bam window {chrom}:{window_start}-{window_start + window_size} "
+                f"had too few reads for variant calling (< {min_reads})"
+            )
+
+        window_start += window_step
+
+        if len(batch) >= batch_size:
+            encodedreads = torch.stack(batch, dim=0).cpu().float()
+            yield encodedreads, batch_offsets
+            batch = []
+            batch_offsets = []
+
+    # Last few
+    if batch:
+        encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
+        yield encodedreads, batch_offsets
+
+
 def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, window_size=300, min_reads=5, window_step=50):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
@@ -363,58 +433,32 @@ def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, w
     """
     chrom, start, end = region[0], region[1] - 25, region[2] + 2
 
-    reference = pysam.FastaFile(reference_fasta)
-    aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
-
-    var_retain_window_size = 125
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
-    window_start = start - 2 * window_step # We start with regions a bit upstream of the focal / target region
     step_count = 0  # initialize
-    batch_size = 32
-    batch = []
-    batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
+    var_retain_window_size = 125
+    batch_size = 64
+
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
-    while window_start <= (end):
-        #logger.info(f"Window start..end: {window_start} - {window_start + window_size}")
-        # Generate encoded reads and group them into batches for faster forward passes
-        encstart = datetime.datetime.now()
-        try:
-            enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
-            encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size, max_read_depth=max_read_depth)
-            batch.append(encoded_with_ref)
-            batch_offsets.append(window_start)
-        except bam.LowReadCountException:
-            logger.debug(
-                f"Bam window {chrom}:{window_start}-{window_start + window_size} "
-                f"had too few reads for variant calling (< {min_reads})"
-            )
+    encstart = datetime.datetime.now()
+    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end, max_read_depth,
+                                               window_size=window_size,
+                                               min_reads=min_reads,
+                                               window_step=window_step,
+                                               batch_size=batch_size):
+        logger.info(f"Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        if len(batch) > batch_size:
-            batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
-            batch = []
-            batch_offsets = []
-            allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count - len(batch), var_retain_window_size)
-        calltime_total += (datetime.datetime.now() - callstart)
-        # continue
-        window_start += window_step
-        step_count += 1
-
-    # Process any remaining items
-    if batch:
-        callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
-        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count - len(batch),
-                                              var_retain_window_size)
+        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, var_retain_window_size)
         calltime_total += (datetime.datetime.now() - callstart)
+
+        step_count += batch.shape[0]
+
     # Only return variants that are actually in the window
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
     hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
-    #logger.warning(f"Only returning variants in {start} - {end}")
-    cp = mp.current_process()
-    logger.info(f"{cp.name} {chrom}:{start}-{end} Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
-    return hap0_passing, hap1_passing
 
+    logger.info(f"Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+    return hap0_passing, hap1_passing
