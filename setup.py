@@ -11,7 +11,38 @@ packages = [
     "dnaseq2seq",
 ]
 
+conda_requirements_file = "conda_requirements.yaml"
 pip_requirements_file = "pip_requirements.txt"
+
+
+def install_required_conda_packages():
+    """
+    This function installs the dependent packages defined in conda_requirements.yaml
+    :return:
+    """
+    if not os.path.exists(conda_requirements_file):
+        print(
+            f"WARNING: Cannot file: '{conda_requirements_file}'\n\t"
+            f"SKIPPING CONDA REQUIREMENTS INSTALLATION!"
+            f"WARNING: Cannot file: '{conda_requirements_file}'\n\t"
+            f"SKIPPING CONDA REQUIREMENTS INSTALLATION!"
+        )
+        return
+
+    print(f"Installing packages defined in {conda_requirements_file}")
+    env = os.environ.get("CONDA_DEFAULT_ENV", "base")
+    cmd = [
+        "conda",
+        "env",
+        "update",
+        "-v",
+        "--name",
+        env,
+        "--file",
+        conda_requirements_file,
+    ]
+    print(f"Running command: {cmd}")
+    subprocess.check_call(cmd)
 
 
 def install_required_pip_packages():
@@ -41,6 +72,7 @@ class DNAseq2seqInstallCommand(install):
     """
 
     def run(self):
+        install_required_conda_packages()
         install_required_pip_packages()
         install.run(self)
 
