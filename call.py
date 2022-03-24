@@ -1,4 +1,5 @@
 import time
+import math
 import datetime
 import logging
 from collections import defaultdict
@@ -193,10 +194,10 @@ def cluster_positions(poslist, maxdist=500):
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
     """
     """
-    chrom, window_start, window_end = window
-
+    chrom, window_idx, window_start, window_end = window
+    
     return [
-        (chrom, start, end) 
+        (chrom, window_idx, start, end) 
         for start, end in cluster_positions(
             gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
             maxdist=maxdist,
@@ -234,21 +235,22 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
     start_time = time.perf_counter()
 
-    model = load_model(model_path)
     reference = pysam.FastaFile(reference_fasta)
     aln = pysam.AlignmentFile(bam, reference_filename=reference_fasta)
 
     vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
 
     # initialize classifier if provided
-    #if classifier_path:
-    #    classifier_model = buildclf.load_model(classifier_path)
+    if classifier_path:
+        classifier_model = buildclf.load_model(classifier_path)
 
     #  Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
     windows = [
-        (chrom, window_start, window_end) for chrom, window_start, window_end in
-        split_large_regions(read_bed_regions(bed), max_region_size=1000)
+        (chrom, window_idx, window_start, window_end) 
+        for window_idx, (chrom, window_start, window_end) in enumerate(
+            split_large_regions(read_bed_regions(bed), max_region_size=1000)
+        )
     ]
 
     func = partial(
@@ -266,46 +268,53 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         regions.extend(p)
     logger.info(f"Generated a total of {len(regions)} regions for variant calling")
 
-    for i, (chrom, start, end) in enumerate(regions):
-        logger.info(f"Processing region {i + 1}: {chrom}:{start}-{end}")
-        vars_hap0, vars_hap1 = _call_vars_region(
-            region, bam, model, reference, max_read_depth, window_size=150, window_step=33
+    func = partial(
+        _call_vars_region,
+        bamfile=bam,
+        model_path=model_path,
+        reference_fasta=reference_fasta,
+        max_read_depth=max_read_depth,
+        window_size=150,
+        window_step=33,
+    )
+
+    for chrom, window_idx, vars_hap0, vars_hap1 in mp.Pool(threads).map(func, regions):
+
+        vcf_vars = vcf.vcf_vars(
+            vars_hap0=vars_hap0,
+            vars_hap1=vars_hap1,
+            chrom=chrom,
+            window_idx=window_idx,
+            aln=aln,
+            reference=reference
         )
 
-        #vcf_vars = vcf.vcf_vars(
-        #    vars_hap0=vars_hap0,
-        #    vars_hap1=vars_hap1,
-        #    chrom=chrom,
-        #    window_idx=i,
-        #    aln=aln,
-        #    reference=reference
-        #)
-
         # covert variants to pysam vcf records
-        #vcf_records = [vcf.create_vcf_rec(var, vcf_file) for var in sorted(vcf_vars, key=lambda x: x.pos)]
+        vcf_records = [vcf.create_vcf_rec(var, vcf_file) for var in sorted(vcf_vars, key=lambda x: x.pos)]
         # if classifier model available then use classifier quality
-        #if classifier_path:
-        #        for rec in vcf_records:
-        #            rec.info["RAW_QUAL"] = rec.qual
-        #            rec.qual = buildclf.predict_one_record(classifier_model, rec)
+        if classifier_path:
+                for rec in vcf_records:
+                    rec.info["RAW_QUAL"] = rec.qual
+                    rec.qual = buildclf.predict_one_record(classifier_model, rec)
 
         # write to output vcf
-        #for rec in vcf_records:
-        #        vcf_file.write(rec)
+        for rec in vcf_records:
+                vcf_file.write(rec)
 
-    #vcf_file.close()
+    vcf_file.close()
+
+    end_time = time.perf_counter()
+    logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
 
 
-def call_batch(batch, batch_pos_offsets, model, reference, chrom, window_size):
+def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
     mismatching parts
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
-    #logger.info(f"Forward pass of batch with size {len(batch)}")
-    encodedreads = torch.stack(batch, dim=0).to(DEVICE).float()
-    seq_preds = model(encodedreads)
+    seq_preds = model(encoded_reads.to(DEVICE))
     calledvars = []
     for b in range(seq_preds.shape[0]):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
@@ -362,7 +371,7 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
+def _encode_region(bamfile, reference_fasta, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -384,6 +393,8 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
+    aln = pysam.AlignmentFile(bamfile)
+    reference = pysam.FastaFile(reference_fasta)
     window_start = start - 2 * window_step  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
@@ -415,7 +426,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
         yield encodedreads, batch_offsets
 
 
-def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, window_size=300, min_reads=5, window_step=50):
+def _call_vars_region(region, bamfile, model_path, reference_fasta, max_read_depth, window_size=300, min_reads=5, window_step=50):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
     tallying all of the variants called, and passing back all call and repeat count info
@@ -431,7 +442,12 @@ def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, w
       - add depth derived from tensor to vars?
       - create new prob from all duplicate calls?
     """
-    chrom, start, end = region[0], region[1] - 25, region[2] + 2
+    cpname = mp.current_process().name
+    chrom, window_idx, start, end = region[0], region[1], region[2] - 25, region[3] + 2
+    logger.info(f"{cpname}: Processing region: {chrom}:{start}-{end}")
+
+    model = load_model(model_path)
+    reference = pysam.FastaFile(reference_fasta)
 
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
@@ -442,12 +458,13 @@ def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, w
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end, max_read_depth,
+    for batch, batch_offsets in _encode_region(bamfile, reference_fasta, chrom, start, end,
+                                               max_read_depth,
                                                window_size=window_size,
                                                min_reads=min_reads,
                                                window_step=window_step,
                                                batch_size=batch_size):
-        logger.info(f"Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+        logger.info(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
@@ -460,5 +477,5 @@ def _call_vars_region(region, bamfile, model, reference_fasta, max_read_depth, w
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
     hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
 
-    logger.info(f"Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
-    return hap0_passing, hap1_passing
+    logger.info(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+    return chrom, window_idx, hap0_passing, hap1_passing
