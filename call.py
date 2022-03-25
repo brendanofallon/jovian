@@ -233,7 +233,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
                                                      chrom, start-25, end+2,
                                                      max_read_depth,
                                                      window_size=150,
-                                                     window_step=33)
+                                                     window_step=20)
 
             vcf_vars = vcf.vcf_vars(vars_hap0=vars_hap0, vars_hap1=vars_hap1, chrom=chrom, window_idx=i, aln=aln,
                              reference=reference)
