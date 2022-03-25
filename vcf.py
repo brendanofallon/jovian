@@ -417,14 +417,14 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
                                  ('Description', 'Number of model haplotype calls of this var in multi-step detection')])
     vcfh.add_meta('INFO', items=[('ID', "STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Number of overlapping steps where var detected in multi-step detection')])
-
     vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 1), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
-
     vcfh.add_meta('INFO', items=[('ID', "WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Position of call within calling window')])
     vcfh.add_meta('INFO', items=[('ID', "VAR_INDEX"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Order of call in window')])
+    vcfh.add_meta('INFO', items=[('ID', "RAW_QUAL"), ('Number', 1), ('Type', 'Float'),
+                                 ('Description', 'Original quality if classifier used to update QUAL field')])
     # write to new vcf file object
     return pysam.VariantFile(path, "w", header=vcfh)
 
@@ -484,4 +484,3 @@ def vars_to_vcf(vcf_file, variants):
     for var in variants:
         r = create_vcf_rec(var, vcf_file)
         vcf_file.write(r)
-

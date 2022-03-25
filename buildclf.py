@@ -26,7 +26,7 @@ def var_feats(var):
     feats.append(1 if "SingleCallHet" in var.filter else 0)
     feats.append(1 if "SingleCallHom" in var.filter else 0)
     feats.append(len(var.ref))
-    feats.append(max(len(a) for a in var.alts)))
+    feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
@@ -57,7 +57,7 @@ def load_model(path):
     with open(path, 'rb') as fh:
         return pickle.load(fh)
 
-def train_model(conf):
+def train_model(conf, threads):
     alltps = []
     allfps = []
     for tpf in conf['tps']:
@@ -68,7 +68,7 @@ def train_model(conf):
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
     y = np.array([1.0 for _ in range(len(alltps))] + [0.0 for _ in range(len(allfps))])
-    clf = RandomForestClassifier(n_estimators=100, max_depth=None, random_state=0, max_features=None)
+    clf = RandomForestClassifier(n_estimators=100, max_depth=None, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
     clf.fit(feats, y)
     return clf
 
@@ -78,21 +78,35 @@ def predict(model, vcf, **kwargs):
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
     print(vcf.header, end='')
     for var in vcf:
-        feats = var_feats(var)
-        prediction = model.predict_proba(feats[np.newaxis, ...])
-        var.qual = prediction[0, 1]
+        proba = predict_one_record(model, var)
+        var.qual = proba
         print(var, end='')
+
+
+def predict_one_record(loaded_model, var_rec, **kwargs):
+    """
+    given a loaded model object and a pysam variant record, return classifier quality
+    :param loaded_model: loaded model object for classifier
+    :param var_rec: single pysam vcf record
+    :param kwargs:
+    :return: classifier quality
+    """
+    feats = var_feats(var_rec)
+    prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
+    return prediction[0, 1]
 
 
 def train(conf, output, **kwargs):
     logger.info("Loading configuration from {conf_file}")
     conf = yaml.safe_load(open(conf).read())
-    model = train_model(conf)
+    model = train_model(conf, threads=kwargs.get('threads'))
     save_model(model, output)
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("-t", "--threads", help="Number of threads to use", type=int, default=-1) # -1 means all threads
+    
     subparser = parser.add_subparsers()
 
     trainparser = subparser.add_parser("train", help="Train a new model")
@@ -111,3 +125,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
