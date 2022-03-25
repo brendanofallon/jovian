@@ -301,6 +301,29 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
 
 
+def split_even_chunks(n_item, n_chunk):
+    """
+    This function splits n_items into n_chunk chunks
+    :param n_item : total number of items that will be splitted.
+    :param n_chunk: the number of chunks
+    :return chunks: the start index and end index of each chunk.
+    """
+    chunks = []
+    chunk_size = n_item // n_chunk
+    num_left = n_item - chunk_size * n_chunk
+    for i in range(n_chunk):
+        chunks.append(chunk_size)
+    for i in range(num_left):
+        chunks[i] += 1
+
+    start_idx = 0
+    end_idx = 0
+    for i in range(n_chunk):
+        start_idx = end_idx
+        end_idx = start_idx + chunks[i]
+        yield (start_idx, end_idx)
+
+
 def call_variants_on_chrom(
     chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir
 ):
@@ -321,6 +344,8 @@ def call_variants_on_chrom(
 
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
+
+    logger.info(f"Creating windows from {bed}")
     windows = [
         (chrom, window_idx, window_start, window_end) 
         for window_idx, (chrom, window_start, window_end) in enumerate(
@@ -335,13 +360,21 @@ def call_variants_on_chrom(
         maxdist=500,
     )
 
-    regions = []
-    for p in mp.Pool(threads).map(func, windows):
-        regions.extend(p)
-    logger.info(f"Generated a total of {len(regions)} regions on chromosome {chrom}")
+    logger.info(f"Generating regions from windows...")
+    region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
+    n_regions = 0
+    with open(region_file, "w") as rfh:
+        for regions in mp.Pool(threads).map(func, windows):
+            for r in regions:
+                print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
+                n_regions += 1
+    logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
+
+    chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
 
     func = partial(
-        process_region,
+        process_chunk_regions,
+        region_file=region_file,
         bamfile=bamfile,
         model_path=model_path,
         reference_fasta=reference_fasta,
@@ -352,28 +385,32 @@ def call_variants_on_chrom(
         window_step=33,
     )
 
-    chrom_vcf = f"{tmpdir}/chrom_{chrom}.{len(regions)}.vcf"
+    chrom_vcf = f"{tmpdir}/chrom_{chrom}.vcf"
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
     vcf_file.close()
 
-    chrom_nvars = 0
+    chrom_nvar = 0
     with open(chrom_vcf, "a") as chrom_vfh:
-        for nvar, vcfname in [f for f in mp.Pool(threads).map(func, regions)]:
-            for var in pysam.VariantFile(vcfname):
+        for chunk_nvar, chunk_vcf in [
+            f for f in mp.Pool(threads).map(func, chunks)
+        ]:
+            for var in pysam.VariantFile(chunk_vcf):
                 chrom_vfh.write(str(var))
-            os.unlink(vcfname)
-            chrom_nvars += nvar
+            os.unlink(chunk_vcf)
+            chrom_nvar += chunk_nvar
 
     logger.info(
-        f"A total of {chrom_nvars} variants called on chromosome {chrom} and saved "
+        f"A total of {chrom_nvar} variants called on chromosome {chrom} and saved "
         f"to {chrom_vcf}"
     )
+    os.unlink(region_file)
     
     return chrom_vcf
 
 
-def process_region(
-    region,
+def process_chunk_regions(
+    chunk,
+    region_file,
     bamfile,
     model_path,
     reference_fasta,
@@ -387,40 +424,65 @@ def process_region(
     """
     Call variants on the given region and write variants to a temporary VCF file.
     """
-    chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
-        region,
-        bamfile=bamfile,
-        model_path=model_path,
-        reference_fasta=reference_fasta,
-        max_read_depth=max_read_depth,
-        window_size=window_size,
-        min_reads=min_reads,
-        window_step=window_step
-    )
+    chrom, start_idx, end_idx = chunk
+    chunk_vcf =f"{tmpdir}/chrom_{chrom}.chunk_{start_idx}-{end_idx}.vcf"
+    chunk_vfh = vcf.init_vcf(chunk_vcf, sample_name="sample", lowcov=20)
+    chunk_vfh.close()
 
-    nvar, vcfname = vars_hap_to_records(
-        chrom,
-        window_idx=window_idx,
-        vars_hap0=vars_hap0,
-        vars_hap1=vars_hap1,
-        bamfile=bamfile,
-        reference_fasta=reference_fasta,
-        classifier_path=classifier_path,
-        tmpdir=tmpdir,
-    )
+    aln = pysam.AlignmentFile(bamfile)
+    reference = pysam.FastaFile(reference_fasta)
+    model = load_model(model_path)
 
-    return nvar, vcfname
+    # if classifier model available then use classifier quality
+    classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
+
+    chunk_nvar = 0
+    with open(region_file) as fh, open(chunk_vcf, "a") as chunk_vfh:
+        for idx, line in enumerate(fh):
+            if idx < start_idx or idx >= end_idx:
+                continue
+            chrom, window_idx, start, end  = line.strip().split("\t")[0:4]
+            window_idx, start, end = int(window_idx), int(start), int(end)
+    
+            chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
+                chrom,
+                window_idx,
+                start - 25,
+                end + 2,
+                aln=aln,
+                model=model,
+                reference=reference,
+                max_read_depth=max_read_depth,
+                window_size=window_size,
+                min_reads=min_reads,
+                window_step=window_step
+            )
+
+            nvar, vcfname = vars_hap_to_records(
+                chrom,
+                window_idx=window_idx,
+                vars_hap0=vars_hap0,
+                vars_hap1=vars_hap1,
+                aln=aln,
+                reference=reference,
+                classifier_model=classifier_model,
+                tmpdir=tmpdir,
+            )
+
+            for var in pysam.VariantFile(vcfname):
+                chunk_vfh.write(str(var))
+            os.unlink(vcfname)
+            chunk_nvar += nvar
+
+    return chunk_nvar, chunk_vcf
 
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, bamfile, reference_fasta, classifier_path, tmpdir,
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir,
 ):
     """
     Convert variant haplotypes to variant records and write the records to a temporary VCF file.
     """
-    aln = pysam.AlignmentFile(bamfile)
-    reference = pysam.FastaFile(reference_fasta)
-    
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
         vars_hap1=vars_hap1,
@@ -442,13 +504,9 @@ def vars_hap_to_records(
         for var in sorted(vcf_vars, key=lambda x: x.pos)
     ]
 
-    # if classifier model available then use classifier quality
-    if classifier_path:
-        classifier_model = buildclf.load_model(classifier_path)
-
     # write to a chunk VCF
     for rec in vcf_records:
-        if classifier_path:
+        if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
             rec.qual = buildclf.predict_one_record(classifier_model, rec)
         vcf_file.write(rec)
@@ -522,7 +580,7 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _encode_region(bamfile, reference_fasta, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
+def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -544,8 +602,6 @@ def _encode_region(bamfile, reference_fasta, chrom, start, end, max_read_depth, 
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    aln = pysam.AlignmentFile(bamfile)
-    reference = pysam.FastaFile(reference_fasta)
     window_start = start - 2 * window_step  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
@@ -577,7 +633,9 @@ def _encode_region(bamfile, reference_fasta, chrom, start, end, max_read_depth, 
         yield encodedreads, batch_offsets
 
 
-def _call_vars_region(region, bamfile, model_path, reference_fasta, max_read_depth, window_size=300, min_reads=5, window_step=50):
+def _call_vars_region(
+    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5, window_step=50
+):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
     tallying all of the variants called, and passing back all call and repeat count info
@@ -594,11 +652,9 @@ def _call_vars_region(region, bamfile, model_path, reference_fasta, max_read_dep
       - create new prob from all duplicate calls?
     """
     cpname = mp.current_process().name
-    chrom, window_idx, start, end = region[0], region[1], region[2] - 25, region[3] + 2
-    logger.info(f"{cpname}: Processing region: {chrom}:{start}-{end}")
-
-    model = load_model(model_path)
-    reference = pysam.FastaFile(reference_fasta)
+    logger.info(
+        f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
+    )
 
     allvars0 = defaultdict(list)
     allvars1 = defaultdict(list)
@@ -610,7 +666,7 @@ def _call_vars_region(region, bamfile, model_path, reference_fasta, max_read_dep
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
     
-    for batch, batch_offsets in _encode_region(bamfile, reference_fasta, chrom, start, end,
+    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
                                                window_size=window_size,
                                                min_reads=min_reads,
