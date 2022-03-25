@@ -1,9 +1,11 @@
+import os
 import time
 import math
 import datetime
 import logging
 from collections import defaultdict
 from functools import partial
+from tempfile import NamedTemporaryFile as NTFile
 
 import torch
 import torch.multiprocessing as mp
@@ -19,8 +21,7 @@ import bam
 logger = logging.getLogger(__name__)
 
 
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
-
+DEVICE = torch.device("cpu")
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
@@ -130,7 +131,6 @@ def reconcile_current_window(prev_win, current_win):
 
 
 def load_model(model_path):
-    logger.info(f"Loading model from path {model_path}")
     attention_heads = 8
     encoder_layers = 8
     transformer_dim = 400
@@ -193,6 +193,7 @@ def cluster_positions(poslist, maxdist=500):
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
     """
+    Generate a list of ranges containing a list of posistions from the given window
     """
     chrom, window_idx, window_start, window_end = window
     
@@ -221,28 +222,10 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param reference_fasta:
     :param vcf_out:
     :param clf_model_path:
-      """
-    max_read_depth = 100
-    logger.info(f"Found torch device: {DEVICE}")
-    if 'cuda' in str(DEVICE):
-        try:
-            mp.set_start_method('spawn')
-        except RuntimeError as err:
-            logger.error(f"pytorch.multiprocessing.set_start_method() failed: {err}")
-            return
-        for idev in range(torch.cuda.device_count()):
-            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
-
+    """
     start_time = time.perf_counter()
-
-    reference = pysam.FastaFile(reference_fasta)
-    aln = pysam.AlignmentFile(bam, reference_filename=reference_fasta)
-
-    vcf_file = vcf.init_vcf(vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
-
-    # initialize classifier if provided
-    if classifier_path:
-        classifier_model = buildclf.load_model(classifier_path)
+    max_read_depth = 100
+    logger.info(f"The model will be loaded from path {model_path}")
 
     #  Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
@@ -278,33 +261,83 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         window_step=33,
     )
 
-    for chrom, window_idx, vars_hap0, vars_hap1 in mp.Pool(threads).map(func, regions):
+    var_haps = [
+        (chrom, window_idx, vars_hap0, vars_hap1) 
+        for chrom, window_idx, vars_hap0, vars_hap1 in mp.Pool(threads).map(func, regions)
+    ]
 
-        vcf_vars = vcf.vcf_vars(
-            vars_hap0=vars_hap0,
-            vars_hap1=vars_hap1,
-            chrom=chrom,
-            window_idx=window_idx,
-            aln=aln,
-            reference=reference
-        )
+    logger.info(f"Called {len(var_haps)} variant haplotypes")
+    
+    func = partial(
+        var_haps_to_records,
+        bamfile=bam,
+        reference_fasta=reference_fasta,
+        classifier_path=classifier_path,
+    )
 
-        # covert variants to pysam vcf records
-        vcf_records = [vcf.create_vcf_rec(var, vcf_file) for var in sorted(vcf_vars, key=lambda x: x.pos)]
-        # if classifier model available then use classifier quality
-        if classifier_path:
-                for rec in vcf_records:
-                    rec.info["RAW_QUAL"] = rec.qual
-                    rec.qual = buildclf.predict_one_record(classifier_model, rec)
-
-        # write to output vcf
-        for rec in vcf_records:
-                vcf_file.write(rec)
-
+    vcf_file = vcf.init_vcf(
+        vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline')
+    )
     vcf_file.close()
+
+    with open(vcf_out, "a") as out_fh:
+        for vcfname in [f for f in mp.Pool(threads).map(func, var_haps)]:
+            with open(vcfname) as fh:
+                for l in fh:
+                    if l.startswith("#"):
+                        continue
+                    out_fh.write(l)
+            os.unlink(vcfname)
 
     end_time = time.perf_counter()
     logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
+
+
+def var_haps_to_records(varhap, bamfile, reference_fasta, classifier_path):
+    """
+    Convert variant haplotypes to variant records
+    """
+    chrom, window_idx, vars_hap0, vars_hap1 = varhap
+
+    aln = pysam.AlignmentFile(bamfile)
+    reference = pysam.FastaFile(reference_fasta)
+    
+    vcf_vars = vcf.vcf_vars(
+        vars_hap0=vars_hap0,
+        vars_hap1=vars_hap1,
+        chrom=chrom,
+        window_idx=window_idx,
+        aln=aln,
+        reference=reference
+    )
+
+    vcfh = NTFile(
+        mode="w+t", delete=False, suffix=".vcf", dir=".", 
+        prefix=f"chrom_{chrom}_w{window_idx}."
+    )
+    vcfh.close()
+    vcf_file = vcf.init_vcf(vcfh.name, sample_name="sample", lowcov=20)
+
+    # covert variants to pysam vcf records
+    vcf_records = [
+        vcf.create_vcf_rec(var, vcf_file)
+        for var in sorted(vcf_vars, key=lambda x: x.pos)
+    ]
+    vcf_file.close()
+
+    # if classifier model available then use classifier quality
+    if classifier_path:
+        classifier_model = buildclf.load_model(classifier_path)
+
+    # write to a chunk VCF
+    with open(vcfh.name, "a") as fh:
+        for rec in vcf_records:
+            if classifier_path:
+                rec.info["RAW_QUAL"] = rec.qual
+                rec.qual = buildclf.predict_one_record(classifier_model, rec)
+            fh.write(str(rec))
+
+    return vcfh.name
 
 
 def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size):
@@ -458,6 +491,7 @@ def _call_vars_region(region, bamfile, model_path, reference_fasta, max_read_dep
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
+    
     for batch, batch_offsets in _encode_region(bamfile, reference_fasta, chrom, start, end,
                                                max_read_depth,
                                                window_size=window_size,
