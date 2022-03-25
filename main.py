@@ -175,7 +175,7 @@ def pregen(config, **kwargs):
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 100)
-    samples_per_pos = kwargs.get('samples_per_pos', 8)
+    samples_per_pos = kwargs.get('samples_per_pos', 2)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
@@ -248,7 +248,6 @@ def main():
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
-    genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
