@@ -28,7 +28,6 @@ CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
 PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_w150_nochr21or22_bigger
-#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_finetuned_test
 
 
 
@@ -36,8 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_bigger_cont7_finetunetest"
-RUN_NOTES="150 width, 'bigger' training data, trying a quick finetuning from FP and FN regions "
+RUN_NAME="wgs_25m_w150_bigger_anotherchpc"
+RUN_NOTES="Another 25m 'bigger' replicate"
 
 set -x
 
@@ -71,7 +70,6 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 1 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_bigger_cont7/wgs_25m_w150_bigger_cont7_epoch3.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
