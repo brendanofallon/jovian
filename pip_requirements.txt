@@ -1,0 +1,9 @@
+pysam
+torch
+numpy
+pandas
+pyyaml
+scipy
+tensorboard
+lz4
+ssw_aligner

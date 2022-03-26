@@ -5,9 +5,9 @@ import numpy as np
 import pysam
 import torch
 import logging
-
-import util
 from collections import defaultdict
+
+from dnaseq2seq import util
 
 logger = logging.getLogger(__name__)
 
