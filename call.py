@@ -198,6 +198,11 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
     """
     chrom, window_idx, window_start, window_end = window
     
+    cpname = mp.current_process().name
+    logger.info(
+        f"{cpname}: Generating regions from window {window_idx}: "
+        f"{window_start}-{window_end} on chromosome {chrom}"
+    )
     return [
         (chrom, window_idx, start, end) 
         for start, end in cluster_positions(
@@ -360,7 +365,7 @@ def call_variants_on_chrom(
         maxdist=500,
     )
 
-    logger.info(f"Generating regions from windows...")
+    logger.info(f"Generating regions from windows on chromosome {chrom}...")
     region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
     n_regions = 0
     with open(region_file, "w") as rfh:
