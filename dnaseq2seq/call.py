@@ -13,11 +13,11 @@ import pysam
 import pyranges as pr
 import pandas as pd
 
-from model import VarTransformer
-import buildclf
-import vcf
-import util
-import bam
+from dnaseq2seq.model import VarTransformer
+from dnaseq2seq import buildclf
+from dnaseq2seq import vcf
+from dnaseq2seq import util
+from dnaseq2seq import bam
 
 logger = logging.getLogger(__name__)
 
