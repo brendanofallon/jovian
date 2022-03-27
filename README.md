@@ -23,6 +23,7 @@ The following libraries are required:
     scipy
     tensorboard
     lz4
+    pygit2
     ssw_aligner
     scikit-bio
     intervaltree
