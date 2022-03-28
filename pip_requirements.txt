@@ -7,3 +7,8 @@ scipy
 tensorboard
 lz4
 ssw_aligner
+scikit-bio
+intervaltree
+pygit2
+pyranges
+Cython
