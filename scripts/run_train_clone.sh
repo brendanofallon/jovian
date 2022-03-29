@@ -35,8 +35,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_50m_bigger_cont8"
-RUN_NOTES="50M model, width 150, contination8"
+RUN_NAME="wgs_50m_bigger_cont9"
+RUN_NOTES="50M model, width 150, contination9"
 
 set -x
 
@@ -71,7 +71,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 1 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_50m_bigger_cont7/wgs_50m_bigger_cont7_epoch1.model \
+    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_50m_bigger_cont8/wgs_50m_bigger_cont8_epoch1.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
