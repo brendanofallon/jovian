@@ -29,6 +29,7 @@ def var_feats(var):
     feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
+    feats.append(sum(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
     feats.append(var.info['WIN_TRANS_COUNT'][0])
@@ -68,7 +69,7 @@ def train_model(conf, threads):
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
     y = np.array([1.0 for _ in range(len(alltps))] + [0.0 for _ in range(len(allfps))])
-    clf = RandomForestClassifier(n_estimators=100, max_depth=None, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
+    clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=16, class_weight="balanced", n_jobs=threads)
     clf.fit(feats, y)
     return clf
 
