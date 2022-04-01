@@ -1,9 +1,12 @@
+import os
 import torch
 import numpy as np
 import gzip
 import lz4.frame
 import io
+from pathlib import Path
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +18,64 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+def var_type(variant):
+    if len(variant.ref) == 1 and len(variant.alt) == 1:
+        return 'snv'
+    elif len(variant.ref) == 0 and len(variant.alt) > 0:
+        return 'ins'
+    elif len(variant.ref) > 0 and len(variant.alt) == 0:
+        return 'del'
+    elif len(variant.ref) > 0 and len(variant.alt) > 0:
+        return 'mnv'
+    print(f"Whoa, unknown variant type: {variant}")
+    return 'unknown'
+
+def concat_metafile(sample_metafile, dest_metafh):
+    """
+    Concate the given sample metadata file to destination metadata file. 
+    The sample metadata file is also removed as a side effect!
+
+    :param smaple_metafile: the path of sample metadata
+    :param dest_metafh: the file handle of destination metadata file.
+    """
+    with open(sample_metafile, 'rb') as sample_fh:
+        shutil.copyfileobj(sample_fh, dest_metafh)
+    os.unlink(sample_metafile)
+
+
+def find_tgt(suffix, files):
+    found = None
+    for tgt in files:
+        tsuf = tgt.name.split("_")[-1].split(".")[0]
+        if tsuf == suffix:
+            if found:
+                raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
+            found = tgt
+            break
+    if found is None:
+        raise ValueError(f"Could not find matching tgt file for {suffix}")
+    return found
+
+
+def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt'):
+    """
+    Examine files in datadir and match up all src / tgt / vaftgt files and store them as tuples in a list
+    :returns : List of (src, tgt, vaftgt) tuples of matched files
+    """
+    datadir = Path(datadir)
+    allsrc = list(datadir.glob(src_prefix + "*"))
+    pairs = []
+    for src in allsrc:
+        suffix = src.name.split("_")[-1]
+        pairs.append((src,
+                     f"{datadir}/{tgt_prefix}_{suffix}",
+                     f"{datadir}/{vaftgt_prefix}_{suffix}"
+                      ))
+    return pairs
 
 def tensor_from_lz4(path, device):
-    return torch.load(io.BytesIO(lz4.frame.decompress(path)), map_location=device)
+    with io.BytesIO(lz4.frame.decompress(path)) as bfh:
+        return torch.load(bfh, map_location=device)
 
 
 def tensor_from_gzip(path, device):
@@ -27,13 +85,13 @@ def tensor_from_gzip(path, device):
 def tensor_from_file(path, device):
     with open(path, "rb") as fh:
         data = fh.read()
-    if str(path).endswith('.gz'):
-        return tensor_from_gz(data, device)
-    elif str(path).endswith('.lz4'):
+    if str(path).endswith('.lz4'):
         return tensor_from_lz4(data, device)
     else:
         return torch.load(path, map_location=device)
 
+def sortreads(reads):
+    return sorted(reads, key=lambda r: r.reference_start)
 
 def unzip_load(path, device='cpu'):
     """
@@ -109,3 +167,16 @@ def writeseqtensor(t):
             base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
         print(f"{base}", end="")
     print()
+
+def count_bases(bedpath):
+    """
+    Return total number of bases in a BED file
+    """
+    tot = 0
+    with open(bedpath) as fh:
+        for line in fh:
+            if len(line.strip())==0 or line.startswith("#"):
+                continue
+            toks = line.split("\t")
+            tot += int(toks[2]) - int(toks[1])
+    return tot

@@ -1,50 +1,145 @@
 
 import random
 import traceback
-
+import numpy as np
+import pysam
 import torch
 import logging
-import pysam
+from collections import defaultdict
 
-import util
+from dnaseq2seq import util
 
 logger = logging.getLogger(__name__)
 
-
-
 EMPTY_TENSOR = torch.zeros(9)
 
-class MockRead:
 
-    def __init__(self, bases, quals, start, end, cigartups):
-        assert len(bases) == len(quals)
-        self.query_sequence = bases
-        self.query_qualities = quals
-        self.reference_start = start
-        self.query_alignment_start = self.reference_start
-        self.reference_end = end
-        self.query_length = len(self.query_sequence)
-        self.cigartuples = cigartups
-        n_cig_bases = sum(a[1] for a in self.cigartuples)
-        assert n_cig_bases == len(bases), "Cigar bases count doesn't match actual number of bases"
 
-    def get_aligned_pairs(self):
-        refpos = self.reference_start
-        readpos = 0
-        result = []
-        for cigop, nbases in self.cigartuples:
-            ref_base_consumed = cigop in {0, 2, 4, 5, 7}
-            seq_base_consumed = cigop in {0, 1, 3, 4,5,7}
-            for i in range(nbases):
-                read_emit = readpos if seq_base_consumed else None
-                ref_emit = refpos if ref_base_consumed else None
-                result.append((read_emit, ref_emit))
-                if ref_base_consumed:
-                    refpos += 1
-                if seq_base_consumed:
-                    readpos += 1
-        return result
+class LowReadCountException(Exception):
+    """
+    Region of bam file has too few spanning reads for variant detection
+    """
+    pass
 
+def readkey(read):
+    suf = "-1" if read.is_read1 else "-2"
+    suf2 = "-" + str(read.cigar) + "-" + str(read.reference_start)
+    return read.query_name + suf + suf2
+
+
+class ReadCache:
+    """
+    Simple cache to store read encodings
+    """
+
+    def __init__(self):
+        self.cache = {}
+
+    def __getitem__(self, read):
+        key = readkey(read)
+        if key not in self.cache:
+            self.cache[key] = (alnstart(read), encode_read(read))
+
+        return self.cache[key][1]
+
+    def clear_to_pos(self, min_pos):
+        """
+        Remove any items from the cache that have a alnstart of less than min_pos
+        """
+        newcache = {}
+        for key, val in self.cache.items():
+            if val[0] >= min_pos:
+                newcache[key] = val
+        self.cache = newcache
+
+    def __contains__(self, item):
+        if type(item) == str:
+            return item in self.cache
+        elif type(item) == pysam.AlignedSegment:
+            return item.query_name in self.cache
+        else:
+            return False
+
+
+class ReadWindow:
+
+    def __init__(self, aln, chrom, start, end):
+        self.aln = aln
+        self.start = start
+        self.end = end
+        self.margin_size = 150 # Should be about a read length
+        self.chrom = chrom
+        self.cache = ReadCache()  # Cache for encoded reads
+        self.bypos = self._fill() # Maps read start positions to actual reads
+
+    def _fill(self):
+        bypos = defaultdict(list)
+        for i, read in enumerate(self.aln.fetch(self.chrom, self.start - self.margin_size, self.end)):
+            if read is not None:
+                bypos[alnstart(read)].append(read)
+        return bypos
+
+    def get_window(self, start, end, max_reads, downsample_read_count=None):
+        assert self.start <= start < self.end, f"Start coordinate must be between beginning and end of window"
+        assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window"
+        allreads = []
+        for pos in range(start - self.margin_size, end):
+            for read in self.bypos[pos]:
+                if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
+                    continue
+                allreads.append((pos, read))
+
+        if len(allreads) < 5:
+            raise LowReadCountException(f"Only {len(allreads)} reads in window")
+            
+        if downsample_read_count:
+            num_reads_to_sample = downsample_read_count
+        else:
+            num_reads_to_sample = max_reads
+        if len(allreads) > num_reads_to_sample:
+            allreads = random.sample(allreads, num_reads_to_sample)
+            allreads = sorted(allreads, key=lambda x: x[0])
+
+        window_size = end - start
+        t = torch.zeros(window_size, max_reads, 9)
+
+        for i, (readstart, read) in enumerate(allreads):
+            encoded = self.cache[read]
+            enc_start_offset = max(0,  start - readstart)
+            enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
+            t_start_offset = max(0, readstart - start)
+            t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
+            t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]
+
+        return t
+
+
+def encode_read(read, prepad=0, tot_length=None):
+    """
+    Encode the given read into a tensor
+    :param read: Read to be encoded (typically pysam.AlignedSegment)
+    :param prepad: Leading zeros to prepend
+    :param tot_length: If not None, desired total 'length' (dimension 0) of tensor
+    """
+    if tot_length:
+        assert prepad < tot_length, f"Cant have more padding than total length"
+    bases = []
+    for i in range(prepad):
+        bases.append(EMPTY_TENSOR)
+
+    try:
+        for t in iterate_bases(read):
+            bases.append(t)
+            if tot_length is not None:
+                if len(bases) >= tot_length:
+                    break
+    except StopIteration:
+        pass
+
+    if tot_length is not None:
+        while len(bases) < tot_length:
+            bases.append(EMPTY_TENSOR)
+    return torch.stack(tuple(bases)).char()
 
 
 def base_index(base):
@@ -93,16 +188,6 @@ def decode(t):
         return '-'
     else:
         return util.INDEX_TO_BASE[t[0:4].argmax()]
-
-
-# def encode_cigop(readpos, refpos):
-#     if readpos == refpos:
-#         return 0
-#     elif readpos is None:
-#         return -1
-#     elif refpos is None:
-#         return 1
-#     return 0
 
 
 
@@ -174,6 +259,8 @@ def iterate_bases(rec):
     :return: Generator for encoded base calls
     """
     cigtups = rec.cigartuples
+    if cigtups is None:
+        cigtups = [(0, len(rec.query_sequence))]
     bases = rec.query_sequence
     quals = rec.query_qualities
     cig_index = 0
@@ -184,7 +271,7 @@ def iterate_bases(rec):
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
         readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -199,7 +286,7 @@ def iterate_bases(rec):
 
 def rec_tensor_it(read, minref):
     for i in range(alnstart(read) - minref):
-        yield EMPTY_TENSOR, True
+        yield EMPTY_TENSOR
 
     try:
         for t in iterate_bases(read):
@@ -208,7 +295,7 @@ def rec_tensor_it(read, minref):
         pass
 
     while True:
-        yield EMPTY_TENSOR, True
+        yield EMPTY_TENSOR
 
 
 def emit_tensor_aln(t):
@@ -227,7 +314,7 @@ def alnstart(read):
     If the first cigar element is hard or soft clip, return read.reference_start - size of first cigar element,
     otherwise return read.reference_start
     """
-    if read.cigartuples[0][0] in {4, 5}:
+    if read.cigartuples is not None and read.cigartuples[0][0] in {4, 5}:
         return read.reference_start - read.cigartuples[0][1]
     else:
         return read.reference_start
@@ -254,7 +341,7 @@ def encode_pileup3(reads, start, end):
     everything = []
     for readnum, read in enumerate(reads):
         try:
-            readencoded = [enc.char() for enc, refconsumed in _consume_n(rec_tensor_it(read, start), end-start)]
+            readencoded = [enc.char() for enc in _consume_n(rec_tensor_it(read, start), end-start)]
             everything.append(torch.stack(readencoded))
         except Exception as ex:
             logger.warn(f"Error processing read {read.query_name}: {ex}, skipping it")
@@ -310,6 +397,25 @@ def reads_spanning(bam, chrom, pos, max_reads):
     return reads[max(0, mid-max_reads//2):min(len(reads), mid+max_reads//2)]
 
 
+def reads_spanning_range(bam, chrom, start, end):
+    """
+    Return a list of reads spanning the given position, generally attempting to take
+    reads in which 'pos' is approximately in the middle of the read
+    :return : list of reads spanning the given position
+    """
+    bamit = bam.fetch(chrom, start)
+    reads = []
+    try:
+        read = next(bamit)
+        while read.reference_start < end:
+            if read.reference_end is not None and read.reference_end > start:
+                reads.append(read)
+            read = next(bamit)
+    except StopIteration:
+        pass
+    return reads
+
+
 def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     """
     Fetch reads from the given BAM file, encode them into a single tensor, and also
@@ -335,7 +441,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     return encoded_with_ref, refseq, altseq
 
 
-def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_samples):
+def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples, downsample_frac=0.3):
     """
     Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
     chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the
@@ -343,29 +449,32 @@ def encode_and_downsample(chrom, pos, ref, alt, bam, fasta, maxreads, num_sample
     :param maxreads: Number of reads to downsample to
     :returns: Tuple of encoded reads, reference sequence, alt sequence
     """
-    allreads = reads_spanning(bam, chrom, pos, max_reads=float("inf"))
+    allreads = reads_spanning_range(bam, chrom, start, end)
     if len(allreads) < 5:
-        raise ValueError(f"Not enough reads spanning {chrom} {pos}, aborting")
+        raise ValueError(f"Not enough reads in {chrom}:{start}-{end}, aborting")
 
     if (len(allreads) // maxreads) < num_samples:
         num_samples = max(1, len(allreads) // maxreads)
         # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
-
-    pos = pos - 1 # Believe fetch() is zero-based, but input typically in 1-based VCF coords?
+    logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
+    readwindow = ReadWindow(bam, chrom, start, end)
     for i in range(num_samples):
-        reads = random.sample(allreads, min(len(allreads), maxreads))
-        minref = min(alnstart(r) for r in reads)
-        maxref = max(alnstart(r) + r.query_length for r in reads)
-        reads_encoded, _ = encode_pileup3(reads, minref, maxref)
-
-        refseq = fasta.fetch(chrom, minref, maxref)
-        assert refseq[pos - minref: pos-minref+len(ref)] == ref, f"Ref sequence / allele mismatch (found {refseq[pos - minref: pos-minref+len(ref)]})"
-        altseq = refseq[0:pos - minref] + alt + refseq[pos-minref+len(ref):]
-        if ref == alt:
-            assert refseq == altseq, "Ref == alt allele, but ref sequence didn't match alt sequence!"
-        assert len(refseq) == reads_encoded.shape[0], f"Length of reference sequence doesn't match width of encoded read tensor ({len(refseq)} vs {reads_encoded.shape[0]})"
-
+        reads_to_sample = maxreads
+        if np.random.rand() < downsample_frac:
+            reads_to_sample = maxreads // 2
+        reads_encoded = readwindow.get_window(start, end, max_reads=maxreads, downsample_read_count=reads_to_sample)
+        refseq = refgenome.fetch(chrom, start, end)
         ref_encoded = string_to_tensor(refseq)
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
-        yield encoded_with_ref, refseq, altseq
+        yield encoded_with_ref, (start, end)
+
+
+if __name__=="__main__":
+    aln = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram",
+                              reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
+    rw = ReadWindow(aln, "21", 20762200, 20762270)
+    t = rw.get_window(20762222, 20762267, max_reads=100)
+
+    print(t.shape)
+    print(util.to_pileup(t))
