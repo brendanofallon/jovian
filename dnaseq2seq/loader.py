@@ -1,8 +1,6 @@
 
 import logging
 
-import phaser
-
 logger = logging.getLogger(__name__)
 
 import random
@@ -23,8 +21,14 @@ import torch
 import torch.multiprocessing as mp
 import pysam
 
-from bam import target_string_to_tensor, encode_with_ref, encode_and_downsample, ensure_dim
-import util
+from dnaseq2seq.bam import (
+    target_string_to_tensor,
+    encode_with_ref,
+    encode_and_downsample,
+    ensure_dim,
+)
+from dnaseq2seq import util
+from dnaseq2seq import phaser
 
 
 class ReadLoader:

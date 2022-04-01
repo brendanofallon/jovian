@@ -23,6 +23,12 @@ The following libraries are required:
     scipy
     tensorboard
     lz4
+    pygit2
+    ssw_aligner
+    scikit-bio
+    intervaltree
+    pyranges
+    
 
 In addition, you must install `https://github.com/kyu999/ssw_aligner` manually - and it requires Cython==0.28.3 (that exact
 version seems to be required currently). It's not installable via pip or conda currently. 
