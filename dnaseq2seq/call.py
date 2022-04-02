@@ -223,6 +223,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     classifier_freq_file = kwargs.get('freq_file')
     if classifier_path is not None and classifier_freq_file is None:
         logger.warning("Classifier model specified, but no classifier population freq file, this probably won't work")
+    if classifier_freq_file:
+        classifier_freq_file = pysam.VariantFile(classifier_freq_file)
 
     totbases = util.count_bases(bed)
     bases_processed = 0 
@@ -258,7 +260,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
             if classifier_path:
                 for rec in vcf_records:
                     rec.info["RAW_QUAL"] = rec.qual
-                    rec.qual = buildclf.predict_one_record(classifier_model, rec, classifier_freq_file)
+                    rec.qual = int(round(vcf.prob_to_phred(buildclf.predict_one_record(classifier_model, rec, classifier_freq_file))))
 
             # write to output vcf
             for rec in vcf_records:
