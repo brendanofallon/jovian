@@ -10,6 +10,7 @@ import pickle
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
+from functools import lru_cache
 import logging
 import argparse
 
@@ -31,9 +32,19 @@ def find_var(varfile, chrom, pos, ref, alt):
                     return var, i
 
 
+@lru_cache(maxsize=1000000)
 def var_af(varfile, chrom, pos, ref, alt):
-    var, alt_index = find_var(varfile, chrom, pos, ref, alt)
-    return var.info['AF'][alt_index]
+    result = find_var(varfile, chrom, pos, ref, alt)
+    af = 0.0
+    if result is not None:
+        var, alt_index = result
+        af = var.info['AF'][alt_index]
+        if af is None:
+            af = 0.0
+        else:
+            af = float(af)
+
+    return af
 
 
 def var_feats(var, var_freq_file):
@@ -60,33 +71,85 @@ def var_feats(var, var_freq_file):
     feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
     return np.array(feats)
 
-def extract_feats(vcf):
+def feat_names():
+    return [
+            "qual",
+            "pass_filter",
+            "lowcov_filter",
+            "singlecallhet_filter",
+            "singlecallhom_filter",
+            "ref_len",
+            "alt_len",
+            "min_qual",
+            "max_qual",
+            "var_count",
+            "cis_count",
+            "trans_count",
+            "step_count",
+            "call_count",
+            "min_var_index",
+            "max_var_index",
+            "min_win_offset",
+            "max_win_offset",
+            "dp",
+            "af",
+        ]
+
+
+def varstr(var):
+    return f"{var.chrom}:{var.pos}-{var.ref}-{var.alts[0]}"
+
+
+def extract_feats(vcf, var_freq_file, fh=None):
     allfeats = []
     for var in pysam.VariantFile(vcf, ignore_truncation=True):
-        allfeats.append(var_feats(var))
+        feats = var_feats(var, var_freq_file)
+        if fh:
+            fstr = ",".join(str(x) for x in feats)
+            fh.write(f"{varstr(var)},{fstr}\n")
+        allfeats.append(feats)
     return allfeats
+
 
 def save_model(mdl, path):
     logger.info(f"Saving model to {path}")
     with open(path, 'wb') as fh:
         pickle.dump(mdl, fh)
         
+
 def load_model(path):
     logger.info(f"Loading model from {path}")
     with open(path, 'rb') as fh:
         return pickle.load(fh)
 
-def train_model(conf, threads, var_freq_file):
+def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None):
     alltps = []
     allfps = []
+    var_freq_file = pysam.VariantFile(var_freq_file)
+    if feat_csv:
+        logger.info("Writing feature dump to {feat_csv}")
+        feat_fh = open(feat_csv, "w")
+        feat_fh.write("varstr," + ",".join(feat_names()) + "\n")
+    else:
+        feat_fh = None
+
     for tpf in conf['tps']:
-        alltps.extend(extract_feats(tpf))
+        alltps.extend(extract_feats(tpf, var_freq_file, feat_fh))
     for fpf in conf['fps']:
-        allfps.extend(extract_feats(fpf))
+        allfps.extend(extract_feats(fpf, var_freq_file, feat_fh))
+
+    if feat_fh:
+        feat_fh.close()
 
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
     y = np.array([1.0 for _ in range(len(alltps))] + [0.0 for _ in range(len(allfps))])
+    if labels_csv:
+        with open(labels_csv, "w") as fh:
+            fh.write("label\n") 
+            for val in y:
+                fh.write(str(val) + "\n")
+
     clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
     clf.fit(feats, y)
     return clf
@@ -122,7 +185,11 @@ def predict_one_record(loaded_model, var_rec, var_freq_file, **kwargs):
 def train(conf, output, **kwargs):
     logger.info("Loading configuration from {conf_file}")
     conf = yaml.safe_load(open(conf).read())
-    model = train_model(conf, threads=kwargs.get('threads'), var_freq_file=kwargs.get('freq_file'))
+    model = train_model(conf, 
+            threads=kwargs.get('threads'), 
+            var_freq_file=kwargs.get('freq_file'),
+            feat_csv=kwargs.get('feat_csv'),
+            labels_csv=kwargs.get('labels_csv'))
     save_model(model, output)
 
 
@@ -136,6 +203,8 @@ def main():
     trainparser.add_argument("-c", "--conf", help="Configuration file")
     trainparser.add_argument("-o", "--output", help="Output path")
     trainparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
+    trainparser.add_argument("--feat-csv", help="Feature dump CSV")
+    trainparser.add_argument("--labels-csv", help="Label dump CSV")
     trainparser.set_defaults(func=train)
 
     predictparser = subparser.add_parser("predict", help="Predict")
