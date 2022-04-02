@@ -106,8 +106,8 @@ class VarTransformer(nn.Module):
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
         self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
 
-        # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
-        self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
+        self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        #self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
         encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout, batch_first=True, activation='gelu')
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
         self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
@@ -121,10 +121,10 @@ class VarTransformer(nn.Module):
 
 
         src = self.elu(self.fc1(src))
-        src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
+        #src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
-        # src = self.pos_encoder(src)
+        src = self.pos_encoder(src)
         output = self.transformer_encoder(src)
         output = self.decoder(output)
 
