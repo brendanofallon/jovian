@@ -43,7 +43,6 @@ def var_af(varfile, chrom, pos, ref, alt):
             af = 0.0
         else:
             af = float(af)
-
     return af
 
 
