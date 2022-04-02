@@ -175,11 +175,14 @@ def cluster_positions(poslist, maxdist=500):
         if len(cluster) == 0 or pos - min(cluster) < maxdist:
             cluster.append(pos)
         else:
-            yield min(cluster), max(cluster)
+            if len(cluster) == 1:
+                yield cluster[0] - 1, cluster[0] + 1
+            else:
+                yield min(cluster), max(cluster)
             cluster = [pos]
 
     if len(cluster) == 1:
-        yield cluster[0] - 10, cluster[0] + 10
+        yield cluster[0] - 1, cluster[0] + 1
     elif len(cluster) > 1:
         yield min(cluster), max(cluster)
 
@@ -217,6 +220,10 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     if classifier_path:
         classifier_model = buildclf.load_model(classifier_path)
 
+    classifier_freq_file = kwargs.get('freq_file')
+    if classifier_path is not None and classifier_freq_file is None:
+        logger.warning("Classifier model specified, but no classifier population freq file, this probably won't work")
+
     totbases = util.count_bases(bed)
     bases_processed = 0 
     #  Iterate over the input BED file, splitting larger regions into chunks of at most 'max_region_size'
@@ -227,10 +234,17 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
         # Search the region for positions that may contain a variant, and cluster those into ranges
         # For each range, run the variant calling procedure in a sliding window
+        prev_end = -1
         for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=100):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
+
+            if start < prev_end:
+                logger.warning(f"Overlapping cluster windows found, adjusting start position of new window on chrom {chrom} to {prev_end} from {start}")
+                start = prev_end
+            prev_end = end
+
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
-                                                     chrom, start-25, end+2,
+                                                     chrom, start, end,
                                                      max_read_depth,
                                                      window_size=150,
                                                      window_step=33)
@@ -244,7 +258,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
             if classifier_path:
                 for rec in vcf_records:
                     rec.info["RAW_QUAL"] = rec.qual
-                    rec.qual = buildclf.predict_one_record(classifier_model, rec)
+                    rec.qual = buildclf.predict_one_record(classifier_model, rec, classifier_freq_file)
 
             # write to output vcf
             for rec in vcf_records:

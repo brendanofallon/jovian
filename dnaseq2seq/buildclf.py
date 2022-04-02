@@ -33,7 +33,12 @@ def find_var(varfile, chrom, pos, ref, alt):
 
 def var_af(varfile, chrom, pos, ref, alt):
     var, alt_index = find_var(varfile, chrom, pos, ref, alt)
-    return var.info['AF'][alt_index]
+    af = var.info['AF'][alt_index]
+    if af is None:
+        af = 0.0
+    else:
+        af = float(af)
+    return af
 
 
 def var_feats(var, var_freq_file):
