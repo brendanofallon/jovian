@@ -49,10 +49,6 @@ def var_af(varfile, chrom, pos, ref, alt):
 def var_feats(var, var_freq_file):
     feats = []
     feats.append(var.qual)
-    feats.append(1 if "PASS" in var.filter else 0)
-    feats.append(1 if "LowCov" in var.filter else 0)
-    feats.append(1 if "SingleCallHet" in var.filter else 0)
-    feats.append(1 if "SingleCallHom" in var.filter else 0)
     feats.append(len(var.ref))
     feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
@@ -62,21 +58,16 @@ def var_feats(var, var_freq_file):
     feats.append(var.info['WIN_TRANS_COUNT'][0])
     feats.append(var.info['STEP_COUNT'][0])
     feats.append(var.info['CALL_COUNT'][0])
-    feats.append(min(var.info['VAR_INDEX']))
-    feats.append(max(var.info['VAR_INDEX']))
     feats.append(min(var.info['WIN_OFFSETS']))
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
     feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
+    feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     return np.array(feats)
 
 def feat_names():
     return [
             "qual",
-            "pass_filter",
-            "lowcov_filter",
-            "singlecallhet_filter",
-            "singlecallhom_filter",
             "ref_len",
             "alt_len",
             "min_qual",
@@ -86,12 +77,11 @@ def feat_names():
             "trans_count",
             "step_count",
             "call_count",
-            "min_var_index",
-            "max_var_index",
             "min_win_offset",
             "max_win_offset",
             "dp",
             "af",
+            "het"
         ]
 
 
