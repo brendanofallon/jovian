@@ -208,7 +208,7 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
     chrom, window_idx, window_start, window_end = window
     
     cpname = mp.current_process().name
-    logger.info(
+    logger.debug(
         f"{cpname}: Generating regions from window {window_idx}: "
         f"{window_start}-{window_end} on chromosome {chrom}"
     )
