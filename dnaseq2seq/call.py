@@ -271,7 +271,13 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
 
     threads = kwargs.get('threads', 1)
-    logger.info(f"There are {threads} CPUs available")
+    logger.info(f"Using {threads} threads")
+
+    var_freq_file = kwargs.get('freq_file')
+    if var_freq_file:
+        logger.info(f"Loading variant pop frequency file from {var_freq_file}")
+    else:
+        logger.info(f"No variant frequency file specified, this might not work depending on the classifier requirements")
 
     tmpdir = "tmpdir"
     os.makedirs(tmpdir, exist_ok=True)
@@ -296,6 +302,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
             classifier_path=classifier_path,
             threads=threads,
             tmpdir=tmpdir,
+            var_freq_file=var_freq_file,
         )
         for var in pysam.VariantFile(chrom_vcf):
             vcf_file.write(var)
@@ -333,7 +340,7 @@ def split_even_chunks(n_item, n_chunk):
 
 
 def call_variants_on_chrom(
-    chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir
+    chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file
 ):
     """
     Call variants on the given chromsome and write the variants to a temporary VCF.
@@ -391,6 +398,7 @@ def call_variants_on_chrom(
         max_read_depth=max_read_depth,
         window_size=150,
         window_step=33,
+        var_freq_file=var_freq_file
     )
 
     chrom_vcf = f"{tmpdir}/chrom_{chrom}.vcf"
@@ -427,7 +435,8 @@ def process_chunk_regions(
     tmpdir,
     window_size=300,
     min_reads=5,
-    window_step=50
+    window_step=50,
+    var_freq_file=var_freq_file
 ):
     """
     Call variants on the given region and write variants to a temporary VCF file.
@@ -440,6 +449,9 @@ def process_chunk_regions(
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
     model = load_model(model_path)
+
+    if var_freq_file:
+        var_freq_file = pysam.VariantFile(var_freq_file)
 
     # if classifier model available then use classifier quality
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
@@ -455,8 +467,8 @@ def process_chunk_regions(
             chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
                 chrom,
                 window_idx,
-                start - 25,
-                end + 2,
+                start,
+                end,
                 aln=aln,
                 model=model,
                 reference=reference,
@@ -475,6 +487,7 @@ def process_chunk_regions(
                 reference=reference,
                 classifier_model=classifier_model,
                 tmpdir=tmpdir,
+                var_freq_file=var_freq_file
             )
 
             for var in pysam.VariantFile(vcfname):
@@ -486,7 +499,7 @@ def process_chunk_regions(
 
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir,
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir, var_freq_file
 ):
     """
     Convert variant haplotypes to variant records and write the records to a temporary VCF file.
@@ -516,7 +529,7 @@ def vars_hap_to_records(
     for rec in vcf_records:
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
-            rec.qual = buildclf.predict_one_record(classifier_model, rec)
+            rec.qual = buildclf.predict_one_record(classifier_model, rec, var_freq_file)
         vcf_file.write(rec)
 
     vcf_file.close()
