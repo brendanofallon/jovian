@@ -433,10 +433,10 @@ def process_chunk_regions(
     classifier_path,
     max_read_depth,
     tmpdir,
+    var_freq_file,
     window_size=300,
     min_reads=5,
     window_step=50,
-    var_freq_file=var_freq_file
 ):
     """
     Call variants on the given region and write variants to a temporary VCF file.
