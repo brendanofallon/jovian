@@ -4,6 +4,7 @@ import math
 import datetime
 import logging
 import string
+import random
 from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
@@ -27,7 +28,7 @@ DEVICE = torch.device("cpu")
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
-    return ''.join(random.choices(string.ascii_letters + string.ascii_digits, k=n)
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):

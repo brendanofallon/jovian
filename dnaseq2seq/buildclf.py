@@ -63,7 +63,7 @@ def var_feats(var, var_freq_file):
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
     feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
-    feats.append(1 if 0 in var.samples[0]['GT'] else 0)
+    #feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     return np.array(feats)
 
 def feat_names():
