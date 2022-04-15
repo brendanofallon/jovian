@@ -53,6 +53,7 @@ def var_feats(var, var_freq_file):
     feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
+    feats.append(sum(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
     feats.append(var.info['WIN_TRANS_COUNT'][0])
@@ -133,6 +134,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None):
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
     y = np.array([1.0 for _ in range(len(alltps))] + [0.0 for _ in range(len(allfps))])
+    
     if labels_csv:
         with open(labels_csv, "w") as fh:
             fh.write("label\n") 

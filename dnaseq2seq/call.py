@@ -3,6 +3,7 @@ import time
 import math
 import datetime
 import logging
+import string
 from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 DEVICE = torch.device("cpu")
+
+def randchars(n=6):
+    """ Generate a random string of letters and numbers """
+    return ''.join(random.choices(string.ascii_letters + string.ascii_digits, k=n)
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
@@ -279,8 +284,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     else:
         logger.info(f"No variant frequency file specified, this might not work depending on the classifier requirements")
 
-    tmpdir = "tmpdir"
-    os.makedirs(tmpdir, exist_ok=True)
+    tmpdir = f".tmp.varcalls_{randchars()}"
+    os.makedirs(tmpdir, exist_ok=False)
 
     chroms = chroms_in_bed(bed)
     func = partial(bed_for_chrom, bed=bed, folder=tmpdir)
