@@ -277,6 +277,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
 
     threads = kwargs.get('threads', 1)
+    min_qual = kwargs.get('min_qual', 1e-4)
     logger.info(f"Using {threads} threads")
 
     var_freq_file = kwargs.get('freq_file')
@@ -311,9 +312,10 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
             var_freq_file=var_freq_file,
         )
         for var in pysam.VariantFile(chrom_vcf):
-            vcf_file.write(var)
-        os.unlink(chrom_vcf)
-        os.unlink(chrom_bed)
+            if var.qual > min_qual:
+                vcf_file.write(var)
+        #os.unlink(chrom_vcf)
+        #os.unlink(chrom_bed)
 
     vcf_file.close()
     logger.info(f"All variants are saved to {vcf_out}")
@@ -418,14 +420,14 @@ def call_variants_on_chrom(
         ]:
             for var in pysam.VariantFile(chunk_vcf):
                 chrom_vfh.write(str(var))
-            os.unlink(chunk_vcf)
+            #os.unlink(chunk_vcf)
             chrom_nvar += chunk_nvar
 
     logger.info(
         f"A total of {chrom_nvar} variants called on chromosome {chrom} and saved "
         f"to {chrom_vcf}"
     )
-    os.unlink(region_file)
+    #os.unlink(region_file)
     
     return chrom_vcf
 
@@ -498,7 +500,7 @@ def process_chunk_regions(
 
             for var in pysam.VariantFile(vcfname):
                 chunk_vfh.write(str(var))
-            os.unlink(vcfname)
+            #os.unlink(vcfname)
             chunk_nvar += nvar
 
     return chunk_nvar, chunk_vcf
