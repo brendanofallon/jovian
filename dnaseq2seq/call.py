@@ -185,6 +185,7 @@ def cluster_positions(poslist, maxdist=500):
     positions not greater than 'maxdist' in size
     """
     cluster = []
+    end_pad_bases = 2
     for pos in poslist:
         if len(cluster) == 0 or pos - min(cluster) < maxdist:
             cluster.append(pos)
@@ -192,13 +193,13 @@ def cluster_positions(poslist, maxdist=500):
             if len(cluster) == 1:
                 yield cluster[0] - 1, cluster[0] + 1
             else:
-                yield min(cluster), max(cluster)
+                yield min(cluster), max(cluster) + end_pad_bases
             cluster = [pos]
 
     if len(cluster) == 1:
         yield cluster[0] - 1, cluster[0] + 1
     elif len(cluster) > 1:
-        yield min(cluster), max(cluster) + 1
+        yield min(cluster), max(cluster) + end_pad_bases
 
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
