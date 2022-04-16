@@ -185,7 +185,7 @@ def cluster_positions(poslist, maxdist=500):
     positions not greater than 'maxdist' in size
     """
     cluster = []
-    end_pad_bases = 2
+    end_pad_bases = 15
     for pos in poslist:
         if len(cluster) == 0 or pos - min(cluster) < maxdist:
             cluster.append(pos)
