@@ -181,7 +181,7 @@ def cluster_positions(poslist, maxdist=500):
     if len(cluster) == 1:
         yield cluster[0] - 10, cluster[0] + 10
     elif len(cluster) > 1:
-        yield min(cluster), max(cluster)
+        yield min(cluster), max(cluster) + 1
 
 
 def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
@@ -230,7 +230,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         for start, end in cluster_positions(gen_suspicious_spots(pysam.AlignmentFile(bam, reference_filename=reference_fasta), chrom, window_start, window_end, refseq), maxdist=100):
             logger.info(f"Running model for {start}-{end} ({end - start} bp) inside {window_start}-{window_end}")
             vars_hap0, vars_hap1 = _call_vars_region(aln, model, reference,
-                                                     chrom, start-25, end+2,
+                                                     chrom, start, end,
                                                      max_read_depth,
                                                      window_size=150,
                                                      window_step=33)
