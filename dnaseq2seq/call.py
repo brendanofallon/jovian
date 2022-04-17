@@ -179,7 +179,7 @@ def split_large_regions(regions, max_region_size):
             start += max_region_size
 
 
-def cluster_positions(poslist, maxdist=500):
+def cluster_positions(poslist, maxdist=100):
     """
     Iterate over the given list of positions (numbers), and generate ranges containing
     positions not greater than 'maxdist' in size
@@ -202,7 +202,7 @@ def cluster_positions(poslist, maxdist=500):
         yield min(cluster), max(cluster) + end_pad_bases
 
 
-def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
+def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
     Generate a list of ranges containing a list of posistions from the given window
     """
@@ -381,7 +381,7 @@ def call_variants_on_chrom(
         cluster_positions_for_window,
         bamfile=bamfile,
         reference_fasta=reference_fasta,
-        maxdist=500,
+        maxdist=100,
     )
 
     logger.info(f"Generating regions from windows on chromosome {chrom}...")
