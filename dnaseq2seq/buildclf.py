@@ -190,6 +190,7 @@ def main():
 
     trainparser = subparser.add_parser("train", help="Train a new model")
     trainparser.add_argument("-c", "--conf", help="Configuration file")
+    trainparser.add_argument("-t", "--threads", help="thread count", default=24, type=int)
     trainparser.add_argument("-o", "--output", help="Output path")
     trainparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     trainparser.add_argument("--feat-csv", help="Feature dump CSV")
