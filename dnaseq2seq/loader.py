@@ -563,7 +563,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     for region in upsampled_labels:
         chrom, start, end = region[0:3]
         variants = list(vcf.fetch(chrom, start, end))
-        logger.info(f"Number of variants in {chrom}:{start}-{end} : {len(variants)}")
+        #logger.info(f"Number of variants in {chrom}:{start}-{end} : {len(variants)}")
         try:
             for encoded, (minref, maxref) in encode_and_downsample(chrom,
                                                  start,
@@ -626,10 +626,10 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
         alltgt.append(tgt)
 
         count += 1
-        if count % 1 == 0:
-            logger.info(f"Loaded {count} tensors from {bampath}")
+        #if count % 1 == 0:
+        #    logger.info(f"Loaded {count} tensors from {bampath}")
         if count == max_to_load:
-            logger.info(f"Stopping tensor load after {max_to_load}")
+            #logger.info(f"Stopping tensor load after {max_to_load}")
             yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
             break
 
