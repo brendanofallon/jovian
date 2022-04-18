@@ -13,7 +13,7 @@
 # to the right spot - seems to work
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
-ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/main.py
+ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq/bin/main.py
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/multindel_novaav_conf.yaml
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_conf.yaml
