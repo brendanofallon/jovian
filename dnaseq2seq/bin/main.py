@@ -291,6 +291,7 @@ def main():
     callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
     callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
+    callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
