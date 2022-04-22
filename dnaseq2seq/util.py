@@ -18,6 +18,15 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+REVCOMP = {
+    'G': 'C',
+    'C': 'G',
+    'T': 'A',
+    'A': 'T',
+    'N': 'N',
+}
+
+
 def var_type(variant):
     if len(variant.ref) == 1 and len(variant.alt) == 1:
         return 'snv'
@@ -29,6 +38,7 @@ def var_type(variant):
         return 'mnv'
     print(f"Whoa, unknown variant type: {variant}")
     return 'unknown'
+
 
 def concat_metafile(sample_metafile, dest_metafh):
     """
@@ -93,6 +103,19 @@ def unzip_load(path, device='cpu'):
             return torch.load(fh, map_location=device)
     else:
         return torch.load(path, map_location=device)
+
+
+def revcomp(s):
+    """
+    Returns the reverse complement of a sequence
+    Returns a string if the input is a string, otherwise a list of bases
+    """
+    rc = [REVCOMP[b] for b in reversed(s)]
+    if type(s) == str:
+        return "".join(rc)
+    else:
+        return rc
+
 
 
 def readstr(t):

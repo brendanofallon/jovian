@@ -23,7 +23,6 @@ import pysam
 
 from dnaseq2seq.bam import (
     target_string_to_tensor,
-    encode_with_ref,
     encode_and_downsample,
     ensure_dim,
 )

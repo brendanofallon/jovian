@@ -72,7 +72,7 @@ class ReverseReadWindow:
 
     def get_window(self, start, end, max_reads, downsample_read_count=None):
         assert self.start <= start < self.end, f"Start coordinate must be between beginning and end of window"
-        assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window"
+        assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window window: {self.start}-{self.end} end: {end}"
         allreads = []
         for endpos in range(end + self.margin_size, start-1, -1):
             for read in self.bypos[endpos]:
@@ -277,16 +277,16 @@ def iterate_cigar(rec):
             is_clipped = cigop in {4, 5}
 
 
-def revcomp(base):
-    if base=='G':
+def revcomp_base(base):
+    if base == 'G':
         return 'C'
-    elif base=='C':
+    elif base == 'C':
         return 'G'
-    elif base=='T':
+    elif base == 'T':
         return 'A'
-    elif base=='A':
+    elif base == 'A':
         return 'T'
-    elif base=='N':
+    elif base == 'N':
         return 'N'
     raise ValueError(f"Unknown base for reverse comp: {base}")
 
@@ -319,7 +319,7 @@ def iterate_bases(rec, reverse=False):
 
     for i, (base, qual) in enumerate(bq_iterator):
         if reverse:
-            base = revcomp(base)
+            base = revcomp_base(base)
         yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
@@ -535,15 +535,15 @@ if __name__=="__main__":
     aln = pysam.AlignmentFile("/Volumes/Share/genomics/WGS/99702111631_GM24631_1ug_chr22.bam",
                               reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
     chrom = "22"
-    start = 37195751
-    end =   37195848
+    start = 37171294
+    end =   37171330
 
     rw = ReverseReadWindow(aln, chrom, start - 100, end + 100)
 
     t = rw.get_window(start, end, max_reads=100)
 
     refseq = refgenome.fetch(chrom, start, end)
-    refseq = "".join([revcomp(b) for b in reversed(refseq)])
+    refseq = "".join([revcomp_base(b) for b in reversed(refseq)])
     ref_encoded = string_to_tensor(refseq)
     t = torch.cat((ref_encoded.unsqueeze(1), t), dim=1)[:, 0:100, :]
 

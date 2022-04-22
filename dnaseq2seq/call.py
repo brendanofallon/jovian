@@ -360,18 +360,18 @@ def call_variants_on_chrom(
         )
     ]
 
-    func = partial(
+    cluster_positions_func = partial(
         cluster_positions_for_window,
         bamfile=bamfile,
         reference_fasta=reference_fasta,
-        maxdist=500,
+        maxdist=100,
     )
 
     logger.info(f"Generating regions from windows on chromosome {chrom}...")
     region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
     n_regions = 0
     with open(region_file, "w") as rfh:
-        for regions in mp.Pool(threads).map(func, windows):
+        for regions in mp.Pool(threads).map(cluster_positions_func, windows):
             for r in regions:
                 print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
                 n_regions += 1
@@ -379,7 +379,7 @@ def call_variants_on_chrom(
 
     chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
 
-    func = partial(
+    process_chunk_func = partial(
         process_chunk_regions,
         region_file=region_file,
         bamfile=bamfile,
@@ -398,13 +398,21 @@ def call_variants_on_chrom(
 
     chrom_nvar = 0
     with open(chrom_vcf, "a") as chrom_vfh:
-        for chunk_nvar, chunk_vcf in [
-            f for f in mp.Pool(threads).map(func, chunks)
-        ]:
-            for var in pysam.VariantFile(chunk_vcf):
-                chrom_vfh.write(str(var))
-            os.unlink(chunk_vcf)
-            chrom_nvar += chunk_nvar
+        if threads == 1:
+            for chunk in chunks:
+                chunk_nvar, chunk_vcf = process_chunk_func(chunk)
+                for var in pysam.VariantFile(chunk_vcf):
+                    chrom_vfh.write(str(var))
+                os.unlink(chunk_vcf)
+                chrom_nvar += chunk_nvar
+        else:
+            for chunk_nvar, chunk_vcf in [
+                f for f in mp.Pool(threads).map(process_chunk_func, chunks)
+            ]:
+                for var in pysam.VariantFile(chunk_vcf):
+                    chrom_vfh.write(str(var))
+                os.unlink(chunk_vcf)
+                chrom_nvar += chunk_nvar
 
     logger.info(
         f"A total of {chrom_nvar} variants called on chromosome {chrom} and saved "
@@ -523,7 +531,7 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size):
+def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size, reverse):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -539,6 +547,12 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
         hap1 = util.readstr(hap1_t)
         hap0_probs = hap0_t.detach().cpu().numpy().max(axis=-1)
         hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
+
+        if reverse:
+            hap0 = util.revcomp(hap0)
+            hap1 = util.revcomp(hap1)
+            hap0_probs = hap0_probs[::-1]
+            hap1_probs = hap1_probs[::-1]
 
         refseq = reference.fetch(chrom, offset, offset + window_size)
         vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
@@ -578,16 +592,18 @@ def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, w
     return allvars0, allvars1
 
 
-def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
+def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth, reverse):
     """
     Add the reference sequence as read 0
     """
     refseq = reference.fetch(chrom, start, end)
+    if reverse:
+        refseq = util.revcomp(refseq)
     ref_encoded = bam.string_to_tensor(refseq)
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
+def _encode_region(aln, reference, chrom, start, end, max_read_depth, reverse=False, window_size=300, min_reads=5, window_step=50, batch_size=64):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -609,14 +625,19 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = start - 2 * window_step  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
-    while window_start <= end:
+    if reverse:
+        readwindow = bam.ReverseReadWindow(aln, chrom, start - window_size, end + 2 * window_size)
+    else:
+        readwindow = bam.ReadWindow(aln, chrom, start - 2 * window_size, end + window_size)
+
+    for window_start in range(start - 2 * window_step, end+1, window_step):
         try:
+            print(f"Getting window from {window_start} to {window_start + window_size}")
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
+                                             reverse=reverse,
                                              max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
@@ -625,8 +646,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-
-        window_start += window_step
 
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
@@ -672,9 +691,12 @@ def _call_vars_region(
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
-    
+
+    reverse=True
+
     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
+                                               reverse=reverse,
                                                window_size=window_size,
                                                min_reads=min_reads,
                                                window_step=window_step,
@@ -682,7 +704,7 @@ def _call_vars_region(
         logger.info(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
+        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, reverse)
         allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, var_retain_window_size)
         calltime_total += (datetime.datetime.now() - callstart)
 
