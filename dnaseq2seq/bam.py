@@ -501,7 +501,7 @@ def reads_spanning_range(bam, chrom, start, end):
 #     return encoded_with_ref, refseq, altseq
 
 
-def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples, downsample_frac=0.3):
+def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples, downsample_frac=0.3, reverse=False):
     """
     Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
     chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the
@@ -517,13 +517,20 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         num_samples = max(1, len(allreads) // maxreads)
         # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
     logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
-    readwindow = ReadWindow(bam, chrom, start, end)
+
+    if reverse:
+        readwindow = ReverseReadWindow(bam, chrom, start, end)
+    else:
+        readwindow = ReadWindow(bam, chrom, start, end)
+
     for i in range(num_samples):
         reads_to_sample = maxreads
         if np.random.rand() < downsample_frac:
             reads_to_sample = maxreads // 2
         reads_encoded = readwindow.get_window(start, end, max_reads=maxreads, downsample_read_count=reads_to_sample)
         refseq = refgenome.fetch(chrom, start, end)
+        if reverse:
+            refseq = util.revcomp(refseq)
         ref_encoded = string_to_tensor(refseq)
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 

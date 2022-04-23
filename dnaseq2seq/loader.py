@@ -342,69 +342,6 @@ class MultiLoader:
                 yield src, tgt, None, None, None
 
 
-class BWASimLoader:
-
-    def __init__(self, device, regions, refpath, readsperpileup, readlength, error_rate, clip_prob):
-        self.batches_in_epoch = 10
-        self.regions = bwasim.load_regions(regions)
-        self.refpath = refpath
-        self.device = device
-        self.readsperpileup = readsperpileup
-        self.readlength = readlength
-        self.error_rate = error_rate
-        self.clip_prob = clip_prob
-        self.sim_data = []
-
-
-    def iter_once(self, batch_size):
-        if len(self.sim_data):
-            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
-
-        for i in range(self.batches_in_epoch):
-            if len(self.sim_data) <= i:
-                src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
-                                                              self.regions,
-                                                              self.refpath,
-                                                              numreads=self.readsperpileup,
-                                                              readlength=self.readlength,
-                                                              vaf_func=bwasim.betavaf,
-                                                              var_funcs=None,
-                                                              error_rate=self.error_rate,
-                                                              clip_prob=self.clip_prob)
-
-                self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[i]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
-
-
-class SimLoader:
-
-    def __init__(self, device, seqlen, readsperbatch, readlength, error_rate, clip_prob):
-        self.batches_in_epoch = 10
-        self.device = device
-        self.seqlen = seqlen
-        self.readsperbatch = readsperbatch
-        self.readlength = readlength
-        self.error_rate = error_rate
-        self.clip_prob = clip_prob
-        self.sim_data = []
-
-
-    def iter_once(self, batch_size):
-        if len(self.sim_data):
-            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
-
-        for i in range(self.batches_in_epoch):
-            if len(self.sim_data) <= i:
-                src, tgt, vaftgt, altmask = sim.make_mixed_batch(batch_size,
-                                            seqlen=self.seqlen,
-                                            readsperbatch=self.readsperbatch,
-                                            readlength=self.readlength,
-                                            error_rate=self.error_rate,
-                                            clip_prob=self.clip_prob)
-                self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[-1]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
 
 
 def trim_pileuptensor(src, tgt, width):
@@ -427,31 +364,6 @@ def trim_pileuptensor(src, tgt, width):
         tgt = tgt[:, start:start+width]
 
     return src, tgt
-
-
-# def assign_class_indexes(rows):
-#     """
-#     Iterate over every row in rows and create a list of class indexes for each element
-#     , where class index is currently row.vtype-row.status. So a class will be something like
-#     snv-TP or small_del-FP, and each class gets a unique number
-#     :returns : 1. List of class indexes across rows.
-#                2. A dictionary keyed by class index and valued by class names.
-#     """
-#     classcount = 0
-#     classes = defaultdict(int)
-#     idxs = []
-#     for row in rows:
-#         clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
-#         if clz in classes:
-#             idx = classes[clz]
-#         else:
-#             idx = classcount
-#             classcount += 1
-#             classes[clz] = idx
-#         idxs.append(idx)
-#     class_names = {v: k for k, v in classes.items()}
-#     return idxs, class_names
-
 
 def parse_rows_classes(bed):
     """
@@ -483,6 +395,7 @@ def parse_rows_classes(bed):
             idxs.append(idx)
     class_names = {v: k for k, v in classes.items()}
     return rows, idxs, class_names
+
 
 def resample_classes(classes, class_names, rows, vals_per_class):
     """
@@ -556,7 +469,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
     vcf = pysam.VariantFile(vcfpath)
-
+    reverse = True  # Probably want to make this random for each region or something
     upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)
     logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
     for region in upsampled_labels:
@@ -570,7 +483,8 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
                                                  bam,
                                                  refgenome,
                                                  max_reads_per_aln,
-                                                 samples_per_pos):
+                                                 samples_per_pos,
+                                                 reverse=reverse):
 
                 hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, minref, maxref + 100, variants)
                 regionsize = end - start

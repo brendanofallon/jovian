@@ -43,7 +43,6 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     assert stop > start, "End coordinate must be greater than start"
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords"
     examined = 0
-    print(f"Generating pileup frmo {start} - {stop}")
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
@@ -64,7 +63,6 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                         base_mismatches += 1
 
                 if indel_count > 1 or base_mismatches > 2:
-                    print(f"Found suspicious spot at {col.reference_pos}")
                     yield col.reference_pos
                     break
 
@@ -707,8 +705,7 @@ def _call_vars_region(
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
 
-    reverse=True
-
+    reverse = False
     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
                                                reverse=reverse,
@@ -724,6 +721,22 @@ def _call_vars_region(
         calltime_total += (datetime.datetime.now() - callstart)
 
         step_count += batch.shape[0]
+
+    reverse = True
+    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
+                                               max_read_depth,
+                                               reverse=reverse,
+                                               window_size=window_size,
+                                               min_reads=min_reads,
+                                               window_step=window_step,
+                                               batch_size=batch_size):
+        logger.info(f"{cpname}: Reverse! pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+        enctime_total += (datetime.datetime.now() - encstart)
+        callstart = datetime.datetime.now()
+        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, reverse)
+        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count,
+                                              var_retain_window_size)
+        calltime_total += (datetime.datetime.now() - callstart)
 
     # Only return variants that are actually in the window
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
