@@ -40,14 +40,19 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
+    assert stop > start, "End coordinate must be greater than start"
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords"
+    examined = 0
+    print(f"Generating pileup frmo {start} - {stop}")
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
+        print(f"Examining position {col.reference_pos}")
         if start <= col.reference_pos < stop:
             refbase = refseq[col.reference_pos - start]
             indel_count = 0
             base_mismatches = 0
+            examined += 1
 
             for i, read in enumerate(col.pileups):
                 if read.indel != 0:
@@ -59,8 +64,12 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                         base_mismatches += 1
 
                 if indel_count > 1 or base_mismatches > 2:
+                    print(f"Found suspicious spot at {col.reference_pos}")
                     yield col.reference_pos
                     break
+
+    if examined != (stop - start):
+        raise ValueError(f"Didn't examine the correct number of bases! Positions interrogated: {examined}, but should be {stop - start}")
 
 
 def bed_to_windows(pr_bed, bed_slack=0, window_spacing=1000, window_overlap=0):
@@ -371,10 +380,16 @@ def call_variants_on_chrom(
     region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
     n_regions = 0
     with open(region_file, "w") as rfh:
-        for regions in mp.Pool(threads).map(cluster_positions_func, windows):
-            for r in regions:
-                print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
-                n_regions += 1
+        if threads == 1:
+            for window in windows:
+                for r in cluster_positions_func(window):
+                    print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
+                    n_regions += 1
+        else:
+            for regions in mp.Pool(threads).map(cluster_positions_func, windows):
+                for r in regions:
+                    print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
+                    n_regions += 1
     logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
 
     chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
