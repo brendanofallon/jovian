@@ -43,20 +43,6 @@ def concat_metafile(sample_metafile, dest_metafh):
     os.unlink(sample_metafile)
 
 
-def find_tgt(suffix, files):
-    found = None
-    for tgt in files:
-        tsuf = tgt.name.split("_")[-1].split(".")[0]
-        if tsuf == suffix:
-            if found:
-                raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-            found = tgt
-            break
-    if found is None:
-        raise ValueError(f"Could not find matching tgt file for {suffix}")
-    return found
-
-
 def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt'):
     """
     Examine files in datadir and match up all src / tgt / vaftgt files and store them as tuples in a list
@@ -72,6 +58,7 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
                      f"{datadir}/{vaftgt_prefix}_{suffix}"
                       ))
     return pairs
+
 
 def tensor_from_lz4(path, device):
     with io.BytesIO(lz4.frame.decompress(path)) as bfh:
@@ -90,8 +77,10 @@ def tensor_from_file(path, device):
     else:
         return torch.load(path, map_location=device)
 
+
 def sortreads(reads):
     return sorted(reads, key=lambda r: r.reference_start)
+
 
 def unzip_load(path, device='cpu'):
     """
@@ -167,6 +156,7 @@ def writeseqtensor(t):
             base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
         print(f"{base}", end="")
     print()
+
 
 def count_bases(bedpath):
     """

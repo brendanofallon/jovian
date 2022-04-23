@@ -636,27 +636,6 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=None, counts=None):
     return counts
 
 
-def eval_batch(src, tgt, predictions):
-    """
-    Run evaluation on a single batch and report number of TPs, FPs, and FNs
-    :param src: Model input (with batch dimension as first dim and ref sequence as first element in dimension 2)
-    :param tgt: Model targets / true alt sequence
-    :param predictions: Model prediction
-    :return: Total number of TP, FP, and FN variants
-    """
-    tp_total = 0
-    fp_total = 0
-    fn_total = 0
-    for b in range(src.shape[0]):
-        refseq = src[b, :, 0, :]
-        assert refseq[:, 0:4].sum() == refseq.shape[0], f"Probable incorrect refseq index, sum did not match sequence length!"
-        tps, fps, fns = eval_prediction(refseq, tgt[b, :], predictions[b, :, :])
-        tp_total += len(tps)
-        fp_total += len(fps)
-        fn_total += len(fns)
-    return tp_total, fp_total, fn_total
-
-
 def train(config, output_model, input_model, epochs, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
@@ -669,33 +648,20 @@ def train(config, output_model, input_model, epochs, **kwargs):
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
- 
-    conf = load_train_conf(config)
 
-    if kwargs.get("datadir") is not None:
-        logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
-        pregenloader = loader.PregenLoader(DEVICE,
-                                         kwargs.get("datadir"),
-                                         threads=kwargs.get('threads'),
-                                         max_decomped_batches=kwargs.get('max_decomp_batches'))
-        
-        dataloader = pregenloader
+    logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
+    dataloader = loader.PregenLoader(DEVICE,
+                                     kwargs.get("datadir"),
+                                     threads=kwargs.get('threads'),
+                                     max_decomped_batches=kwargs.get('max_decomp_batches'))
 
-        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
-        if kwargs.get("data_augmentation"):
-            #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-            dataloader = loader.ShufflingLoader(dataloader)
-            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
-    else:
-        logger.info(f"Using on-the-fly training data from sim loader")
-        dataloader = loader.BWASimLoader(DEVICE,
-                                     regions=conf['regions'],
-                                     refpath=conf['reference'],
-                                     readsperpileup=300,
-                                     readlength=145,
-                                     error_rate=0.02,
-                                     clip_prob=0.01)
+    # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
+    if kwargs.get("data_augmentation"):
+        #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
+        dataloader = loader.ShufflingLoader(dataloader)
+        #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01
+
     torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,

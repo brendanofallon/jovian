@@ -212,7 +212,6 @@ def pregen(config, **kwargs):
                 util.concat_metafile(sample_metafile, metafh)
 
 
-
 def print_pileup(path, idx, target=None, **kwargs):
     path = Path(path)
 
@@ -290,6 +289,7 @@ def main():
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
     callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
     callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
+    callparser.add_argument("-f", "--freq-file", help="Population frequency file for classifier")
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     callparser.set_defaults(func=call)
