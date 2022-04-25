@@ -14,6 +14,7 @@ class Variant:
     step: int = None
     window_offset: int = None
     var_index: int = None
+    reverse_call: bool = None
 
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
@@ -47,15 +48,15 @@ class VcfVar:
     phase_set: int
     model_haps: list
     haplotype: int
-    step_indexes: list
     window_idx: int
     window_var_count: int
     window_cis_vars: int
     window_trans_vars: int
-    window_offset: int
-    var_index: int
+    forward_window_offset: int
+    reverse_window_offset: int
     call_count: int
-    step_count: int
+    forward_step_count: int
+    reverse_step_count: int
     genotype: tuple
     het: bool
     duplicate: bool
@@ -228,8 +229,8 @@ def var_depth(var, chrom, aln):
 def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=30):
     """
     From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
-    :param vars_hap0:
-    :param vars_hap1:
+    :param vars_hap0: List of Variant objects
+    :param vars_hap1: List of Variant objects
     :param chrom:
     :param window_idx: simple index of sequential call windows
     :param aln: bam AlignmentFile
@@ -256,18 +257,19 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var in window for now
             model_haps=[call.hap_model for call in vars_hap0[var]],
             haplotype=0,  # defalt vars_hap0 to haplotype 0 for now
-            step_indexes=[call.step for call in vars_hap0[var]],  # in which steps across window was var detected?
+            # in which steps across window was var detected?
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=len(vars_hap0),
             window_trans_vars=len(vars_hap1),
             call_count=len(vars_hap0[var]),
-            step_count=len(vars_hap0[var]),
+            forward_step_count=len([v for v in vars_hap0[var] if not v.reverse_call]),
+            reverse_step_count=len([v for v in vars_hap0[var] if v.reverse_call]),
             genotype=(0, 1),  # default to haplotype 0
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
-            window_offset=[call.window_offset for call in vars_hap0[var]],
-            var_index=[call.var_index for call in vars_hap0[var]],
+            forward_window_offset=[call.window_offset for call in vars_hap0[var] if not call.reverse_call],
+            reverse_window_offset=[call.window_offset for call in vars_hap0[var] if call.reverse_call],
         )
     vcfvars_hap1 = {}
     for var, depth in zip(vars_hap1, depths_hap1):
@@ -284,18 +286,18 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var position in window
             model_haps=[call.hap_model for call in vars_hap1[var]],
             haplotype=1,  # defalt vars_hap1 to haplotype 1 for now
-            step_indexes=[call.step for call in vars_hap1[var]],  # in which steps across window was var detected?
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=len(vars_hap1),
             window_trans_vars=len(vars_hap0),
             call_count=len(vars_hap1[var]),
-            step_count=len(vars_hap1[var]),
+            forward_step_count=len([v for v in vars_hap1[var] if not v.reverse_call]),
+            reverse_step_count=len([v for v in vars_hap1[var] if v.reverse_call]),
             genotype=(1, 0),  # default to haplotype 1
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
-            window_offset=[call.window_offset for call in vars_hap1[var]],
-            var_index=[call.var_index for call in vars_hap1[var]],
+            forward_window_offset=[call.window_offset for call in vars_hap1[var] if not call.reverse_call],
+            reverse_window_offset=[call.window_offset for call in vars_hap1[var] if call.reverse_call],
         )
     # check for homozygous vars
     homs = list(set(vcfvars_hap0) & set(vcfvars_hap1))
@@ -304,14 +306,15 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         vcfvars_hap0[var].qual = (vcfvars_hap0[var].qual + vcfvars_hap1[var].qual) / 2  # Mean of each call??
         vcfvars_hap0[var].quals = vcfvars_hap0[var].quals + vcfvars_hap1[var].quals  # combine haps
         vcfvars_hap0[var].model_haps = vcfvars_hap0[var].model_haps + vcfvars_hap1[var].model_haps  # combine haps
-        vcfvars_hap0[var].step_indexes = vcfvars_hap0[var].step_indexes + vcfvars_hap1[var].step_indexes  # combine haps
         vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
         vcfvars_hap0[var].window_trans_vars = 0  # moved all vars to cis
         vcfvars_hap0[var].call_count += vcfvars_hap1[var].call_count  # combine call counts in both haplotypes
-        vcfvars_hap0[var].step_count = len(set(vcfvars_hap0[var].step_indexes))  # combine call counts in both haplotypes
+        vcfvars_hap0[var].forward_step_count = vcfvars_hap0[var].forward_step_count + vcfvars_hap1[var].forward_step_count  # combine call counts in both haplotypes
+        vcfvars_hap0[var].reverse_step_count = vcfvars_hap0[var].reverse_step_count + vcfvars_hap1[var].reverse_step_count
         vcfvars_hap0[var].genotype = (1, 1)
         vcfvars_hap0[var].het = False
-        vcfvars_hap0[var].window_offset = sorted(set(vcfvars_hap0[var].window_offset + vcfvars_hap1[var].window_offset))
+        vcfvars_hap0[var].forward_window_offset = sorted(set(vcfvars_hap0[var].forward_window_offset + vcfvars_hap1[var].forward_window_offset))
+        vcfvars_hap0[var].reverse_window_offset = sorted(set(vcfvars_hap0[var].reverse_window_offset + vcfvars_hap1[var].reverse_window_offset))
         # then remove from hap1 vars
         vcfvars_hap1.pop(var)
 
@@ -326,9 +329,11 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         if var.depth < mindepth:
             var.filter.append("LowCov")
         if var.call_count < 2:
-            var.filter.append("SingleCallHet")
-        elif var.step_count < 2:
-            var.filter.append("SingleCallHom")
+            if len(set(var.genotype)) == 2:
+                var.filter.append("SingleCallHet")
+            else:
+                var.filter.append("SingleCallHom")
+
 
         # adjust insertions and deletions so no blank ref or alt
         if var.ref == "" or var.alt == "":
@@ -358,7 +363,7 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     # Create a VCF header
     vcfh = pysam.VariantHeader()
     if cmdline is not None:
-        vcfh.add_meta('COMMAND', cmdline)
+        vcfh.add_meta('COMMAND', f"\"{cmdline}\"")
     # Add a sample named "sample"
     vcfh.add_sample(sample_name)
     # Add contigs
@@ -411,18 +416,18 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
                                  ('Description', 'QUAL value(s) for calls in window(s)')])
     vcfh.add_meta('INFO', items=[('ID', "MODEL_HAPS"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Haplotypes of all model calls of this var')])
-    vcfh.add_meta('INFO', items=[('ID', "STEP_INDEXES"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'Step indexes of all model calls of this var in multi-step detection')])
     vcfh.add_meta('INFO', items=[('ID', "CALL_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Number of model haplotype calls of this var in multi-step detection')])
-    vcfh.add_meta('INFO', items=[('ID', "STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'Number of overlapping steps where var detected in multi-step detection')])
+    vcfh.add_meta('INFO', items=[('ID', "FORWARD_STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Number of overlapping steps where var detected in forward direction')])
+    vcfh.add_meta('INFO', items=[('ID', "REVERSE_STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Number of overlapping steps where var detected in reverse detection')])
     vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 1), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
-    vcfh.add_meta('INFO', items=[('ID', "WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'Position of call within calling window')])
-    vcfh.add_meta('INFO', items=[('ID', "VAR_INDEX"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'Order of call in window')])
+    vcfh.add_meta('INFO', items=[('ID', "FORWARD_WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Position of call within forward calling windows')])
+    vcfh.add_meta('INFO', items=[('ID', "REVERSE_WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Position of call within forward calling windows')])
     vcfh.add_meta('INFO', items=[('ID', "RAW_QUAL"), ('Number', 1), ('Type', 'Float'),
                                  ('Description', 'Original quality if classifier used to update QUAL field')])
     # write to new vcf file object
@@ -463,11 +468,11 @@ def create_vcf_rec(var, vcf_file):
     r.info['WIN_TRANS_COUNT'] = var.window_trans_vars
     r.info['QUALS'] = [float(x) for x in var.quals]
     r.info['MODEL_HAPS'] = var.model_haps
-    r.info['STEP_INDEXES'] = var.step_indexes
     r.info['CALL_COUNT'] = var.call_count
-    r.info['STEP_COUNT'] = var.step_count
-    r.info['WIN_OFFSETS'] = [int(x) for x in var.window_offset]
-    r.info['VAR_INDEX'] = [int(x) for x in var.var_index]
+    r.info['FORWARD_STEP_COUNT'] = var.forward_step_count
+    r.info['REVERSE_STEP_COUNT'] = var.forward_step_count
+    r.info['FORWARD_WIN_OFFSETS'] = [int(x) for x in var.forward_window_offset]
+    r.info['REVERSE_WIN_OFFSETS'] = [int(x) for x in var.reverse_window_offset]
     if var.duplicate:
         r.info['DUPLICATE'] = ()
     return r
@@ -475,10 +480,9 @@ def create_vcf_rec(var, vcf_file):
 
 def vars_to_vcf(vcf_file, variants):
     """
-    create variant records from pyranges variant table and write all to pysam VariantFile
+    create pysam.VariantRecords from list of VcfVar objects and write all to pysam VariantFile
     :param vcf_file:
-    :param pr_vars: List of variants to write
-
+    :param variants: List of variants to write
     :return: None
     """
     for var in variants:

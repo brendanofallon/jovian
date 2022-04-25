@@ -46,7 +46,6 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
-        print(f"Examining position {col.reference_pos}")
         if start <= col.reference_pos < stop:
             refbase = refseq[col.reference_pos - start]
             indel_count = 0
@@ -139,9 +138,9 @@ def reconcile_current_window(prev_win, current_win):
 
 
 def load_model(model_path):
-    attention_heads = 8
-    encoder_layers = 8
-    transformer_dim = 400
+    attention_heads = 6
+    encoder_layers = 6
+    transformer_dim = 250
     embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
@@ -570,11 +569,18 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
         refseq = reference.fetch(chrom, offset, offset + window_size)
         vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
         vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        for var in vars_hap0 + vars_hap1:
+            var.reverse_call = reverse
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
 
 def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
+    """
+    Add the variants in 'batchvars' to the dicts of variants in allvars0 and allvars1
+    and return allvars0 and allvars1
+    THIS MODIFIES THE INPUTS allvars0 and allvars1 ! 
+    """
     for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
         stepvars0 = {}
         for v in vars_hap0:
@@ -647,7 +653,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, reverse=Fa
 
     for window_start in range(start - 2 * window_step, end+1, window_step):
         try:
-            print(f"Getting window from {window_start} to {window_start + window_size}")
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
                                              reverse=reverse,
@@ -672,18 +677,35 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, reverse=Fa
         yield encodedreads, batch_offsets
 
 
+def _encode_and_call(aln, model, reference, chrom, start, end, max_read_depth, window_size, min_reads, window_step, batch_size, var_retain_window_size, reverse):
+    """
+    Encode BAM regions from aln in multiple sliding windows over the desired region (chrom:start-end) and
+    convert the predicted haplotypes into Variants, one for each haplotype
+    """
+    step_count = 0
+    allvars0 = defaultdict(list)
+    allvars1 = defaultdict(list)
+    cpname = mp.current_process().name
+    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
+                                               max_read_depth,
+                                               reverse=reverse,
+                                               window_size=window_size,
+                                               min_reads=min_reads,
+                                               window_step=window_step,
+                                               batch_size=batch_size):
+        logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, reverse)
+        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, var_retain_window_size)
+
+    return allvars0, allvars1
+
+
 def _call_vars_region(
-    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5, window_step=50
+    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=150, min_reads=5, window_step=50
 ):
     """
-    For the given region, identify variants by repeatedly calling the model over a sliding window,
-    tallying all of the variants called, and passing back all call and repeat count info
-    for further exploration
-    Currently:
-    - exclude all variants in the downstream half of the window
-    - retain all remaining var calls noting how many time each one was called, qualities, etc.
-    - call with no repeats are mostly false positives but they are retained
-    - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
+    Call variants in the given region by encoding multiple regions (in both forward and reverse directions)
+    and merging results. Returns lists of Variant objects detected on both haplotypes
 
     TODO:
       - add prob info from alt sequence to vars?
@@ -695,8 +717,7 @@ def _call_vars_region(
         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
     )
 
-    allvars0 = defaultdict(list)
-    allvars1 = defaultdict(list)
+
     step_count = 0  # initialize
     var_retain_window_size = 125
     batch_size = 64
@@ -705,42 +726,27 @@ def _call_vars_region(
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
 
-    reverse = False
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                               max_read_depth,
-                                               reverse=reverse,
-                                               window_size=window_size,
-                                               min_reads=min_reads,
-                                               window_step=window_step,
-                                               batch_size=batch_size):
-        logger.info(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
-        enctime_total += (datetime.datetime.now() - encstart)
-        callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, reverse)
-        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, var_retain_window_size)
-        calltime_total += (datetime.datetime.now() - callstart)
+    allvars0f, allvars1f = _encode_and_call(aln, model, reference, chrom, start, end, max_read_depth, window_size,
+                                            min_reads, window_step, batch_size, var_retain_window_size, reverse=False)
 
-        step_count += batch.shape[0]
+    allvars0r, allvars1r = _encode_and_call(aln, model, reference, chrom, start, end, max_read_depth, window_size,
+                                          min_reads, window_step, batch_size, var_retain_window_size, reverse=True)
 
-    reverse = True
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                               max_read_depth,
-                                               reverse=reverse,
-                                               window_size=window_size,
-                                               min_reads=min_reads,
-                                               window_step=window_step,
-                                               batch_size=batch_size):
-        logger.info(f"{cpname}: Reverse! pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
-        enctime_total += (datetime.datetime.now() - encstart)
-        callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, reverse)
-        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count,
-                                              var_retain_window_size)
-        calltime_total += (datetime.datetime.now() - callstart)
+    # allvars0/1 r/f are both phased internally, but not with each other. So just count matches between
+    # the sets and see if they should be swapped
+    match00 = len(set(allvars0f.keys()).intersection(set(allvars0r.keys()))) + len(set(allvars1f.keys()).intersection(set(allvars1r.keys())))
+    match01 = len(set(allvars0f.keys()).intersection(set(allvars1r.keys()))) + len(
+        set(allvars1f.keys()).intersection(set(allvars0r.keys())))
+    if match01 > match00:
+        allvars0r, allvars1r = allvars1r, allvars0r
+    for k, v in allvars0r.items():
+        allvars0f[k].extend(v)
+    for k, v in allvars1r.items():
+        allvars1f[k].extend(v)
 
     # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
+    hap0_passing = {k: v for k, v in allvars0f.items() if start <= v[0].pos <= end}
+    hap1_passing = {k: v for k, v in allvars1f.items() if start <= v[0].pos <= end}
 
-    logger.info(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+    # logger.info(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing

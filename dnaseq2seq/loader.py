@@ -469,7 +469,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     refgenome = pysam.FastaFile(refpath)
     bam = pysam.AlignmentFile(bampath)
     vcf = pysam.VariantFile(vcfpath)
-    reverse = True  # Probably want to make this random for each region or something
+    reverse = False  # Probably want to make this random for each region or something
     upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)
     logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
     for region in upsampled_labels:
@@ -491,8 +491,13 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
                 midstart = max(0, start - minref)
                 midend = midstart + regionsize
 
-                tgt0 = target_string_to_tensor(hap0[midstart:midend])
-                tgt1 = target_string_to_tensor(hap1[midstart:midend])
+                hap0mid = hap0[midstart:midend]
+                hap1mid = hap1[midstart:midend]
+                if reverse:
+                    raise NotImplemented("Implement reversed haplotype construction...")
+
+                tgt0 = target_string_to_tensor(hap0mid)
+                tgt1 = target_string_to_tensor(hap1mid)
                 tgt_haps = torch.stack((tgt0, tgt1))
 
                 if encoded.shape[0] > regionsize:
