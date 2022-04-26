@@ -199,15 +199,6 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
             t_offset += cig.len
 
 
-
-# import numpy as np
-# ref = "ACTGACTG"
-# alt = "ACTGCTG"
-# probs = np.arange(7) * 0.1
-# for v in aln_to_vars(ref, alt, probs=probs):
-#     print(v)
-
-
 def var_depth(var, chrom, aln):
     """
     Get read depth at variant start position from bam  pysam AlignmentFile to get depth at
@@ -470,7 +461,7 @@ def create_vcf_rec(var, vcf_file):
     r.info['MODEL_HAPS'] = var.model_haps
     r.info['CALL_COUNT'] = var.call_count
     r.info['FORWARD_STEP_COUNT'] = var.forward_step_count
-    r.info['REVERSE_STEP_COUNT'] = var.forward_step_count
+    r.info['REVERSE_STEP_COUNT'] = var.reverse_step_count
     r.info['FORWARD_WIN_OFFSETS'] = [int(x) for x in var.forward_window_offset]
     r.info['REVERSE_WIN_OFFSETS'] = [int(x) for x in var.reverse_window_offset]
     if var.duplicate:
