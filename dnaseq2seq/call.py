@@ -4,6 +4,7 @@ import math
 import datetime
 import logging
 import string
+import random
 from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
@@ -27,7 +28,7 @@ DEVICE = torch.device("cpu")
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
-    return ''.join(random.choices(string.ascii_letters + string.ascii_digits, k=n)
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
@@ -178,33 +179,37 @@ def split_large_regions(regions, max_region_size):
             start += max_region_size
 
 
-def cluster_positions(poslist, maxdist=500):
+def cluster_positions(poslist, maxdist=100):
     """
     Iterate over the given list of positions (numbers), and generate ranges containing
     positions not greater than 'maxdist' in size
     """
     cluster = []
+    end_pad_bases = 8
     for pos in poslist:
         if len(cluster) == 0 or pos - min(cluster) < maxdist:
             cluster.append(pos)
         else:
-            yield min(cluster), max(cluster)
+            if len(cluster) == 1:
+                yield cluster[0] - 1, cluster[0] + 1
+            else:
+                yield min(cluster), max(cluster) + end_pad_bases
             cluster = [pos]
 
     if len(cluster) == 1:
-        yield cluster[0] - 10, cluster[0] + 10
+        yield cluster[0] - 1, cluster[0] + 1
     elif len(cluster) > 1:
-        yield min(cluster), max(cluster)
+        yield min(cluster), max(cluster) + end_pad_bases
 
 
-def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=500):
+def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
     Generate a list of ranges containing a list of posistions from the given window
     """
     chrom, window_idx, window_start, window_end = window
     
     cpname = mp.current_process().name
-    logger.info(
+    logger.debug(
         f"{cpname}: Generating regions from window {window_idx}: "
         f"{window_start}-{window_end} on chromosome {chrom}"
     )
@@ -273,7 +278,14 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
 
     threads = kwargs.get('threads', 1)
-    logger.info(f"There are {threads} CPUs available")
+    min_qual = kwargs.get('min_qual', 1e-4)
+    logger.info(f"Using {threads} threads")
+
+    var_freq_file = kwargs.get('freq_file')
+    if var_freq_file:
+        logger.info(f"Loading variant pop frequency file from {var_freq_file}")
+    else:
+        logger.info(f"No variant frequency file specified, this might not work depending on the classifier requirements")
 
     tmpdir = f".tmp.varcalls_{randchars()}"
     os.makedirs(tmpdir, exist_ok=False)
@@ -298,9 +310,11 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
             classifier_path=classifier_path,
             threads=threads,
             tmpdir=tmpdir,
+            var_freq_file=var_freq_file,
         )
         for var in pysam.VariantFile(chrom_vcf):
-            vcf_file.write(var)
+            if var.qual > min_qual:
+                vcf_file.write(var)
         os.unlink(chrom_vcf)
         os.unlink(chrom_bed)
 
@@ -335,7 +349,7 @@ def split_even_chunks(n_item, n_chunk):
 
 
 def call_variants_on_chrom(
-    chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir
+    chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file
 ):
     """
     Call variants on the given chromsome and write the variants to a temporary VCF.
@@ -367,7 +381,7 @@ def call_variants_on_chrom(
         cluster_positions_for_window,
         bamfile=bamfile,
         reference_fasta=reference_fasta,
-        maxdist=500,
+        maxdist=100,
     )
 
     logger.info(f"Generating regions from windows on chromosome {chrom}...")
@@ -393,6 +407,7 @@ def call_variants_on_chrom(
         max_read_depth=max_read_depth,
         window_size=150,
         window_step=33,
+        var_freq_file=var_freq_file
     )
 
     chrom_vcf = f"{tmpdir}/chrom_{chrom}.vcf"
@@ -427,9 +442,10 @@ def process_chunk_regions(
     classifier_path,
     max_read_depth,
     tmpdir,
+    var_freq_file,
     window_size=300,
     min_reads=5,
-    window_step=50
+    window_step=50,
 ):
     """
     Call variants on the given region and write variants to a temporary VCF file.
@@ -442,6 +458,9 @@ def process_chunk_regions(
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
     model = load_model(model_path)
+
+    if var_freq_file:
+        var_freq_file = pysam.VariantFile(var_freq_file)
 
     # if classifier model available then use classifier quality
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
@@ -457,8 +476,8 @@ def process_chunk_regions(
             chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
                 chrom,
                 window_idx,
-                start - 25,
-                end + 2,
+                start,
+                end,
                 aln=aln,
                 model=model,
                 reference=reference,
@@ -477,6 +496,7 @@ def process_chunk_regions(
                 reference=reference,
                 classifier_model=classifier_model,
                 tmpdir=tmpdir,
+                var_freq_file=var_freq_file
             )
 
             for var in pysam.VariantFile(vcfname):
@@ -488,7 +508,7 @@ def process_chunk_regions(
 
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir,
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir, var_freq_file
 ):
     """
     Convert variant haplotypes to variant records and write the records to a temporary VCF file.
@@ -518,7 +538,7 @@ def vars_hap_to_records(
     for rec in vcf_records:
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
-            rec.qual = buildclf.predict_one_record(classifier_model, rec)
+            rec.qual = buildclf.predict_one_record(classifier_model, rec, var_freq_file)
         vcf_file.write(rec)
 
     vcf_file.close()
