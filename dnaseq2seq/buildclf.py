@@ -20,16 +20,34 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
                     level=logging.INFO)
 
 
+
+def trim_prefix(ref, alt):
+    offset = 0
+    if len(ref) == 1 or len(alt) == 1:
+        return 0, ref, alt
+    for r, a in zip(ref[:-1], alt[:-1]):
+        if r != a:
+            return offset, ref[offset:], alt[offset:]
+        offset += 1
+    return offset, ref[offset:], alt[offset:]
+
+
 def find_var(varfile, chrom, pos, ref, alt):
     """
     Search varfile for VCF record with matching chrom, pos, ref, alt
     If chrom/pos/ref/alt match is found, return that record and allele index of matching alt
     """
-    for var in varfile.fetch(chrom, pos-3, pos+3):
-        if var.ref == ref and var.pos == pos:
-            for i, varalt in enumerate(var.alts):
-                if varalt == alt:
-                    return var, i
+    poffset, trimref, trimalt = trim_prefix(ref, alt)
+    print(f"Trimmed query: {pos + poffset} {trimref}  {trimalt}")
+    pos = pos + poffset
+    for var in varfile.fetch(chrom, pos-5, pos+3):
+        print(f"Comparing to : {var}")
+        for i, varalt in enumerate(var.alts):
+            offset, r, a = trim_prefix(var.ref, varalt)
+            print(f"Comparing to {var.pos + offset}  {r}  {a}")
+            if var.pos + offset == pos and r == trimref and a == trimalt:
+                return var, i
+
 
 
 @lru_cache(maxsize=1000000)
@@ -208,5 +226,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    varfile = pysam.VariantFile("test.vcf.gz")
+    print(find_var(varfile, "2", 99, "CTTG", "GTA"))
+    #main()
 
