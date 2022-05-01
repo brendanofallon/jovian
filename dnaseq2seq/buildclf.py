@@ -47,14 +47,11 @@ def find_var(varfile, chrom, pos, ref, alt):
     """
     ref, alt = trim_suffix(ref, alt)
     poffset, trimref, trimalt = trim_prefix(ref, alt)
-    #print(f"Trimmed query: {pos + poffset} {trimref}  {trimalt}")
     pos = pos + poffset
     for var in varfile.fetch(chrom, pos-5, pos+3):
-        #print(f"Comparing to : {var}")
         for i, varalt in enumerate(var.alts):
             varref, varalt = trim_suffix(var.ref, varalt)
             offset, r, a = trim_prefix(varref, varalt)
-            #print(f"Comparing to {var.pos + offset}  {r}  {a}")
             if var.pos + offset == pos and r == trimref and a == trimalt:
                 return var, i
 
@@ -63,12 +60,10 @@ def find_var(varfile, chrom, pos, ref, alt):
 @lru_cache(maxsize=1000000)
 def var_af(varfile, chrom, pos, ref, alt):
     result = find_var(varfile, chrom, pos, ref, alt)
-    print(f"Find var result: {result}")
     af = 0.0
     if result is not None:
         var, alt_index = result
         af = var.info['AF'][alt_index]
-        print(f"Got AF: {af}")
         if af is None or "PASS" not in var.filter:
             af = 0.0
         else:

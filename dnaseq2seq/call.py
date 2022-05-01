@@ -69,28 +69,6 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                     break
 
 
-def bed_to_windows(pr_bed, bed_slack=0, window_spacing=1000, window_overlap=0):
-    """
-    Make generator yielding windows of spacing window_spacing with right side overlap window_overlap
-    Windows will typically be smaller than window_spacing at right end of bed intervals
-    Also return total window count (might indicate how long it could take?)
-    :param pr_bed: PyRange object representing bed file (columns Chromosome, Start, End)
-    :param bed_slack: bases to slack both sides of each bed region
-    :param window_spacing: spacing between the start of each window
-    :param window_overlap: right side overlap between windows
-    :return: yields Chromosome, Start, End of window
-    """
-    # merge and slack/pad bed file regions
-    pr_slack = pr_bed.slack(bed_slack)
-    df_windows = pr_slack.window(window_spacing).df
-    df_windows["End"] = df_windows["End"] + window_overlap
-    df_windows = pr.PyRanges(df_windows).intersect(pr_slack).df
-
-    window_count = len(df_windows)
-    windows = ((win.Chromosome, win.Start, win.End) for i, win in df_windows.iterrows())
-    return windows, window_count
-
-
 def reconcile_current_window(prev_win, current_win):
     """
     modify variant parameters in current window depending on any overlapping variants in previous window
@@ -190,21 +168,19 @@ def cluster_positions(poslist, maxdist=100):
         if len(cluster) == 0 or pos - min(cluster) < maxdist:
             cluster.append(pos)
         else:
-            if len(cluster) == 1:
-                yield cluster[0] - 1, cluster[0] + 1
-            else:
-                yield min(cluster), max(cluster) + end_pad_bases
+            yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
             cluster = [pos]
 
     if len(cluster) == 1:
-        yield cluster[0] - 1, cluster[0] + 1
+        yield cluster[0] - end_pad_bases, cluster[0] + end_pad_bases
     elif len(cluster) > 1:
-        yield min(cluster), max(cluster) + end_pad_bases
+        yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
 
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
     Generate a list of ranges containing a list of posistions from the given window
+    returns: list of (chrom, index, start, end) tuples
     """
     chrom, window_idx, window_start, window_end = window
     
@@ -470,7 +446,7 @@ def process_chunk_regions(
         for idx, line in enumerate(fh):
             if idx < start_idx or idx >= end_idx:
                 continue
-            chrom, window_idx, start, end  = line.strip().split("\t")[0:4]
+            chrom, window_idx, start, end = line.strip().split("\t")[0:4]
             window_idx, start, end = int(window_idx), int(start), int(end)
     
             chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
