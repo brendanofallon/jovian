@@ -20,15 +20,26 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
                     level=logging.INFO)
 
 
+def trim_prefix(ref, alt):
+    offset = 0
+    for r, a in zip(ref, alt):
+        if r != a:
+            return offset, ref[offset:], alt[offset:]
+        offset += 1
+    raise ValueError("We should never get here")
+
+
+
 def find_var(varfile, chrom, pos, ref, alt):
     """
     Search varfile for VCF record with matching chrom, pos, ref, alt
     If chrom/pos/ref/alt match is found, return that record and allele index of matching alt
     """
-    for var in varfile.fetch(chrom, pos-3, pos+3):
+    for var in varfile.fetch(chrom, pos-5, pos+3):
         if var.ref == ref and var.pos == pos:
             for i, varalt in enumerate(var.alts):
-                if varalt == alt:
+                offset, r, a = trim_prefix(ref, varalt)
+                if var.pos + offset == pos and r == ref and a == alt:
                     return var, i
 
 
