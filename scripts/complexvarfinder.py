@@ -36,7 +36,7 @@ def main(vcf, bam, refgenome):
         if len(var.ref) > min_size or any(len(a) > min_size for a in var.alts):
             indel_starts = [s for s in find_indel_starts(aln, var.chrom, var.pos - 20, var.pos + 20)]
             if len(indel_starts) > 3:
-                print(var)
+                print(var, end='')
 
 
 if __name__=="__main__":
