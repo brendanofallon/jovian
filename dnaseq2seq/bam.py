@@ -5,9 +5,9 @@ import numpy as np
 import pysam
 import torch
 import logging
-
-import util
 from collections import defaultdict
+
+from dnaseq2seq import util
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ class LowReadCountException(Exception):
 
 def readkey(read):
     suf = "-1" if read.is_read1 else "-2"
-    return read.query_name + suf
+    suf2 = "-" + str(read.cigar) + "-" + str(read.reference_start)
+    return read.query_name + suf + suf2
 
 
 class ReadCache:
@@ -98,12 +99,14 @@ class ReadWindow:
         if len(allreads) > num_reads_to_sample:
             allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
-        t = torch.zeros(end-start, max_reads, 9)
+
+        window_size = end - start
+        t = torch.zeros(window_size, max_reads, 9)
 
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
             enc_start_offset = max(0,  start - readstart)
-            enc_end_offset = min(encoded.shape[0], t.shape[0] - (readstart - start))
+            enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
             t_start_offset = max(0, readstart - start)
             t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
             t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]

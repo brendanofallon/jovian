@@ -20,7 +20,7 @@
 \maketitle
 
 \begin{abstract}
-	Detection of germline variants in next-generation sequencing data is an essential element of modern genomics. Variant detection tools typically rely on a variety of statistical algorithms and heuristic techniques to identify variants. Here we describe a new approach that replaces the handcrafted statistical methods with a single, end-to-end deep learning model. Our model frames variant detection as a sequence-to-sequence modeling task, and employs a transformer-based architecture to translate alignment columns into predicted haplotype sequences. 
+	Detection of germline variants in next-generation sequencing data is an essential element of modern genomics. Variant detection tools typically rely on a variety of statistical algorithms and heuristic techniques to identify variants. Here we describe a new approach that replaces the handcrafted statistical methods with a single, end-to-end deep learning model. Our model frames variant detection as a sequence-to-sequence modeling task, and employs a transformer-based architecture to translate alignment columns into two predicted haplotype sequences. We demonstrate that this method predicts variant genotypes accurately, phases nearby variants correctly, and has the ability to realign complex and ambiguous read mappings to produce accurate haplotype predictions. 
 \end{abstract}
 
 \section{Introduction}
@@ -59,7 +59,7 @@ To select regions to include for training data, we developed a scheme to sample 
 
 \subsection{Loss function}
 
-We use a familiar cross-entropy loss function to compare predicted haplotypes to known haplotype sequences for each region, and simply compare each prediction at window index (position) $i$ to the true base at index $i$.  While we obtain satisfactory results with this approach, two issues were apparent. First, predicted haplotype sequences may have inserted or deleted bases relative to the true haplotypes. Because incorrect insertions and deletions cause mismatches at every downstream (higher index) position, such mistakes are penalized more heavily when they occur at lower indexes than higher indexes, because a greater number of mismatches are generated. Thus the model learns to generate high quality results for the first portion of the window where inaccuracies are punished severely, and is less concerned with accuarcy at high indexes. 
+We use a standard cross-entropy loss function to compare predicted haplotypes to known haplotype sequences for each region, and simply compare each prediction at window index (position) $i$ to the true base at index $i$.  While we obtain satisfactory results with this approach, two issues were apparent. First, predicted haplotype sequences may have inserted or deleted bases relative to the true haplotypes. Because incorrect insertions and deletions cause mismatches at every downstream (higher index) position, such mistakes are penalized more heavily when they occur at lower indexes than higher indexes. Thus the model learns to generate high quality results for the first portion of the window where inaccuracies are punished severely, and is less concerned with accuarcy at high indexes. 
 
 A second complexity arises due to ambiguity regarding which haplotype should contain a variant. The two haplotypes present in a sample have no inherent order. In training data variants are assigned arbitrarily to haplotypes, and this randomness in haplotype assignment means model cannot learn to predict which haplotype should contain a given variant. To combat this ambiguity, we calculate loss in both possible configurations - predicted haplotype 0 with training haplotype 0 and 1 with 1, as well as predicted haplotype 0 with training haplotype 1 and 1 with 0. We select the configuration with the lowest loss and backpropogate gradients only for that configuration. 
 
@@ -70,9 +70,27 @@ Given an alignment file in BAM or CRAM format,
 
 \section{Results}
 
-\subsection{Yes we can really do nontrivial / complex alignments}
+\subsection{Genotyping}
+ - Are we getting the right variant genotypes
 
-Just show some examples here
+\subsection{Phasing accuracy}
+ - look at nearby variants, see if they are phased correctly compared to GIAB information
+
+\subsection{Complex regions}
+ - Not sure how to define these, but ideally we'd look for variants in regions where the read mapper had
+ lots of overlapping insertion / deletions in reads and/or softclipping
+
+\subsection{Use of local context}
+ - Also ambiguous, but anecdotally when looking at variant calls, it seems apparent that variants that otherwise look real have lower quality scores when there's a lot of junk around. That's good, since such variants are more likely To
+ be false positives, and that means the model is to some extent looking at local context to modify prediction accuracy. Which is cool. 
+
+
+\subsection{Variant detection accuracy}
+
+ - Tabulate Hap.py results across a few common stratifications, compare to other callers
+
+
+
 
 \subsection{Model size experiments}
 

@@ -14,11 +14,11 @@ from torch import nn
 
 logger = logging.getLogger(__name__)
 
-import vcf
-import loader
-import util
-from model import VarTransformer
-from swloss import SmithWatermanLoss
+from dnaseq2seq import vcf
+from dnaseq2seq import loader
+from dnaseq2seq import util
+from dnaseq2seq.model import VarTransformer
+from dnaseq2seq.swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -191,7 +191,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
             epoch_loss_sum += loss.detach().item()
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
-        if batch % 1 == 0:
+        if batch % 10 == 0:
             logger.info(f"Batch {batch} : hap0 / 1 acc: {midmatch_hap0.item():.3f} / {midmatch_hap1.item():.3f} hap1loss: {loss.item():.3f}")
             
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
@@ -329,10 +329,10 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 8
-    transformer_dim = 400
-    encoder_layers = 8
-    embed_dim_factor = 100
+    attention_heads = 4
+    transformer_dim = 200
+    encoder_layers = 6
+    embed_dim_factor = 125
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=4,
@@ -361,7 +361,7 @@ def train_epochs(epochs,
     elif lossfunc == 'sw':
         gap_open_penalty = -5
         gap_exend_penalty = -1
-        temperature = 2.0
+        temperature = 1.0
         trim_width = 100
         logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
         criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
@@ -532,7 +532,7 @@ def train_epochs(epochs,
                 "epoch": epoch,
                 "trainingloss": loss,
                 "train_accuracy": train_acc0,
-                "val_accuracy": acc0,
+                "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
                 "mean_var_count": var_count0,
                 "ppa_dels": ppa_dels,
                 "ppa_ins": ppa_ins,
@@ -636,27 +636,6 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=None, counts=None):
     return counts
 
 
-def eval_batch(src, tgt, predictions):
-    """
-    Run evaluation on a single batch and report number of TPs, FPs, and FNs
-    :param src: Model input (with batch dimension as first dim and ref sequence as first element in dimension 2)
-    :param tgt: Model targets / true alt sequence
-    :param predictions: Model prediction
-    :return: Total number of TP, FP, and FN variants
-    """
-    tp_total = 0
-    fp_total = 0
-    fn_total = 0
-    for b in range(src.shape[0]):
-        refseq = src[b, :, 0, :]
-        assert refseq[:, 0:4].sum() == refseq.shape[0], f"Probable incorrect refseq index, sum did not match sequence length!"
-        tps, fps, fns = eval_prediction(refseq, tgt[b, :], predictions[b, :, :])
-        tp_total += len(tps)
-        fp_total += len(fps)
-        fn_total += len(fns)
-    return tp_total, fp_total, fn_total
-
-
 def train(config, output_model, input_model, epochs, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
@@ -669,33 +648,20 @@ def train(config, output_model, input_model, epochs, **kwargs):
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
- 
-    conf = load_train_conf(config)
 
-    if kwargs.get("datadir") is not None:
-        logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
-        pregenloader = loader.PregenLoader(DEVICE,
-                                         kwargs.get("datadir"),
-                                         threads=kwargs.get('threads'),
-                                         max_decomped_batches=kwargs.get('max_decomp_batches'))
-        
-        dataloader = pregenloader
+    logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
+    dataloader = loader.PregenLoader(DEVICE,
+                                     kwargs.get("datadir"),
+                                     threads=kwargs.get('threads'),
+                                     max_decomped_batches=kwargs.get('max_decomp_batches'))
 
-        # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
-        if kwargs.get("data_augmentation"):
-            #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-            dataloader = loader.ShufflingLoader(dataloader)
-            #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01)
 
-    else:
-        logger.info(f"Using on-the-fly training data from sim loader")
-        dataloader = loader.BWASimLoader(DEVICE,
-                                     regions=conf['regions'],
-                                     refpath=conf['reference'],
-                                     readsperpileup=300,
-                                     readlength=145,
-                                     error_rate=0.02,
-                                     clip_prob=0.01)
+    # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
+    if kwargs.get("data_augmentation"):
+        #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
+        dataloader = loader.ShufflingLoader(dataloader)
+        #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01
+
     torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,

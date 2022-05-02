@@ -2,7 +2,7 @@
 import pytest
 import pysam
 
-import phaser
+from dnaseq2seq import phaser
 
 class MockRefAllA:
 
