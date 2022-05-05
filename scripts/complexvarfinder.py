@@ -7,6 +7,8 @@ import pysam
 Find indels greater than 10bp where the aligned reads do not agree on the position 
 """
 
+REFGENOME="/uufs/chpc.utah.edu/common/home/u0379426/arup-storage3/Reference/Data/B37/GATKBundle/2.8/human_g1k_v37_decoy_phiXAdaptr.fasta"
+
 def find_indel_starts(aln, chrom, start, stop):
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
@@ -23,13 +25,10 @@ def find_indel_starts(aln, chrom, start, stop):
                     break
 
 
-def main(vcf, bam, refgenome):
+def main(vcf, bam):
     min_size = 4
-    ref = pysam.Fastafile(refgenome)
-    if refgenome:
-        aln = pysam.AlignmentFile(bam, reference_filename=refgenome)
-    else:
-        aln = pysam.AlignmentFile(bam)
+    ref = pysam.Fastafile(REFGENOME)
+    aln = pysam.AlignmentFile(bam, reference_filename=REFGENOME)
     vcf = pysam.VariantFile(vcf)
     print(vcf.header, end='')
     for var in vcf:
