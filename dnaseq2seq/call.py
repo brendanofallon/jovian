@@ -386,7 +386,7 @@ def call_variants_on_chrom(
         var_freq_file=var_freq_file
     )
 
-    chrom_vcf = f"{tmpdir}/chrom_{chrom}.vcf"
+    chrom_vcf = f"{tmpdir}/chrom_{chrom}_raw.vcf"
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
     vcf_file.close()
 
@@ -400,13 +400,20 @@ def call_variants_on_chrom(
             os.unlink(chunk_vcf)
             chrom_nvar += chunk_nvar
 
+    chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
+    util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
+    chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
+    util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
+
     logger.info(
         f"A total of {chrom_nvar} variants called on chromosome {chrom} and saved "
-        f"to {chrom_vcf}"
+        f"to {chrom_vcf_dedup}"
     )
     os.unlink(region_file)
+    os.unlink(chrom_vcf)
+    os.unlink(chrom_vcf_sorted)
     
-    return chrom_vcf
+    return chrom_vcf_dedup
 
 
 def process_chunk_regions(

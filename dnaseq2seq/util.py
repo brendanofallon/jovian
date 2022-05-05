@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import gzip
 import lz4.frame
+import pysam
 import io
 from pathlib import Path
 import logging
@@ -170,3 +171,48 @@ def count_bases(bedpath):
             toks = line.split("\t")
             tot += int(toks[2]) - int(toks[1])
     return tot
+
+
+def sort_chrom_vcf(input_vcf, dest):
+    """
+    Sort variants found in the given vcf file and write them to the given destination file
+    Raises an exception if not all variants are on the same chromosome
+    """
+    vcf = pysam.VariantFile(input_vcf)
+    chrom = None
+    with open(dest, "w") as ofh:
+        ofh.write(str(vcf.header))
+        for var in sorted(vcf.fetch(), key=lambda x: x.pos):
+            if chrom is None:
+                chrom = var.chrom
+            else:
+                assert var.chrom == chrom, f"Variants must be on same chromsome, but found {var} which is not on chrom {chrom}"
+            ofh.write(str(var))
+
+        
+def _varkey(variant):
+    return variant.chrom, variant.pos, variant.ref, ",".join(str(s) for s in variant.alts)
+
+
+def dedup_vcf(input_vcf, dest):
+    """
+    Iterate a VCF file and remove any variants that duplicates in terms of chrom/pos/ref/alt
+    Requires input VCF to be sorted
+    """
+    vcf = pysam.VariantFile(input_vcf)
+    clump = []
+    with open(dest, "w") as ofh:
+        ofh.write(str(vcf.header))
+        for var in vcf.fetch():
+            if len(clump) == 0:
+                clump.append(var)
+            else:
+                if _varkey(var) == _varkey(clump[0]):
+                    clump.append(var)
+                else:
+                    # Big question here: Which variant to write if there are duplicates found?
+                    # Currently we just write the first one, but maybe we could be smarter
+                    ofh.write(str(clump[0]))
+                    clump = [var]
+        if clump:
+            ofh.write(str(clump[0]))
