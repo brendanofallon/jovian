@@ -18,11 +18,11 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq/bin/main
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/multindel_novaav_conf.yaml
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_conf.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_huge
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_no_lc
 
-BATCH_SIZE=512
+BATCH_SIZE=256
 
 mkdir -p $DEST
 
-$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 48 --batch-size $BATCH_SIZE > $DEST/stdout.log 
+$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 24 --batch-size $BATCH_SIZE > $DEST/stdout.log 
 
