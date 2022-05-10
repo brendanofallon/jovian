@@ -42,7 +42,7 @@ vcf = pysam.VariantFile(sys.argv[1])
 #sys.stderr.write("Loading forest from " + sys.argv[2])
 #forest = buildforest(sys.argv[2])
 
-for line in open(sys.argv[3]):
+for line in open(sys.argv[2]):
     toks = line.split("\t")
     start = int(toks[1])
     end = int(toks[2])
@@ -72,8 +72,6 @@ for line in open(sys.argv[3]):
         label = "ins"
     elif snv_count:
         label = "snv"
-    elif interval_count:
-        label = "tn-flag"
     else:
         label = "tn"
 
