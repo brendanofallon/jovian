@@ -13,6 +13,7 @@ class Variant:
     hap_model: int = None
     step: int = None
     window_offset: int = None
+    var_index: int = None
 
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
@@ -52,6 +53,7 @@ class VcfVar:
     window_cis_vars: int
     window_trans_vars: int
     window_offset: int
+    var_index: int
     call_count: int
     step_count: int
     genotype: tuple
@@ -76,7 +78,11 @@ def _cigtups(cigstr):
 
 
 def _geomean(probs):
+    """
+    Geometric mean of numbers
+    """
     return np.exp(np.log(probs).mean())
+
 
 def align_sequences(query, target):
     """
@@ -89,6 +95,7 @@ def align_sequences(query, target):
                                                match_score=2,
                                                mismatch_score=-1)
     return aln
+
 
 def _mismatches_to_vars(query, target, offset, probs):
     """
@@ -129,6 +136,7 @@ def _mismatches_to_vars(query, target, offset, probs):
                       qual=_geomean(mismatch_quals),
                       window_offset=mismatchstart - offset)
 
+
 def aln_to_vars(refseq, altseq, offset=0, probs=None):
     """
     Smith-Watterman align the given sequences and return a generator over Variant objects
@@ -138,6 +146,8 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     :param offset: This amount will be added to each variant position
     :return: Generator over variants
     """
+
+    num_vars = 0
     if probs is not None:
         assert len(probs) == len(altseq), f"Probabilities must contain same number of elements as alt sequence"
     else:
@@ -148,10 +158,8 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
 
     variant_pos_offset = 0
     if aln.query_begin > 0:
-        # yield Variant(ref='', alt=altseq[0:aln.query_begin], pos=offset, qual=-1)
         q_offset += aln.query_begin # Maybe we don't want this?
     if aln.target_begin > 0:
-        # yield Variant(ref=refseq[0:aln.target_begin], alt='', pos=offset, qual=-1)
         t_offset += aln.target_begin
 
     for cig in _cigtups(aln.cigar):
@@ -161,7 +169,9 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                     altseq[q_offset:q_offset+cig.len],
                     offset + t_offset,
                     probs[q_offset:q_offset+cig.len]):
+                v.var_index = num_vars
                 yield v
+                num_vars += 1
             q_offset += cig.len
             variant_pos_offset += cig.len
             t_offset += cig.len
@@ -171,7 +181,9 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                           alt=altseq[q_offset:q_offset+cig.len],
                           pos=offset + variant_pos_offset,
                           qual=_geomean(probs[q_offset:q_offset+cig.len]),
-                          window_offset=variant_pos_offset)
+                          window_offset=variant_pos_offset,
+                          var_index=num_vars)
+            num_vars += 1
             q_offset += cig.len
             variant_pos_offset += cig.len
 
@@ -180,13 +192,11 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                           alt='',
                           pos=offset + t_offset,
                           qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
-                          window_offset=t_offset)  # Is this right??
+                          window_offset=t_offset,
+                          var_index=num_vars)  # Is this right??
+            num_vars += 1
             t_offset += cig.len
 
-    # if aln.query_end+1 < len(altseq):
-    #     yield Variant(ref='', alt=altseq[aln.query_end+1:], pos=offset + q_offset+1, qual=-1)
-    # if aln.target_end_optimal+1 < len(refseq):
-    #     yield Variant(ref=refseq[aln.target_end_optimal+1:], alt='', pos=offset + 1, qual=-1)
 
 
 # import numpy as np
@@ -257,6 +267,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
             window_offset=[call.window_offset for call in vars_hap0[var]],
+            var_index=[call.var_index for call in vars_hap0[var]],
         )
     vcfvars_hap1 = {}
     for var, depth in zip(vars_hap1, depths_hap1):
@@ -284,6 +295,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             het=True,  # default to het but check later
             duplicate=False,  # initialize but check later
             window_offset=[call.window_offset for call in vars_hap1[var]],
+            var_index=[call.var_index for call in vars_hap1[var]],
         )
     # check for homozygous vars
     homs = list(set(vcfvars_hap0) & set(vcfvars_hap1))
@@ -405,14 +417,17 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
                                  ('Description', 'Number of model haplotype calls of this var in multi-step detection')])
     vcfh.add_meta('INFO', items=[('ID', "STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Number of overlapping steps where var detected in multi-step detection')])
-
-    vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 0), ('Type', 'String'),
+    vcfh.add_meta('INFO', items=[('ID', "DUPLICATE"), ('Number', 1), ('Type', 'String'),
                                  ('Description', 'Duplicate of call made in previous window')])
-
     vcfh.add_meta('INFO', items=[('ID', "WIN_OFFSETS"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Position of call within calling window')])
+    vcfh.add_meta('INFO', items=[('ID', "VAR_INDEX"), ('Number', "."), ('Type', 'Integer'),
+                                 ('Description', 'Order of call in window')])
+    vcfh.add_meta('INFO', items=[('ID', "RAW_QUAL"), ('Number', 1), ('Type', 'Float'),
+                                 ('Description', 'Original quality if classifier used to update QUAL field')])
     # write to new vcf file object
     return pysam.VariantFile(path, "w", header=vcfh)
+
 
 def prob_to_phred(p, max_qual=1000.0):
     """
@@ -423,6 +438,7 @@ def prob_to_phred(p, max_qual=1000.0):
         return max_qual
     else:
         return min(max_qual, -10 * np.log10(1.0 - p))
+
 
 def create_vcf_rec(var, vcf_file):
     """
@@ -451,9 +467,11 @@ def create_vcf_rec(var, vcf_file):
     r.info['CALL_COUNT'] = var.call_count
     r.info['STEP_COUNT'] = var.step_count
     r.info['WIN_OFFSETS'] = [int(x) for x in var.window_offset]
+    r.info['VAR_INDEX'] = [int(x) for x in var.var_index]
     if var.duplicate:
         r.info['DUPLICATE'] = ()
     return r
+
 
 def vars_to_vcf(vcf_file, variants):
     """
@@ -466,4 +484,3 @@ def vars_to_vcf(vcf_file, variants):
     for var in variants:
         r = create_vcf_rec(var, vcf_file)
         vcf_file.write(r)
-

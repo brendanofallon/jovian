@@ -20,15 +20,18 @@
 \maketitle
 
 \begin{abstract}
-	Detection of germline variants in next-generation sequencing data is an essential element of modern genomics. Variant detection tools typically rely on a variety of statistical algorithms and heuristic techniques to identify variants. Here we describe a new approach that replaces the handcrafted statistical methods with a single, end-to-end deep learning model. Our model frames variant detection as a sequence-to-sequence modeling task, and employs a transformer-based architecture to translate alignment columns into predicted haplotype sequences. 
+	Detection of germline variants in next-generation sequencing data is an essential element of modern genomics. Variant detection tools typically rely on a variety of statistical algorithms and heuristic techniques to identify variants. Here we describe a new approach that replaces the handcrafted statistical methods with a single, end-to-end deep learning model. Our model frames variant detection as a sequence-to-sequence modeling task, and employs a transformer-based architecture to translate alignment columns into two predicted haplotype sequences. We demonstrate that this method predicts variant genotypes accurately, phases nearby variants correctly, and has the ability to realign complex and ambiguous read mappings to produce accurate haplotype predictions. 
+
 \end{abstract}
+
+
 
 \section{Introduction}
 
-Accurate reconstruction of the DNA sequence in a sample is a fundamental component of modern genomics analysis. Next Generation Sequencing (NGS) workflows typically begin by aligning sequenced fragments to a reference genome, optionally performing some alignment post-processing steps such as identification of duplicate fragments, and then identifying sequence variants relative to the reference genome. The variant identification step is challenging for many reasons, including technical artifacts in the sequencing process, improper alignments due to sequence homology or low sequence complexity, and the stochastic nature of the library preparation and amplification steps [citation here would be nice]. 
+Accurate reconstruction of the DNA sequence in a sample is a fundamental component of modern genomics analysis. Next Generation Sequencing (NGS) workflows typically begin by aligning sequenced fragments to a reference genome, optionally performing some alignment post-processing steps such as identification of duplicated fragments, and then identifying sequence variants relative to the reference genome. The variant identification step is challenging for many reasons, including technical artifacts in the sequencing process, improper alignments due to sequence homology or low sequence complexity, and the stochastic nature of the library preparation and amplification steps [citation here would be nice]. 
 
 
-Variant discovery tools use a variety of statistical techniques to identify variants. Early callers, such as samtools / mpileup (Li et al. 2009) and the UnifiedGenotyper tool from the Genome Analysis ToolKit (GATK, De Pristo et al. 2011) examined each alignment column individually to determine genotype. Because these tools do not realign reads, they rely on the alignments produced by read mapping tools such as BWA (Li \& Durbin 2009) . Later tools, such as the HaplotypeCaller from the GATK and Strelka 2 (Kim et al. 2018) incorporated a re-alignment of reads in each region of interest, resulting in a significant improvement in the precision and specificity of variant calls. The HaplotypeCaller tool constructs de Bruijn graphs from k-mers present in the reads in a region, realigns reads to the graphs, and uses a pair Hidden Markov Model (HMM) to determine the most likely path through the graph. 
+Variant discovery tools use a variety of statistical techniques to identify variants. Early callers, such as samtools / mpileup (Li et al. 2009) and the UnifiedGenotyper tool from the Genome Analysis ToolKit (GATK, De Pristo et al. 2011) examined each alignment column individually to determine genotype. Because these tools do not realign reads, they rely on the alignments produced by read mapping tools such as BWA (Li \& Durbin 2009). Later tools, such as the HaplotypeCaller from the GATK and Strelka 2 (Kim et al. 2018) incorporated local re-alignment of reads in each region of interest, resulting in a significant improvement in the precision and specificity of variant calls. The HaplotypeCaller tool constructs de Bruijn graphs from k-mers present in the reads in a region, realigns reads to the graphs, and uses a pair Hidden Markov Model (HMM) to determine the most likely path through the graph. 
 
 More recent tools have incorporated elements of deep learning to further improve accuracy. DeepVariant (Poplin et al. 2018) builds on the HaplotypeCaller approach, but adds a Convolutional Neural Net (CNN) to classify variants as true or false positive detections. HELLO (Ramachandran et al. 2020), designed to work on hybrid short- and long-read datasets, employs a mixture-of-experts approach with separate 1-dimensional convolutions across the read and allele dimensions of the input. While these tools deliver accurate results, they rely heavily on hand-crafted statistical algorithms and heuristics to generate and assess candidate alleles. 
 
@@ -40,29 +43,59 @@ Here, we show that none of the bespoke statistical apparatus developed in earlie
 
 \subsection{Model architecture}
 
-Our model consists of a transformer-based encoder and simple, fully connected decoder. The encoder component is an unmodified transformer with GeLU activations as implemented in PyTorch 1.10 (Paszke et al. 2019). We add an additional fully connected layer prior to the transformer encoders which embeds the encoded basecalls in $d$ dimensions, where $d=12$ for the analyses here. The embedded basecalls are 'flattened' along the read dimension, producing an input with size $dr$ where $r$ is the number of reads. Instead of the typical 1-dimensional positional encoding, we employed a 2-dimensional encoding, enabling the model to retain information about which read contained a given sequenced base. 
+Our model consists of a transformer-based encoder and simple, fully connected decoder that produces two output sequences, one for each predicted haplotype. The encoder component is an unmodified transformer with GeLU activations as implemented in PyTorch 1.10 (Paszke et al. 2019). Input tokens are the collection of bases that align to a given reference position across reads, with some modifications described below. We add an additional fully connected layer prior to the transformer encoders which embeds the encoded basecalls in $d$ dimensions, where $d=12$ for the analyses here. The embedded basecalls are 'flattened' along the read dimension, producing an input token with size $dr$ where $r$ is the number of reads. Instead of the typical 1-dimensional positional encoding, we employed a 2-dimensional encoding, enabling the model to retain information about which read contained a given base across input tokens. 
 
 The decoder consists of a single fully-connected layer followed by two additional fully connected components that each generate a single haplotype. Predictions are discrete probability distributions over the four possible bases at each predicted output position. The decoder is of fixed size, and each predicted haplotype contains the same number of predicted bases as the number of positions $g$ in the input. 
 
 
 \subsection{NGS data}
 
-We obtained training data from 17 whole genomes sequenced from 5 Genome-in-a-Bottle cell lines. Eight samples were prepped with Illumina Nextera DNA Flex kit and the remained were prepared with the Illumina TruSeq PCR-free kit. All samples were sequenced on an Illumina NovaSeq 6000 instrument in 2x150 mode, to an approximate read depth of 50. After conversion to fastq, the sequenced reads were aligned to human reference genome GRCh37 with the GEM-mapper (v3, Marco-Sola et al. 2012) and were sorted and converted to CRAM format with samtools version 1.9 (Li et al. 2009). No additional refinements, such as duplicate read marking, base-quality score recalibration, or indel realignment were performed.
+We obtained training data from 17 whole genomes sequenced from 5 Genome-in-a-Bottle cell lines. Eight samples were prepared with Illumina Nextera DNA Flex kit and the remainder were prepared with the Illumina TruSeq PCR-free kit. All samples were sequenced on an Illumina NovaSeq 6000 instrument in 2x150 mode, to an approximate read depth of 50. After conversion to fastq, the sequenced reads were aligned to human reference genome GRCh37 with the GEM-mapper (v3, Marco-Sola et al. 2012) and were sorted and converted to CRAM format with samtools version 1.9 (Li et al. 2009). No additional refinements, such as duplicate read marking, base-quality score recalibration, or indel realignment were performed.
 
 \subsection{Training data}
 
-Training tensors were generated by selecting regions 150bp in width from alignments. The encoding process included fetching all reads aligning to the desired region. If more reads were found then a specified maximum read depth (100 for all analyses included in this work), reads were randomly downsampled to not exceed the maximum size. Reads were sorted by the reference coordinate of the first aligned base. For each aligned base in the selected reads nine features were encoded; the first four were the one-hot encoded base call, followed by base quality, two flags indicating if base `consumed' reference base (i.e. was not an insertion) or consumed a sequence read base (was not a deletion), and additional flags indicating sequence read direction and clipping status.  No 'gap' tokens or other special handling was performed for insertions or deletions. In addition to sequenced reads, the first row in each encoded region was the reference sequence. For this special row we inserted a base quality of 100 for every position and did not set any of the other flags. Resulting tensors had dimension $[g, r, 9]$, where $g$ represents genomic position, $r$ represents read, and 9 is the number of features. 
+Training tensors were generated by selecting regions 150bp in width from a list of preselected regions, in a manner described below. For each region, all reads overlapping the window were obtained from the corresponding BAM/ CRAM file. If more than a specified maximum number of reads were found (100 for all analyses here), then reads were downsampled to the desired size.  Reads were sorted by the reference coordinate of the first aligned base. For each aligned base in the selected reads nine features were encoded; the first four were the one-hot encoded base call, followed by base quality, two flags indicating if base `consumed' reference base (i.e. was not an insertion) or consumed a sequence read base (was not a deletion), and additional flags indicating sequence read direction and clipping status.  No 'gap' tokens or other special handling was performed for insertions or deletions. In addition to sequenced reads, the first row in each encoded region was the reference sequence. For this special row we inserted a base quality of 100 for every position and did not set any of the other flags. Resulting tensors had dimension $[g, r, 9]$, where $g$ represents genomic position, $r$ represents read, and 9 is the number of features. 
 
-Target / label sequences were produced by obtaining truth variants from the Genome-in-a-Bottle VCF files for each sample and inserting the variants into the reference sequence. Two sequences were generated for each region, one representing each haplotype. In situations where phasing of the variants was ambiguous, the reads in the sequenced sample were examined to determine phase status. Briefly, all possible genotypes (pairs of haplotype sequences) were generated and reads were aligned via Smith-Waterman to the possible haplotypes, and the highest scoring genotypes selected as the most likely phasing. This phasing procedure was only performed if multiple heterozygous variants were present in the region. 
+Target / label haplotype sequences were produced by obtaining truth variants from the Genome-in-a-Bottle VCF files for each sample and inserting the variants into the reference sequence. Two sequences were generated for each region, one representing each haplotype. In regions where phasing of the variants was ambiguous, the reads in the sequenced sample were examined to determine phase status. Briefly, all possible genotypes (pairs of haplotype sequences) were generated and reads were aligned via Smith-Waterman to the possible haplotypes, and the highest scoring genotypes selected as the most likely phasing. This phasing procedure procedure was only attempted for variants less than 100bp apart, otherwise the region was discarded.
 
 To select regions to include for training data, we developed a scheme to sample regions in a biased manner, prioritizing regions containing variants and, especially, regions with multiple or complex variants. Regions of the reference genome overlapping the high-confidence regions from Genome-in-a-Bottle were subdivided into 150bp nonoverlapping windows, and these regions labelled according to the presence of variants. Separate labels were generated for regions conataining a single SNV, deletion, or insertion, as well as regions containing multiple insertion-deletions, or those containing variants intersecting  low-complexity regions. We additionally included `true negative' regions where no known variant was present. The total number of regions generated per sample was 325,000, yielding 5.53M total training regions across our 17 samples.
+
+\subsection{Loss function}
+
+We use a standard cross-entropy loss function to compare predicted haplotypes to known haplotype sequences for each region, and simply compare each prediction at window index (position) $i$ to the true base at index $i$.  While we obtain satisfactory results with this approach, two issues were apparent. First, predicted haplotype sequences may have inserted or deleted bases relative to the true haplotypes. Because incorrect insertions and deletions cause mismatches at every downstream (higher index) position, such mistakes are penalized more heavily when they occur at lower indexes than higher indexes. Thus the model learns to generate high quality results for the first portion of the window where inaccuracies are punished severely, and is less concerned with accuarcy at high indexes. 
+
+A second complexity arises due to ambiguity regarding which haplotype should contain a variant. The two haplotypes present in a sample have no inherent order. In training data variants are assigned arbitrarily to haplotypes, and this randomness in haplotype assignment means model cannot learn to predict which haplotype should contain a given variant. To combat this ambiguity, we calculate loss in both possible configurations - predicted haplotype 0 with training haplotype 0 and 1 with 1, as well as predicted haplotype 0 with training haplotype 1 and 1 with 0. We select the configuration with the lowest loss and backpropogate gradients only for that configuration. 
 
 
 \subsection{Variant detection}
 
-Given an alignment file in BAM or CRAM format, 
+Given an alignment file in BAM or CRAM format, we first identify regions where a potential variant might exist, and then run forward passes of the model using a sliding window over the region. Any genomic position in which at least two reads contain a base that differs from the reference or an indel are flagged as potentially containing a variant. Positions closer than 100bp are merged into a single region. 
+
+Given a region containing suspected variants, we perform multiple overlapping forward passes of the model with step size $k$. On each forward pass the model produces two predicted haplotypes. Each haplotype is aligned via Smith-Waterman to the reference sequence, and any mismatching positions are converted to variant calls. We record the number of windows in which each variant was detected
 
 \section{Results}
+
+\subsection{Genotyping}
+ - Are we getting the right variant genotypes
+
+\subsection{Phasing accuracy}
+ - look at nearby variants, see if they are phased correctly compared to GIAB information
+
+\subsection{Complex regions}
+ - Not sure how to define these, but ideally we'd look for variants in regions where the read mapper had
+ lots of overlapping insertion / deletions in reads and/or softclipping
+
+\subsection{Use of local context}
+ - Also ambiguous, but anecdotally when looking at variant calls, it seems apparent that variants that otherwise look real have lower quality scores when there's a lot of junk around. That's good, since such variants are more likely To
+ be false positives, and that means the model is to some extent looking at local context to modify prediction accuracy. Which is cool. 
+
+
+\subsection{Variant detection accuracy}
+
+ - Tabulate Hap.py results across a few common stratifications, compare to other callers
+
+
+
 
 \subsection{Model size experiments}
 
@@ -70,11 +103,20 @@ Given an alignment file in BAM or CRAM format,
 
  
  Ablate the 2D positional encoding.
+
+ Ablate reference as read 0 
  
- 
+ \subsection{Phasing accuracy}
+
+
+
  \section{Discussion}
+
+We describe a new approach to the problem of detecting sequence variants in next-generation sequencing (NGS) data based on a single, end-to-end deep learning model. Our approach envisions variant detection as a sequence-to-sequence modeling problem, akin to language translation, and leverages the successful transformer architecture to accomplish the task. In contrast to other variant detection methods (...), our approach does not rely on handcrafted statistical techniques such as de Bruijn graphs, hidden Markov models, or heuristic thresholding and instead learns to construct accurate haplotypes directly from aligned NGS reads. 
  
  Convolutions - do they make sense? 
+
+ Loss functions, there's probably something better. The Smith Waterman loss sounds really cool, but didn't lead to high sensitivity in our hands. 
  
  \section{Availability}
  

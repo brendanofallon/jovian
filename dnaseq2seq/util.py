@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import gzip
 import lz4.frame
+import pysam
 import io
 from pathlib import Path
 import logging
@@ -43,20 +44,6 @@ def concat_metafile(sample_metafile, dest_metafh):
     os.unlink(sample_metafile)
 
 
-def find_tgt(suffix, files):
-    found = None
-    for tgt in files:
-        tsuf = tgt.name.split("_")[-1].split(".")[0]
-        if tsuf == suffix:
-            if found:
-                raise ValueError(f"Uh oh, found multiple matches for suffix {suffix}!")
-            found = tgt
-            break
-    if found is None:
-        raise ValueError(f"Could not find matching tgt file for {suffix}")
-    return found
-
-
 def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftgt'):
     """
     Examine files in datadir and match up all src / tgt / vaftgt files and store them as tuples in a list
@@ -72,6 +59,7 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt', vaftgt_prefix='vaftg
                      f"{datadir}/{vaftgt_prefix}_{suffix}"
                       ))
     return pairs
+
 
 def tensor_from_lz4(path, device):
     with io.BytesIO(lz4.frame.decompress(path)) as bfh:
@@ -90,8 +78,10 @@ def tensor_from_file(path, device):
     else:
         return torch.load(path, map_location=device)
 
+
 def sortreads(reads):
     return sorted(reads, key=lambda r: r.reference_start)
+
 
 def unzip_load(path, device='cpu'):
     """
@@ -168,6 +158,7 @@ def writeseqtensor(t):
         print(f"{base}", end="")
     print()
 
+
 def count_bases(bedpath):
     """
     Return total number of bases in a BED file
@@ -180,3 +171,48 @@ def count_bases(bedpath):
             toks = line.split("\t")
             tot += int(toks[2]) - int(toks[1])
     return tot
+
+
+def sort_chrom_vcf(input_vcf, dest):
+    """
+    Sort variants found in the given vcf file and write them to the given destination file
+    Raises an exception if not all variants are on the same chromosome
+    """
+    vcf = pysam.VariantFile(input_vcf)
+    chrom = None
+    with open(dest, "w") as ofh:
+        ofh.write(str(vcf.header))
+        for var in sorted(vcf.fetch(), key=lambda x: x.pos):
+            if chrom is None:
+                chrom = var.chrom
+            else:
+                assert var.chrom == chrom, f"Variants must be on same chromsome, but found {var} which is not on chrom {chrom}"
+            ofh.write(str(var))
+
+        
+def _varkey(variant):
+    return variant.chrom, variant.pos, variant.ref, ",".join(str(s) for s in variant.alts)
+
+
+def dedup_vcf(input_vcf, dest):
+    """
+    Iterate a VCF file and remove any variants that duplicates in terms of chrom/pos/ref/alt
+    Requires input VCF to be sorted
+    """
+    vcf = pysam.VariantFile(input_vcf)
+    clump = []
+    with open(dest, "w") as ofh:
+        ofh.write(str(vcf.header))
+        for var in vcf.fetch():
+            if len(clump) == 0:
+                clump.append(var)
+            else:
+                if _varkey(var) == _varkey(clump[0]):
+                    clump.append(var)
+                else:
+                    # Big question here: Which variant to write if there are duplicates found?
+                    # Currently we just write the first one, but maybe we could be smarter
+                    ofh.write(str(clump[0]))
+                    clump = [var]
+        if clump:
+            ofh.write(str(clump[0]))

@@ -16,10 +16,10 @@ from concurrent.futures.process import ProcessPoolExecutor
 import argparse
 import yaml
 
-import util
-import loader
-from train import train
-from call import call
+from dnaseq2seq import util
+from dnaseq2seq import loader
+from dnaseq2seq.train import train
+from dnaseq2seq.call import call
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
@@ -84,7 +84,7 @@ def pregen(config, **kwargs):
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 100)
-    samples_per_pos = kwargs.get('samples_per_pos', 8)
+    samples_per_pos = kwargs.get('samples_per_pos', 2)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
@@ -212,7 +212,6 @@ def pregen(config, **kwargs):
                 util.concat_metafile(sample_metafile, metafh)
 
 
-
 def print_pileup(path, idx, target=None, **kwargs):
     path = Path(path)
 
@@ -285,11 +284,14 @@ def main():
 
     callparser = subparser.add_parser("call", help="Call variants")
     callparser.add_argument("-m", "--model-path", help="Stored model", required=True)
+    callparser.add_argument("-c", "--classifier-path", help="Stored variant classifier model", default=None, type=str)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
     callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
     callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
+    callparser.add_argument("-f", "--freq-file", help="Population frequency file for classifier")
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
+    callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
