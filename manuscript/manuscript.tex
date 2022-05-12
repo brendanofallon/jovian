@@ -30,13 +30,12 @@
 
 Accurate reconstruction of the DNA sequence in a sample is a fundamental component of modern genomics analysis. Next Generation Sequencing (NGS) workflows typically begin by aligning sequenced fragments to a reference genome, optionally performing some alignment post-processing steps such as identification of duplicated fragments, and then identifying sequence variants relative to the reference genome. The variant identification step is challenging for many reasons, including technical artifacts in the sequencing process, improper alignments due to sequence homology or low sequence complexity, and the stochastic nature of the library preparation and amplification steps [citation here would be nice]. 
 
+All variant discovery tools must address two challenges. First, they must identify candidate alleles in a region. Then, given a set of allele candidates, they must assess the likelihood of each candidate (or pairs of candidates in the diploid case), to determine the most likely alleles. Early callers, such as samtools / mpileup (Li et al. 2009) and the UnifiedGenotyper tool from the Genome Analysis ToolKit (GATK, De Pristo et al. 2011) rely on the read aligner to generate candidate allele candidates, and utilize ad-hoc heuristics and thresholds to determine likely alleles. Later tools (e.g. Poplin et al. 2018, Kim et al. 2018, Cooke et al. 2021) incorporated local re-alignment of reads in each region of interest, resulting in a significant improvement in the precision and specificity of variant calls. For instance, the HaplotypeCaller tool identifies candidate haplotypes by constructing de Bruijn graphs from k-mers present in the reads, and assesses haplotype likelihoods with a pair Hidden Markov Model (HMM). 
 
-Variant discovery tools use a variety of statistical techniques to identify variants. Early callers, such as samtools / mpileup (Li et al. 2009) and the UnifiedGenotyper tool from the Genome Analysis ToolKit (GATK, De Pristo et al. 2011) examined each alignment column individually to determine genotype. Because these tools do not realign reads, they rely on the alignments produced by read mapping tools such as BWA (Li \& Durbin 2009). Later tools, such as the HaplotypeCaller from the GATK and Strelka 2 (Kim et al. 2018) incorporated local re-alignment of reads in each region of interest, resulting in a significant improvement in the precision and specificity of variant calls. The HaplotypeCaller tool constructs de Bruijn graphs from k-mers present in the reads in a region, realigns reads to the graphs, and uses a pair Hidden Markov Model (HMM) to determine the most likely path through the graph. 
+More recent tools have incorporated elements of deep learning into the allele likelihood calculation. DeepVariant (Poplin et al. 2018) builds on the HaplotypeCaller approach, but adds a Convolutional Neural Net (CNN) to classify variants as true or false positive detections. HELLO (Ramachandran et al. 2020), designed to work on hybrid short- and long-read datasets, employs a mixture-of-experts approach with separate 1-dimensional convolutions across the read and allele dimensions of the input. 
 
-More recent tools have incorporated elements of deep learning to further improve accuracy. DeepVariant (Poplin et al. 2018) builds on the HaplotypeCaller approach, but adds a Convolutional Neural Net (CNN) to classify variants as true or false positive detections. HELLO (Ramachandran et al. 2020), designed to work on hybrid short- and long-read datasets, employs a mixture-of-experts approach with separate 1-dimensional convolutions across the read and allele dimensions of the input. While these tools deliver accurate results, they rely heavily on hand-crafted statistical algorithms and heuristics to generate and assess candidate alleles. 
+Here, we explore a new approach to variant detection that replaces the bespoke statistical techniques used in previous tools with a single, end-to-end machine learning model. We recast variant detection as a sequence-to-sequence translation problem in which the input sequence is the series of bases aligning to a single genomic location, and the output sequences are the two predicted haplotypes. The sequence-to-sequence translation is performed by a transformer-based deep neural network (Vaswani et al. 2017). We demonstrate that this approach identifies real genomic variants with sensitivity equivalent to current top-performing callers, albeit with slightly lower specificity. 
 
-
-Here, we show that none of the bespoke statistical apparatus developed in earlier tools is required for accurate variant identification, and that a robust variant detection model can be learned directly from raw NGS data. To achieve this, we recast variant detection as a sequence-to-sequence translation problem. The series of bases aligning to a given reference position is a single input token, and the sequence of these alignment columns constitutes the input to the model. The output of the model is the two predicted haplotype sequences in the sample. The sequence-to-sequence translation is performed by a transformer-based deep neural network (Vaswani et al. 2017). Transformer models have achieved state-of-the-art results in many sequence-to-sequence problems, 
 
 
 \section{Methods}
@@ -60,6 +59,8 @@ Target / label haplotype sequences were produced by obtaining truth variants fro
 
 To select regions to include for training data, we developed a scheme to sample regions in a biased manner, prioritizing regions containing variants and, especially, regions with multiple or complex variants. Regions of the reference genome overlapping the high-confidence regions from Genome-in-a-Bottle were subdivided into 150bp nonoverlapping windows, and these regions labelled according to the presence of variants. Separate labels were generated for regions conataining a single SNV, deletion, or insertion, as well as regions containing multiple insertion-deletions, or those containing variants intersecting  low-complexity regions. We additionally included `true negative' regions where no known variant was present. The total number of regions generated per sample was 325,000, yielding 5.53M total training regions across our 17 samples.
 
+For all analyses described here, we obtain training data only from the human autosomes 1-20, and hold out chromosomes 21 and 22 for model evaluation. 
+
 \subsection{Loss function}
 
 We use a standard cross-entropy loss function to compare predicted haplotypes to known haplotype sequences for each region, and simply compare each prediction at window index (position) $i$ to the true base at index $i$.  While we obtain satisfactory results with this approach, two issues were apparent. First, predicted haplotype sequences may have inserted or deleted bases relative to the true haplotypes. Because incorrect insertions and deletions cause mismatches at every downstream (higher index) position, such mistakes are penalized more heavily when they occur at lower indexes than higher indexes. Thus the model learns to generate high quality results for the first portion of the window where inaccuracies are punished severely, and is less concerned with accuarcy at high indexes. 
@@ -69,7 +70,7 @@ A second complexity arises due to ambiguity regarding which haplotype should con
 
 \subsection{Variant detection}
 
-Given an alignment file in BAM or CRAM format, we first identify regions where a potential variant might exist, and then run forward passes of the model using a sliding window over the region. Any genomic position in which at least two reads contain a base that differs from the reference or an indel are flagged as potentially containing a variant. Positions closer than 100bp are merged into a single region. 
+Given an alignment file in BAM or CRAM format, we first identify regions where a potential variant might exist, and then run forward passes of the model using a sliding window over the region. Any genomic position in which at least three reads contain a base that differs from the reference or an indel are flagged as potentially containing a variant. Positions closer than 100bp are merged into a single region. 
 
 Given a region containing suspected variants, we perform multiple overlapping forward passes of the model with step size $k$. On each forward pass the model produces two predicted haplotypes. Each haplotype is aligned via Smith-Waterman to the reference sequence, and any mismatching positions are converted to variant calls. We record the number of windows in which each variant was detected
 
@@ -82,8 +83,7 @@ Given a region containing suspected variants, we perform multiple overlapping fo
  - look at nearby variants, see if they are phased correctly compared to GIAB information
 
 \subsection{Complex regions}
- - Not sure how to define these, but ideally we'd look for variants in regions where the read mapper had
- lots of overlapping insertion / deletions in reads and/or softclipping
+ - Not sure how to define these, but ideally we'd look for variants in regions where the read mapper had lots of overlapping insertion / deletions in reads and/or softclipping
 
 \subsection{Use of local context}
  - Also ambiguous, but anecdotally when looking at variant calls, it seems apparent that variants that otherwise look real have lower quality scores when there's a lot of junk around. That's good, since such variants are more likely To
@@ -126,7 +126,10 @@ We describe a new approach to the problem of detecting sequence variants in next
  
  \vspace{8pt}
  Conrad, Donald F., et al. "Origins and functional impact of copy number variation in the human genome." Nature 464.7289 (2010): 704.
- 
+
+\vspace{8pt}
+Cooke, Daniel P., David C. Wedge, and Gerton Lunter. "A unified haplotype-based method for accurate and comprehensive variant calling." Nature biotechnology 39.7 (2021): 885-892.
+
 \vspace{8pt}
 DePristo, Mark A., et al. "A framework for variation discovery and genotyping using next-generation DNA sequencing data." Nature genetics 43.5 (2011): 491-498.
 
@@ -143,19 +146,24 @@ Li, Heng, and Richard Durbin. "Fast and accurate short read alignment with Burro
 \vspace{8pt}
 Marco-Sola S., Sammeth M., Guigó R., Ribeca P. "The GEM mapper: fast, accurate and versatile alignment by filtration". Nat Methods. (2012);9(12):1185-1188. doi:10.1038/nmeth.2221
 
-\vspace{8pt}
-Poplin, Ryan, et al. "A universal SNP and small-indel variant caller using deep neural networks." Nature biotechnology 36.10 (2018): 983-987.
  
 \vspace{8pt}
 Paszke, A., et al. "PyTorch: An Imperative Style, High-Performance Deep Learning Library." In Advances in Neural Information Processing Systems 32 (2019):8024–8035. Curran Associates, Inc. Retrieved from http://papers.neurips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library.pdf
+
+
+\vspace{8pt}
+Poplin, Ryan, et al. "A universal SNP and small-indel variant caller using deep neural networks." Nature biotechnology 36.10 (2018): 983-987.
+
+\vspace{8pt}
+Poplin, Ryan, et al. "Scaling accurate genetic variant discovery to tens of thousands of samples." BioRxiv (2018): 201178.
 
 \vspace{8pt}
 Ramachandran, Anand, et al. "HELLO: A hybrid variant calling approach." bioRxiv (2020).
  
 
- \vspace{8pt}
- \subsection{Ablation experiments}
+\vspace{8pt}
 Vaswani, Ashish, et al. "Attention is all you need." Advances in neural information processing systems 30 (2017).
+
 
 \end{document}
 
