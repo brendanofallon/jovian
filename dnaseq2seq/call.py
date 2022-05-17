@@ -372,7 +372,7 @@ def call_variants_on_chrom(
 
     chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
 
-    func = partial(
+    process_chunk_func = partial(
         process_chunk_regions,
         region_file=region_file,
         bamfile=bamfile,
@@ -390,15 +390,24 @@ def call_variants_on_chrom(
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
     vcf_file.close()
 
+
     chrom_nvar = 0
     with open(chrom_vcf, "a") as chrom_vfh:
-        for chunk_nvar, chunk_vcf in [
-            f for f in mp.Pool(threads).map(func, chunks)
-        ]:
-            for var in pysam.VariantFile(chunk_vcf):
-                chrom_vfh.write(str(var))
-            os.unlink(chunk_vcf)
-            chrom_nvar += chunk_nvar
+        if threads == 1:
+            for chunk in chunks:
+                chunk_nvar, chunk_vcf = process_chunk_func(chunk)
+                for var in pysam.VariantFile(chunk_vcf):
+                    chrom_vfh.write(str(var))
+                os.unlink(chunk_vcf)
+                chrom_nvar += chunk_nvar
+        else:
+            for chunk_nvar, chunk_vcf in [
+                f for f in mp.Pool(threads).map(process_chunk_func, chunks)
+            ]:
+                for var in pysam.VariantFile(chunk_vcf):
+                    chrom_vfh.write(str(var))
+                os.unlink(chunk_vcf)
+                chrom_nvar += chunk_nvar
 
     chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
     util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
