@@ -46,7 +46,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
-    assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords"
+    assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
@@ -116,9 +116,9 @@ def reconcile_current_window(prev_win, current_win):
 
 
 def load_model(model_path):
-    attention_heads = 8
-    encoder_layers = 8
-    transformer_dim = 400
+    attention_heads = 6
+    encoder_layers = 6
+    transformer_dim = 250
     embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
@@ -709,3 +709,4 @@ def _call_vars_region(
 
     logger.info(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
+

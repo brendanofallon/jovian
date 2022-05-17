@@ -20,14 +20,24 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
                     level=logging.INFO)
 
 
+def trim_suffix(ref, alt):
+    r = ref
+    a = alt
+    while r[-1] == a[-1] and min(len(r), len(a)) > 1:
+        r = r[0:-1]
+        a = a[0:-1]
+    return r, a
+
+
 def trim_prefix(ref, alt):
     offset = 0
-    for r, a in zip(ref, alt):
+    if len(ref) == 1 or len(alt) == 1:
+        return 0, ref, alt
+    for r, a in zip(ref[:-1], alt[:-1]):
         if r != a:
             return offset, ref[offset:], alt[offset:]
         offset += 1
-    raise ValueError("We should never get here")
-
+    return offset, ref[offset:], alt[offset:]
 
 
 def find_var(varfile, chrom, pos, ref, alt):
@@ -35,12 +45,16 @@ def find_var(varfile, chrom, pos, ref, alt):
     Search varfile for VCF record with matching chrom, pos, ref, alt
     If chrom/pos/ref/alt match is found, return that record and allele index of matching alt
     """
+    ref, alt = trim_suffix(ref, alt)
+    poffset, trimref, trimalt = trim_prefix(ref, alt)
+    pos = pos + poffset
     for var in varfile.fetch(chrom, pos-5, pos+3):
-        if var.ref == ref and var.pos == pos:
-            for i, varalt in enumerate(var.alts):
-                offset, r, a = trim_prefix(ref, varalt)
-                if var.pos + offset == pos and r == ref and a == alt:
-                    return var, i
+        for i, varalt in enumerate(var.alts):
+            varref, varalt = trim_suffix(var.ref, varalt)
+            offset, r, a = trim_prefix(varref, varalt)
+            if var.pos + offset == pos and r == trimref and a == trimalt:
+                return var, i
+
 
 
 @lru_cache(maxsize=1000000)
@@ -50,7 +64,7 @@ def var_af(varfile, chrom, pos, ref, alt):
     if result is not None:
         var, alt_index = result
         af = var.info['AF'][alt_index]
-        if af is None:
+        if af is None or "PASS" not in var.filter:
             af = 0.0
         else:
             af = float(af)
@@ -75,6 +89,7 @@ def var_feats(var, var_freq_file):
     feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     return np.array(feats)
+
 
 def feat_names():
     return [
@@ -219,5 +234,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    #print(trim_suffix("T", "A"))
+    varfile = pysam.VariantFile("test.vcf.gz")
+    print(var_af(varfile, "2", 100, "TTG", "TCT"))
+    #main()
 
