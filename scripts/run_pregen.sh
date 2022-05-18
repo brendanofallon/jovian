@@ -25,6 +25,7 @@ DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_extra_snv
 BATCH_SIZE=512
 
 mkdir -p $DEST
+cp $CONF $DEST/
 
 $PYTHON $ds2s pregen -c $CONF -d $DEST --threads 24 --batch-size $BATCH_SIZE > $DEST/stdout.log 
 
