@@ -224,7 +224,7 @@ def pregen(config, **kwargs):
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 300)
-    samples_per_pos = kwargs.get('samples_per_pos', 10)
+    samples_per_pos = kwargs.get('samples_per_pos', 4)
     vals_per_class = kwargs.get('vals_per_class', 1000)
     output_dir = Path(kwargs.get('dir'))
     processes = kwargs.get('threads', 1)

@@ -39,8 +39,8 @@ def buildforest(bedpath):
 
 vcf = pysam.VariantFile(sys.argv[1])
 
-sys.stderr.write("Loading forest from " + sys.argv[2])
-forest = buildforest(sys.argv[2])
+#sys.stderr.write("Loading forest from " + sys.argv[2])
+#forest = buildforest(sys.argv[2])
 
 for line in open(sys.argv[3]):
     toks = line.split("\t")
@@ -48,13 +48,18 @@ for line in open(sys.argv[3]):
     end = int(toks[2])
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
-    intervals = list(forest[chrom].search(start, end))
-    interval_count = len(intervals)
+    #intervals = list(forest[chrom].search(start, end))
+    #interval_count = len(intervals)
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
     del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
     ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
     multi_count = len([v for v in variants if len(v.alts) > 1])
-     
+ 
+    if variants:
+        var_size = max( max(len(v.ref), max(len(a) for a in v.alts)) for v in variants)
+    else:
+        var_size = 0
+
     if del_count and ins_count:
         label = "ins-del"
     elif (ins_count > 0 or del_count > 0) and snv_count > 0:
@@ -72,13 +77,17 @@ for line in open(sys.argv[3]):
     else:
         label = "tn"
 
-    found = False
-    for i in intervals:
-        if any(i.start < v.pos < i.end for v in variants):
-            found = True
+    #found = False
+    #for i in intervals:
+    #    if any(i.start < v.pos < i.end for v in variants):
+    #        found = True
 
-    if found:
-        label = label + "-lc"
+
+    if var_size > 10:
+        label = label + "-big"
+
+    #if found:
+    #    label = label + "-lc"
     toks = '\t'.join(line.strip().split('\t')[0:3])
     print(f"{toks}\t{label}")
 
