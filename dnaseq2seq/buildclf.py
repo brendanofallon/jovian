@@ -218,14 +218,16 @@ def bamfeats(var, aln):
 def var_feats(var, aln, var_freq_file):
     feats = []
     bamreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
-    if bamreads > 0:
+    if pos_ref + neg_ref + pos_alt + neg_alt > 0:
         vaf = (pos_alt + neg_alt) / (pos_ref + neg_ref + pos_alt + neg_alt)
     else:
         vaf = 0.0
+
     if (highmq_ref + highmq_alt) > 0:
         mq_vaf = (highmq_alt) / (highmq_alt + highmq_ref)
     else:
         mq_vaf = 0.0
+  
     feats.append(var.qual)
     feats.append(len(var.ref))
     feats.append(max(len(a) for a in var.alts))
@@ -309,11 +311,11 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         feat_fh = None
 
     for sample in conf.keys():
-        aln = pysam.AlignmentFile(sample['bam'], reference_filename=reference_filename)
-        if 'tps' in sample:
-            alltps.extend(extract_feats(sample['tps'], aln, var_freq_file, feat_fh))
-        if 'fps' in sample:
-            allfps.extend(extract_feats(sample['fps'], aln, var_freq_file, feat_fh))
+        aln = pysam.AlignmentFile(conf[sample]['bam'], reference_filename=reference_filename)
+        if 'tps' in conf[sample]:
+            alltps.extend(extract_feats(conf[sample]['tps'], aln, var_freq_file, feat_fh))
+        if 'fps' in conf[sample]:
+            allfps.extend(extract_feats(conf[sample]['fps'], aln, var_freq_file, feat_fh))
 
     if feat_fh:
         feat_fh.close()
