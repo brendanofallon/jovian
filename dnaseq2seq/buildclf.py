@@ -263,7 +263,10 @@ def feat_names():
             "max_win_offset",
             "dp",
             "af",
-            "het"
+            "het",
+            "vaf",
+            "highmq_vaf",
+            "altreads",
         ]
 
 
