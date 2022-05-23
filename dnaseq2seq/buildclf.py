@@ -297,7 +297,7 @@ def load_model(path):
         return pickle.load(fh)
 
 
-def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None):
+def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
     alltps = []
     allfps = []
     var_freq_file = pysam.VariantFile(var_freq_file)
@@ -308,10 +308,12 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None):
     else:
         feat_fh = None
 
-    for tpf in conf['tps']:
-        alltps.extend(extract_feats(tpf, var_freq_file, feat_fh))
-    for fpf in conf['fps']:
-        allfps.extend(extract_feats(fpf, var_freq_file, feat_fh))
+    for sample in conf.keys():
+        aln = pysam.AlignmentFile(sample['bam'], reference_filename=reference_filename)
+        if 'tps' in sample:
+            alltps.extend(extract_feats(sample['tps'], aln, var_freq_file, feat_fh))
+        if 'fps' in sample:
+            allfps.extend(extract_feats(sample['fps'], aln, var_freq_file, feat_fh))
 
     if feat_fh:
         feat_fh.close()
@@ -344,7 +346,7 @@ def predict(model, vcf, **kwargs):
         print(var, end='')
 
 
-def predict_one_record(loaded_model, var_rec, var_freq_file, **kwargs):
+def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
     """
     given a loaded model object and a pysam variant record, return classifier quality
     :param loaded_model: loaded model object for classifier
@@ -352,7 +354,7 @@ def predict_one_record(loaded_model, var_rec, var_freq_file, **kwargs):
     :param kwargs:
     :return: classifier quality
     """
-    feats = var_feats(var_rec, var_freq_file)
+    feats = var_feats(var_rec, aln, var_freq_file)
     prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
     return prediction[0, 1]
 
@@ -364,7 +366,8 @@ def train(conf, output, **kwargs):
             threads=kwargs.get('threads'), 
             var_freq_file=kwargs.get('freq_file'),
             feat_csv=kwargs.get('feat_csv'),
-            labels_csv=kwargs.get('labels_csv'))
+            labels_csv=kwargs.get('labels_csv'),
+            reference_filename=kwargs.get('reference'))
     save_model(model, output)
 
 
@@ -378,6 +381,7 @@ def main():
     trainparser.add_argument("-c", "--conf", help="Configuration file")
     trainparser.add_argument("-t", "--threads", help="thread count", default=24, type=int)
     trainparser.add_argument("-o", "--output", help="Output path")
+    trainparser.add_argument("-r", "--reference", help="Reference genome fasta")
     trainparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     trainparser.add_argument("--feat-csv", help="Feature dump CSV")
     trainparser.add_argument("--labels-csv", help="Label dump CSV")
@@ -394,11 +398,12 @@ def main():
 
 
 if __name__ == "__main__":
-    for a,b in zip("ABC", "ABCDEF"):
-        print(f"{a},{b}")
-    print(pysam.__version__)
-    aln = pysam.AlignmentFile("/Volumes/Share/genomics/WGS/99702111878_NA12878_1ug_chr22.bam")
-    vcf = pysam.VariantFile("/Volumes/Share/genomics/variantcalling/test.vcf")
-    var = next(vcf)
-    x = bamfeats(var, aln)
-    print(x)
+    main()
+    # for a,b in zip("ABC", "ABCDEF"):
+    #     print(f"{a},{b}")
+    # print(pysam.__version__)
+    # aln = pysam.AlignmentFile("/Volumes/Share/genomics/WGS/99702111878_NA12878_1ug_chr22.bam")
+    # vcf = pysam.VariantFile("/Volumes/Share/genomics/variantcalling/test.vcf")
+    # var = next(vcf)
+    # x = bamfeats(var, aln)
+    # print(x)
