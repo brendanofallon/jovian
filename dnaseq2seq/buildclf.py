@@ -312,10 +312,18 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
 
     for sample in conf.keys():
         aln = pysam.AlignmentFile(conf[sample]['bam'], reference_filename=reference_filename)
-        if 'tps' in conf[sample]:
-            alltps.extend(extract_feats(conf[sample]['tps'], aln, var_freq_file, feat_fh))
-        if 'fps' in conf[sample]:
-            allfps.extend(extract_feats(conf[sample]['fps'], aln, var_freq_file, feat_fh))
+        tps = conf[sample].get('tps')
+        if type(tps) == str:
+            alltps.extend(extract_feats(tps, aln, var_freq_file, feat_fh))
+        elif type(tps) == list:
+            for tp in tps:
+                alltps.extend(extract_feats(tp, aln, var_freq_file, feat_fh))
+        fps = conf[sample].get('fps')
+        if type(fps) == str:
+            allfps.extend(extract_feats(fps, aln, var_freq_file, feat_fh))
+        elif type(fps) == list:
+            for fp in fps:
+                allfps.extend(extract_feats(fp, aln, var_freq_file, feat_fh))
 
     if feat_fh:
         feat_fh.close()

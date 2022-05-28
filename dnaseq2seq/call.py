@@ -530,7 +530,7 @@ def vars_hap_to_records(
     for rec in vcf_records:
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
-            rec.qual = buildclf.predict_one_record(classifier_model, rec, var_freq_file)
+            rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
         vcf_file.write(rec)
 
     vcf_file.close()
