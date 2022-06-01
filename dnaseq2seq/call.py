@@ -674,7 +674,7 @@ def _call_vars_region(
       - create new prob from all duplicate calls?
     """
     cpname = mp.current_process().name
-    logger.info(
+    logger.debug(
         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
     )
 
@@ -694,7 +694,7 @@ def _call_vars_region(
                                                min_reads=min_reads,
                                                window_step=window_step,
                                                batch_size=batch_size):
-        logger.info(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+        logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
@@ -707,6 +707,6 @@ def _call_vars_region(
     hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
     hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
 
-    logger.info(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+    logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
 
