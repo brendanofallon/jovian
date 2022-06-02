@@ -6,7 +6,7 @@ import pysam
 from collections import defaultdict
 import gzip
 from quicksect import IntervalTree
-
+import random
 
 """
 Given a 'split' BED file (where every region has the same length, usually 300bp), generate a fourth column
@@ -37,46 +37,56 @@ def buildforest(bedpath):
 
 
 
-vcf = pysam.VariantFile(sys.argv[1])
+#vcf = pysam.VariantFile(sys.argv[1])
 
-#sys.stderr.write("Loading forest from " + sys.argv[2])
-#forest = buildforest(sys.argv[2])
+sys.stderr.write("Loading forest from " + sys.argv[2])
+forest = buildforest(sys.argv[2])
 
 for line in open(sys.argv[3]):
+    variants = []
     toks = line.split("\t")
     start = int(toks[1])
     end = int(toks[2])
+    label = toks[3].strip()
+    if label != 'tn':
+        print(line, end='')
+        continue
+    if random.random() > 0.10:
+        continue
+
     chrom = toks[0]
-    variants = list(vcf.fetch(chrom, start, end))
-    #intervals = list(forest[chrom].search(start, end))
-    #interval_count = len(intervals)
-    snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
-    del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
-    ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
-    multi_count = len([v for v in variants if len(v.alts) > 1])
+    #variants = list(vcf.fetch(chrom, start, end))
+    intervals = list(forest[chrom].search(start, end))
+    interval_count = len(intervals)
+    #snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
+    #del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
+    #ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
+    #multi_count = len([v for v in variants if len(v.alts) > 1])
  
     if variants:
         var_size = max( max(len(v.ref), max(len(a) for a in v.alts)) for v in variants)
     else:
         var_size = 0
 
-    if del_count and ins_count:
-        label = "ins-del"
-    elif (ins_count > 0 or del_count > 0) and snv_count > 0:
-        label = "indel-snv"
-    elif multi_count:
-        label = "multi"
-    elif del_count:
-        label = "del"
-    elif ins_count:
-        label = "ins"
-    elif snv_count:
-        label = "snv"
-    elif interval_count:
-        label = "tn-flag"
-    else:
-        label = "tn"
+    #if del_count and ins_count:
+    #    label = "ins-del"
+    #elif (ins_count > 0 or del_count > 0) and snv_count > 0:
+    #    label = "indel-snv"
+    #elif multi_count:
+    #    label = "multi"
+    #elif del_count:
+    #    label = "del"
+    #elif ins_count:
+    #    label = "ins"
+    #elif snv_count:
+    #    label = "snv"
+    #elif interval_count:
+    #    label = "tn-flag"
+    #else:
+    #    label = "tn"
 
+    if interval_count:
+        label = 'tn-lc'
     #found = False
     #for i in intervals:
     #    if any(i.start < v.pos < i.end for v in variants):
