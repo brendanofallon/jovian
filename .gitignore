@@ -4,3 +4,9 @@ tmp/
 __pycache__/
 
 .idea/
+*.aux
+*.pdf
+*.synctex.gz
+*.log
+*.fdb.latexmk
+
