@@ -12,6 +12,10 @@
 \author[1]{Ashini Bolia}
 \author[1]{Jacob Durtschi}
 \author[1]{Luobin Yang}
+\author[1]{Eric Frederickson}
+\author[1]{Katherine Noble}
+\author[1]{Joshua Coleman}
+\author[1]{Hunter Best}
 
 \affil[1]{ARUP Institute for Clinical and Experimental Pathology, Salt Lake City, UT}
 \date{}
@@ -125,16 +129,12 @@ Accurate phase prediction requires that information regarding which reads suppor
 
 
 
- \subsection{Variant detection accuracy}
+\subsection{Variant detection accuracy}
 
- - Tabulate Hap.py results across a few common stratifications, compare to other callers
+To characterize variant detection accuracy, we called variants on validation regions from chromosomes 21 and 22 for each of the 17 samples, and compared results to DeepVariant (v1.3.0, Poplin et al. 2018), HaplotypeCaller (v. 4.1.4.1), and Strelka (v. 2.9.10, Kim et al. 2018). Calls were obtained with the 10M model trained for 25 epochs on the 'bigger' training set (~$10^6$ training examples). We selected filtering criteria for each caller by reviewing ROC curves produced by \textit{vcfeval} and selecting values close to the $F_1$ maximizing value across samples. Jovian calls were filtered at 0.4, HaplotypeCaller at 60 (phred-scaled), Strelka at 4 (phred-scaled), and DeepVariant at 0. Sensitivity, precision, and related calculations were computed with the hap.py tool (Krushe et al. 2019) using Genome-in-a-Bottle (v.4.2.1) as the truth set of variants. 
 
-\subsection{Ablation experiments}
- 
- Ablate the 2D positional encoding.
+Across all regions, Jovian's sensitivity and precision for indels is slightly higher than that for HaplotypeCaller, and slightly lower than DeepVariant or Strelka2. For SNV calls Jovian has middling sensitivity and the lowest precision of the callers. 
 
- Ablate reference as read 0 
- 
  
 
 
@@ -146,6 +146,7 @@ Our analysis demonstrates that the model learns many features of modern, state o
 
 In this work we have used a standard cross-entropy loss function that simply compares each prediction at base $i$ to the label at base $i$. While training with this loss yields accurate results, it has two significant shortcomings. First, the impact of an insertion / deletion (indel) error depends on its position in the region, with indels at lower indices leading to a greater number of mismatches and high loss compared to indels at higher indices. Secondly, indel errors ar punished more severely than similar SNV errors. We hypothesize the second fact explains the lower performance of our model on SNV calls compared to indels. Alternative, alignment-based loss functions such as those described by Baid et al. (2021) and Petti et al. (2021) may provide a path forward, however the Petti implementation lead to lower sensitivity in our experiments.  
 
+While our model has comparable sensitivity to the other callers we examined, our specificity for SNV calls is lower. Strategies to improve SNV specificity include adding additional training data with false positive SNV calls, adding new features to the quality-estimation classifier, or possibly running an ensemble of models. 
 
 For this work we have employed an unmodified transformer model with a very simple decoder consisting of just two fully connected layers, and we leave to future work exploration of the many transformer variations proposed in recent years (e.g. Dosovitskiy 2018, Fedus et al. 2021, Liu et al 2021, Wu et al. 2021). Our simple decoder only predicts haplotypes that are equal in length to the number of input tokens (genomic positions), but a natural improvement would be to add a more sophisticated decoder capable of producing a variable length sequence to handle larger insertion and deletion events.  In addition, newer transformer models that avoid the $O(n^2)$ scaling with the number of input tokens may be able to handle longer input sequence lengths, and therefore may be able to detect larger variants. 
 
@@ -175,6 +176,9 @@ Fedus, William, Barret Zoph, and Noam Shazeer. "Switch transformers: Scaling to 
 
 \vspace{8pt}
 Kim, Sangtae, et al. "Strelka2: fast and accurate calling of germline and somatic variants." Nature methods 15.8 (2018): 591-594.
+
+\vspace{8pt}
+Krusche, Peter, et al. "Best practices for benchmarking germline small-variant calls in human genomes." Nature biotechnology 37.5 (2019): 555-560.
 
 \vspace{8pt}
 Li, Heng. "Toward better understanding of artifacts in variant calling from high-coverage samples." Bioinformatics 30.20 (2014): 2843-2851.
