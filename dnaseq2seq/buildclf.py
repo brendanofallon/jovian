@@ -9,6 +9,7 @@ import pysam
 import pickle
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
+import scipy.stats as stats
 
 from functools import lru_cache
 import logging
@@ -228,6 +229,9 @@ def var_feats(var, aln, var_freq_file):
     else:
         mq_vaf = 0.0
   
+    # Fisher exact test for strand bias
+    strandbias_stat = stats.fisher_exact([[pos_alt, neg_alt], [pos_ref, neg_ref]], alternative='two-sided')[1]
+
     feats.append(var.qual)
     feats.append(len(var.ref))
     feats.append(max(len(a) for a in var.alts))
@@ -246,6 +250,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(vaf)
     feats.append(mq_vaf)
     feats.append(pos_alt + neg_alt)
+    feats.append(strandbias_stat)
     return np.array(feats)
 
 
@@ -269,6 +274,7 @@ def feat_names():
             "vaf",
             "highmq_vaf",
             "altreads",
+            "strandbias_stat",
         ]
 
 
