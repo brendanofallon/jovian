@@ -1,3 +1,4 @@
+import itertools
 import os
 import time
 import math
@@ -717,4 +718,69 @@ def _call_vars_region(
 
     logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
+
+
+
+
+def vars_dont_overlap(v0, v1):
+    return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
+
+
+def merge_genotypes(genos):
+    """
+    Genos is a list of 2-tuples representing haplotypes called in overlapping windows. This function
+    attempts to merge the haplotypes in a way that makes sense, given the possibility of conflicting information
+
+    """
+    allvars = sorted(list(v for g in genos for v in g[0]) + list(v for g in genos for v in g[1]), key=lambda v: v.pos)
+    allkeys = set()
+    varsnodups = []
+    for v in allvars:
+        if v.key not in allkeys:
+            allkeys.add(v.key)
+            varsnodups.append(v)
+
+    results = [[], []]
+
+    prev_het = None
+    prev_het_index = None
+    for p in varsnodups:
+        homcount = 0
+        hetcount = 0
+        for g in genos:
+            a = p.key in [v.key for v in g[0]]
+            b = p.key in [v.key for v in g[1]]
+            if a and b:
+                homcount += 1
+            elif a or b:
+                hetcount += 1
+        if homcount > hetcount:
+            results[0].append(p)
+            results[1].append(p)
+        elif prev_het is None:
+            results[0].append(p)
+            prev_het = p
+            prev_het_index = 0
+        else:
+            # There was a previous het variant, so figure out where this new one should go
+            # determine if p should be in cis or trans with prev_het
+            cis = 0
+            trans = 0
+            for g in genos:
+                g0keys = [v.key for v in g[0]]
+                g1keys = [v.key for v in g[1]]
+                if (p.key in g0keys and prev_het.key in g0keys) or (p.key in g1keys and prev_het.key in g1keys):
+                    cis += 1
+                elif (p.key in g0keys and prev_het.key in g1keys) or (p.key in g1keys and prev_het.key in g0keys):
+                    trans += 1
+            if trans >= cis: # If there's a tie, assume trans. This covers the case where cis==0 and trans==0, because trans is safer
+                results[1 - prev_het_index].append(p)
+                prev_het = p
+                prev_het_index = 1 - prev_het_index
+            else:
+                results[prev_het_index].append(p)
+                prev_het = p
+                prev_het_index = prev_het_index
+
+    return results
 

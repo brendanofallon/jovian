@@ -24,6 +24,11 @@ class Variant:
     def __gt__(self, other):
         return self.pos > other.pos
 
+    @property
+    def key(self):
+        return f"{self.pos}-{self.ref}-{self.alt}"
+
+
 @dataclass
 class Cigar:
     op: str

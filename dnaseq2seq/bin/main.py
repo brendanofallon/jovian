@@ -297,7 +297,10 @@ def main():
     args = parser.parse_args()
     args.cmdline = " ".join(sys.argv[1:])
     args.cl_args = vars(args).copy()  # command line copy for logging
-    args.func(**vars(args))
+    if len(vars(args)) == 0 or getattr(args, 'func') is None:
+        print(args.usage())
+    else:
+        args.func(**vars(args))
 
 
 if __name__ == "__main__":
