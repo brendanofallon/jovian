@@ -250,7 +250,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(vaf)
     feats.append(mq_vaf)
     feats.append(pos_alt + neg_alt)
-    feats.append(strandbias_stat)
+    #feats.append(strandbias_stat)
     return np.array(feats)
 
 
