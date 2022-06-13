@@ -687,17 +687,15 @@ def _call_vars_region(
         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
     )
 
-    allvars0 = defaultdict(list)
-    allvars1 = defaultdict(list)
     step_count = 0  # initialize
     var_retain_window_size = 125
-    batch_size = 64
+    batch_size = 128
 
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
-    hap0 = {}
-    hap1 = {}
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
                                                window_size=window_size,
@@ -708,7 +706,11 @@ def _call_vars_region(
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
-        hap0, hap1 = merge_genotypes(batchvars)
+        h0, h1 = merge_genotypes(batchvars)
+        for k, v in h0.items():
+            hap0[k].extend(v)
+        for k, v in h1.items():
+            hap1[k].extend(v)
         calltime_total += (datetime.datetime.now() - callstart)
 
         step_count += batch.shape[0]
@@ -721,9 +723,10 @@ def _call_vars_region(
     return chrom, window_idx, hap0_passing, hap1_passing
 
 
-
-
 def vars_dont_overlap(v0, v1):
+    """
+    True if the two variant do not share any reference bases
+    """
     return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
 
 
