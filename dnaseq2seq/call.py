@@ -547,7 +547,7 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size):
+def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size, var_retain_window_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -565,41 +565,41 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
         hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
 
         refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
-        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, hap0_probs) if v.pos < offset + var_retain_window_size)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, hap1_probs) if v.pos < offset + var_retain_window_size)
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
 
-def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
-    for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
-        stepvars0 = {}
-        for v in vars_hap0:
-            if v.pos < (window_start + window_retain_size):
-                v.hap_model = 0
-                v.step = step_count
-                stepvars0[(v.pos, v.ref, v.alt)] = v
-        stepvars1 = {}
-        for v in vars_hap1:
-            if v.pos < (window_start + window_retain_size):
-                v.hap_model = 1
-                v.step = step_count
-                stepvars1[(v.pos, v.ref, v.alt)] = v
-
-        # swap haplotypes if supported by previous vars
-        same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
-        same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
-        opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
-        opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
-        if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-            stepvars1, stepvars0 = stepvars0, stepvars1
-
-        # add this step's vars to allvars
-        [allvars0[key].append(v) for key, v in stepvars0.items()]
-        [allvars1[key].append(v) for key, v in stepvars1.items()]
-        step_count = step_count + 1
-
-    return allvars0, allvars1
+# def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
+#     for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
+#         stepvars0 = {}
+#         for v in vars_hap0:
+#             if v.pos < (window_start + window_retain_size):
+#                 v.hap_model = 0
+#                 v.step = step_count
+#                 stepvars0[(v.pos, v.ref, v.alt)] = v
+#         stepvars1 = {}
+#         for v in vars_hap1:
+#             if v.pos < (window_start + window_retain_size):
+#                 v.hap_model = 1
+#                 v.step = step_count
+#                 stepvars1[(v.pos, v.ref, v.alt)] = v
+#
+#         # swap haplotypes if supported by previous vars
+#         same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
+#         same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
+#         opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
+#         opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
+#         if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
+#             stepvars1, stepvars0 = stepvars0, stepvars1
+#
+#         # add this step's vars to allvars
+#         [allvars0[key].append(v) for key, v in stepvars0.items()]
+#         [allvars1[key].append(v) for key, v in stepvars1.items()]
+#         step_count = step_count + 1
+#
+#     return allvars0, allvars1
 
 
 def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
@@ -696,7 +696,8 @@ def _call_vars_region(
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
-    
+    hap0 = {}
+    hap1 = {}
     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
                                                window_size=window_size,
@@ -706,15 +707,15 @@ def _call_vars_region(
         logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
-        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, var_retain_window_size)
+        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
+        hap0, hap1 = merge_genotypes(batchvars)
         calltime_total += (datetime.datetime.now() - callstart)
 
         step_count += batch.shape[0]
 
     # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
+    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
+    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
 
     logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
@@ -782,5 +783,12 @@ def merge_genotypes(genos):
                 prev_het = p
                 prev_het_index = prev_het_index
 
-    return results
+    # Build dictionaries with correct haplotypes...
+    allvars0 = dict()
+    allvars1 = dict()
+    for v in results[0]:
+        allvars0[v.key] = [t for t in allvars if t.key == v.key]
+    for v in results[1]:
+        allvars1[v.key] = [t for t in allvars if t.key == v.key]
+    return allvars0, allvars1
 
