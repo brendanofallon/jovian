@@ -721,8 +721,6 @@ def _call_vars_region(
     return chrom, window_idx, hap0_passing, hap1_passing
 
 
-
-
 def vars_dont_overlap(v0, v1):
     return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
 
