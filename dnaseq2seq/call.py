@@ -691,13 +691,13 @@ def _call_vars_region(
     allvars1 = defaultdict(list)
     step_count = 0  # initialize
     var_retain_window_size = 125
-    batch_size = 64
+    batch_size = 128
 
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
-    hap0 = {}
-    hap1 = {}
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
                                                window_size=window_size,
@@ -708,7 +708,11 @@ def _call_vars_region(
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
-        hap0, hap1 = merge_genotypes(batchvars)
+        h0, h1 = merge_genotypes(batchvars)
+        for k, v in h0.items():
+            hap0[k].append(v)
+        for k, v in h1.items():
+            hap1[k].append(v)
         calltime_total += (datetime.datetime.now() - callstart)
 
         step_count += batch.shape[0]
