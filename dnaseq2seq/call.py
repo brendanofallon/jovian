@@ -687,8 +687,6 @@ def _call_vars_region(
         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
     )
 
-    allvars0 = defaultdict(list)
-    allvars1 = defaultdict(list)
     step_count = 0  # initialize
     var_retain_window_size = 125
     batch_size = 128
@@ -710,9 +708,9 @@ def _call_vars_region(
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
         h0, h1 = merge_genotypes(batchvars)
         for k, v in h0.items():
-            hap0[k].append(v)
+            hap0[k].extend(v)
         for k, v in h1.items():
-            hap1[k].append(v)
+            hap1[k].extend(v)
         calltime_total += (datetime.datetime.now() - callstart)
 
         step_count += batch.shape[0]
@@ -726,6 +724,9 @@ def _call_vars_region(
 
 
 def vars_dont_overlap(v0, v1):
+    """
+    True if the two variant do not share any reference bases
+    """
     return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
 
 
