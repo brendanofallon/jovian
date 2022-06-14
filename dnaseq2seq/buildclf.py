@@ -310,13 +310,14 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     allfps = []
     var_freq_file = pysam.VariantFile(var_freq_file)
     if feat_csv:
-        logger.info("Writing feature dump to {feat_csv}")
+        logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
         feat_fh.write("varstr," + ",".join(feat_names()) + "\n")
     else:
         feat_fh = None
 
     for sample in conf.keys():
+        logger.info(f"Processing sample {sample}")
         aln = pysam.AlignmentFile(conf[sample]['bam'], reference_filename=reference_filename)
         tps = conf[sample].get('tps')
         if type(tps) == str:
@@ -330,6 +331,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         elif type(fps) == list:
             for fp in fps:
                 allfps.extend(extract_feats(fp, aln, var_freq_file, feat_fh))
+        logger.info(f"TPs: {len(alltps)} FPs: {len(allfps)}")
 
     if feat_fh:
         feat_fh.close()
