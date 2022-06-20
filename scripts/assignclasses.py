@@ -6,7 +6,7 @@ import pysam
 from collections import defaultdict
 import gzip
 from quicksect import IntervalTree
-
+import random
 
 """
 Given a 'split' BED file (where every region has the same length, usually 300bp), generate a fourth column
@@ -39,17 +39,25 @@ def buildforest(bedpath):
 
 vcf = pysam.VariantFile(sys.argv[1])
 
-#sys.stderr.write("Loading forest from " + sys.argv[2])
-#forest = buildforest(sys.argv[2])
+sys.stderr.write("Loading forest from " + sys.argv[2])
+forest = buildforest(sys.argv[2])
 
-for line in open(sys.argv[2]):
+for line in open(sys.argv[3]):
+    variants = []
     toks = line.split("\t")
     start = int(toks[1])
     end = int(toks[2])
+    label = toks[3].strip()
+    if label != 'tn':
+        print(line, end='')
+        continue
+    if random.random() > 0.10:
+        continue
+
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
-    #intervals = list(forest[chrom].search(start, end))
-    #interval_count = len(intervals)
+    intervals = list(forest[chrom].search(start, end))
+    interval_count = len(intervals)
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
     del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
     ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
@@ -74,7 +82,6 @@ for line in open(sys.argv[2]):
         label = "snv"
     else:
         label = "tn"
-
     #found = False
     #for i in intervals:
     #    if any(i.start < v.pos < i.end for v in variants):
