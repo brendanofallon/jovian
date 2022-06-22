@@ -31,6 +31,7 @@ def var_type(variant):
     print(f"Whoa, unknown variant type: {variant}")
     return 'unknown'
 
+
 def concat_metafile(sample_metafile, dest_metafh):
     """
     Concate the given sample metadata file to destination metadata file. 
