@@ -47,6 +47,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
+    # todo do we want to add the truncate=True param to the pileup command?
     for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
