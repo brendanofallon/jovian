@@ -119,16 +119,16 @@ def reconcile_current_window(prev_win, current_win):
 def load_model(model_path):
     
     # 25m
-    #attention_heads = 8
-    #encoder_layers = 8
-    #transformer_dim = 400
-    #embed_dim_factor = 100
+    attention_heads = 8
+    encoder_layers = 8
+    transformer_dim = 400
+    embed_dim_factor = 100
     
     # 10m
-    attention_heads = 6
-    encoder_layers = 6
-    transformer_dim = 250
-    embed_dim_factor = 100
+    #attention_heads = 6
+    #encoder_layers = 6
+    #transformer_dim = 250
+    #embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,
