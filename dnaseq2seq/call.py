@@ -418,8 +418,10 @@ def call_variants_on_chrom(
                 os.unlink(chunk_vcf)
                 chrom_nvar += chunk_nvar
 
+    logger.info(f"Done calling variants on {len(chunks)} chunks, now sorting & deduping raw VCF")
     chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
     util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
+    logger.info(f"Done sorting, now deduping..")
     chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
     util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
 
@@ -455,6 +457,12 @@ def process_chunk_regions(
     chunk_vcf =f"{tmpdir}/chrom_{chrom}.chunk_{start_idx}-{end_idx}.vcf"
     chunk_vfh = vcf.init_vcf(chunk_vcf, sample_name="sample", lowcov=20)
     chunk_vfh.close()
+    
+    cpname = mp.current_process().name
+    logger.debug(
+        f"{cpname}: Writing variants to tmp VCF {chunk_vcf}"
+    )
+
 
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
@@ -473,33 +481,44 @@ def process_chunk_regions(
                 continue
             chrom, window_idx, start, end = line.strip().split("\t")[0:4]
             window_idx, start, end = int(window_idx), int(start), int(end)
-    
-            chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
-                chrom,
-                window_idx,
-                start,
-                end,
-                aln=aln,
-                model=model,
-                reference=reference,
-                max_read_depth=max_read_depth,
-                window_size=window_size,
-                min_reads=min_reads,
-                window_step=window_step
-            )
+            
+            logger.debug(f"{cpname}: calling variants in region {chrom}:{start}-{end} (window {window_idx})")
+            try:
+                chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
+                    chrom,
+                    window_idx,
+                    start,
+                    end,
+                    aln=aln,
+                    model=model,
+                    reference=reference,
+                    max_read_depth=max_read_depth,
+                    window_size=window_size,
+                    min_reads=min_reads,
+                    window_step=window_step
+                )
+            except Exception as ex:
+                logger.error(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
+                raise ex
 
-            nvar, vcfname = vars_hap_to_records(
-                chrom,
-                window_idx=window_idx,
-                vars_hap0=vars_hap0,
-                vars_hap1=vars_hap1,
-                aln=aln,
-                reference=reference,
-                classifier_model=classifier_model,
-                tmpdir=tmpdir,
-                var_freq_file=var_freq_file
-            )
+            try:
+                logger.debug(f"{cpname}: Creating variant records for region {chrom}:{start}-{end} (window {window_idx})")
+                nvar, vcfname = vars_hap_to_records(
+                    chrom,
+                    window_idx=window_idx,
+                    vars_hap0=vars_hap0,
+                    vars_hap1=vars_hap1,
+                    aln=aln,
+                    reference=reference,
+                    classifier_model=classifier_model,
+                    tmpdir=tmpdir,
+                    var_freq_file=var_freq_file
+                )
+            except Exception as ex:
+                logger.error(f"Error converting variants to VCF records in window {window_idx}: {ex}")
+                raise ex
 
+            logger.info(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
             for var in pysam.VariantFile(vcfname):
                 chunk_vfh.write(str(var))
             os.unlink(vcfname)
