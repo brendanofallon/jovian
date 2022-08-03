@@ -9,6 +9,8 @@ import random
 from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
+from concurrent.futures import ProcessPoolExecutor
+
 
 import torch
 import torch.multiprocessing as mp
@@ -410,13 +412,25 @@ def call_variants_on_chrom(
                 os.unlink(chunk_vcf)
                 chrom_nvar += chunk_nvar
         else:
-            for chunk_nvar, chunk_vcf in [
-                f for f in mp.Pool(threads).map(process_chunk_func, chunks)
-            ]:
-                for var in pysam.VariantFile(chunk_vcf):
-                    chrom_vfh.write(str(var))
+            futs = []
+            with ProcessPoolExecutor(max_workers=threads) as pool:
+                for chunk in chunks:
+                    fut = pool.submit(process_chunk_func, chunk)
+                    futs.append(fut)
+                logger.info(f"Submitted {len(futs)} jobs for variant calling")
+                for i, fut in enumerate(futs):
+                    try:
+                        nvars, chunk_vcf = fut.result(timeout= 5 * 60 * 60)
+                        logger.debug(f"Got result {i} of {len(futs)} results for chunked variant calling with {nvars} vars")
+                        chrom_nvar += nvars
+                        for var in pysam.VariantFile(chunk_vcf):
+                            chrom_vfh.write(str(var))
+                            chrom_vfh.flush()
+                    except Exception as ex:
+                        logger.error(f"Exception processing chunk {i} ({chunk}): {ex}")
+                        raise ex
+
                 os.unlink(chunk_vcf)
-                chrom_nvar += chunk_nvar
 
     logger.info(f"Done calling variants on {len(chunks)} chunks, now sorting & deduping raw VCF")
     chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
@@ -498,7 +512,7 @@ def process_chunk_regions(
                     window_step=window_step
                 )
             except Exception as ex:
-                logger.error(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
+                print(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
                 raise ex
 
             try:
@@ -518,7 +532,7 @@ def process_chunk_regions(
                 logger.error(f"Error converting variants to VCF records in window {window_idx}: {ex}")
                 raise ex
 
-            logger.info(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
+            #logger.info(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
             for var in pysam.VariantFile(vcfname):
                 chunk_vfh.write(str(var))
             os.unlink(vcfname)

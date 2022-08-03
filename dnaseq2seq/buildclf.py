@@ -16,10 +16,6 @@ import logging
 import argparse
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
-                    datefmt='%m-%d %H:%M:%S',
-                    level=logging.INFO)
-
 
 SUPPORTS_REF=0
 SUPPORTS_ALT=1
@@ -274,7 +270,7 @@ def feat_names():
             "vaf",
             "highmq_vaf",
             "altreads",
-            "strandbias_stat",
+          #  "strandbias_stat",
         ]
 
 
@@ -416,6 +412,10 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
+                    datefmt='%m-%d %H:%M:%S',
+                    level=logging.INFO)
+
     main()
     # for a,b in zip("ABC", "ABCDEF"):
     #     print(f"{a},{b}")
