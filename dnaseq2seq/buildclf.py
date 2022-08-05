@@ -282,7 +282,9 @@ def varstr(var):
 
 
 def extract_feats(args):
-    vcf, aln, var_freq_file, is_real = args
+    vcf, alnpath, var_freq_file, is_real, reference_filename = args
+    aln = pysam.AlignmentFile(alnpath, reference_filename=reference_filename)
+    var_freq_file = pysam.VariantFile(var_freq_file)
     allfeats = []
     feat_strs = []
     labels = []
@@ -315,7 +317,6 @@ def load_model(path):
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
     alltps = []
     allfps = []
-    var_freq_file = pysam.VariantFile(var_freq_file)
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -327,24 +328,20 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         futs = []
         for sample in conf.keys():
             logger.info(f"Processing sample {sample}")
-            aln = pysam.AlignmentFile(conf[sample]['bam'], reference_filename=reference_filename)
+            print(conf[sample])
+            alnpath = conf[sample]['bam']
             tps = conf[sample].get('tps')
             if type(tps) == str:
-                futs.append(pool.submit(extract_feats, (tps, aln, var_freq_file, True)))
-                # alltps.extend(extract_feats(tps, aln, var_freq_file))
+                futs.append(pool.submit(extract_feats, (tps, alnpath, var_freq_file, True, reference_filename)))
             elif type(tps) == list:
                 for tp in tps:
-                    futs.append(pool.submit(extract_feats, (tp, aln, var_freq_file, True)))
-                    # alltps.extend(extract_feats(tp, aln, var_freq_file))?
+                    futs.append(pool.submit(extract_feats, (tp, alnpath, var_freq_file, True, reference_filename)))
             fps = conf[sample].get('fps')
             if type(fps) == str:
-                futs.append(pool.submit(extract_feats, (fps, aln, var_freq_file, False)))
-                # allfps.extend(extract_feats(fps, aln, var_freq_file))
+                futs.append(pool.submit(extract_feats, (fps, alnpath, var_freq_file, False, reference_filename)))
             elif type(fps) == list:
                 for fp in fps:
-                    futs.append(pool.submit(extract_feats, (fp, aln, var_freq_file, False)))
-                    # allfps.extend(extract_feats(fp, aln, var_freq_file))
-            logger.info(f"TPs: {len(alltps)} FPs: {len(allfps)}")
+                    futs.append(pool.submit(extract_feats, (fp, alnpath, var_freq_file, False, reference_filename)))
 
         allfeatures = []
         alllabels = []
