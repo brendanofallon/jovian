@@ -1,3 +1,4 @@
+import itertools
 import os
 import time
 import math
@@ -8,6 +9,8 @@ import random
 from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
+from concurrent.futures import ProcessPoolExecutor
+
 
 import torch
 import torch.multiprocessing as mp
@@ -116,10 +119,17 @@ def reconcile_current_window(prev_win, current_win):
 
 
 def load_model(model_path):
+    # 25m
     attention_heads = 8
     encoder_layers = 8
     transformer_dim = 400
     embed_dim_factor = 100
+    
+    # 10m
+    #attention_heads = 6
+    #encoder_layers = 6
+    #transformer_dim = 250
+    #embed_dim_factor = 100
     model = VarTransformer(read_depth=100,
                            feature_count=9,
                            out_dim=4,
@@ -401,16 +411,30 @@ def call_variants_on_chrom(
                 os.unlink(chunk_vcf)
                 chrom_nvar += chunk_nvar
         else:
-            for chunk_nvar, chunk_vcf in [
-                f for f in mp.Pool(threads).map(process_chunk_func, chunks)
-            ]:
-                for var in pysam.VariantFile(chunk_vcf):
-                    chrom_vfh.write(str(var))
-                os.unlink(chunk_vcf)
-                chrom_nvar += chunk_nvar
+            futs = []
+            with ProcessPoolExecutor(max_workers=threads) as pool:
+                for chunk in chunks:
+                    fut = pool.submit(process_chunk_func, chunk)
+                    futs.append(fut)
+                logger.info(f"Submitted {len(futs)} jobs for variant calling")
+                for i, fut in enumerate(futs):
+                    try:
+                        nvars, chunk_vcf = fut.result(timeout= 5 * 60 * 60)
+                        logger.debug(f"Got result {i} of {len(futs)} results for chunked variant calling with {nvars} vars")
+                        chrom_nvar += nvars
+                        for var in pysam.VariantFile(chunk_vcf):
+                            chrom_vfh.write(str(var))
+                            chrom_vfh.flush()
+                    except Exception as ex:
+                        logger.error(f"Exception processing chunk {i} ({chunk}): {ex}")
+                        raise ex
 
+                os.unlink(chunk_vcf)
+
+    logger.info(f"Done calling variants on {len(chunks)} chunks, now sorting & deduping raw VCF")
     chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
     util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
+    logger.info(f"Done sorting, now deduping..")
     chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
     util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
 
@@ -446,6 +470,12 @@ def process_chunk_regions(
     chunk_vcf =f"{tmpdir}/chrom_{chrom}.chunk_{start_idx}-{end_idx}.vcf"
     chunk_vfh = vcf.init_vcf(chunk_vcf, sample_name="sample", lowcov=20)
     chunk_vfh.close()
+    
+    cpname = mp.current_process().name
+    logger.debug(
+        f"{cpname}: Writing variants to tmp VCF {chunk_vcf}"
+    )
+
 
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
@@ -464,33 +494,44 @@ def process_chunk_regions(
                 continue
             chrom, window_idx, start, end = line.strip().split("\t")[0:4]
             window_idx, start, end = int(window_idx), int(start), int(end)
-    
-            chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
-                chrom,
-                window_idx,
-                start,
-                end,
-                aln=aln,
-                model=model,
-                reference=reference,
-                max_read_depth=max_read_depth,
-                window_size=window_size,
-                min_reads=min_reads,
-                window_step=window_step
-            )
+            
+            logger.debug(f"{cpname}: calling variants in region {chrom}:{start}-{end} (window {window_idx})")
+            try:
+                chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
+                    chrom,
+                    window_idx,
+                    start,
+                    end,
+                    aln=aln,
+                    model=model,
+                    reference=reference,
+                    max_read_depth=max_read_depth,
+                    window_size=window_size,
+                    min_reads=min_reads,
+                    window_step=window_step
+                )
+            except Exception as ex:
+                print(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
+                raise ex
 
-            nvar, vcfname = vars_hap_to_records(
-                chrom,
-                window_idx=window_idx,
-                vars_hap0=vars_hap0,
-                vars_hap1=vars_hap1,
-                aln=aln,
-                reference=reference,
-                classifier_model=classifier_model,
-                tmpdir=tmpdir,
-                var_freq_file=var_freq_file
-            )
+            try:
+                logger.debug(f"{cpname}: Creating variant records for region {chrom}:{start}-{end} (window {window_idx})")
+                nvar, vcfname = vars_hap_to_records(
+                    chrom,
+                    window_idx=window_idx,
+                    vars_hap0=vars_hap0,
+                    vars_hap1=vars_hap1,
+                    aln=aln,
+                    reference=reference,
+                    classifier_model=classifier_model,
+                    tmpdir=tmpdir,
+                    var_freq_file=var_freq_file
+                )
+            except Exception as ex:
+                logger.error(f"Error converting variants to VCF records in window {window_idx}: {ex}")
+                raise ex
 
+            #logger.info(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
             for var in pysam.VariantFile(vcfname):
                 chunk_vfh.write(str(var))
             os.unlink(vcfname)
@@ -530,7 +571,7 @@ def vars_hap_to_records(
     for rec in vcf_records:
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
-            rec.qual = buildclf.predict_one_record(classifier_model, rec, var_freq_file)
+            rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
         vcf_file.write(rec)
 
     vcf_file.close()
@@ -538,7 +579,7 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size):
+def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size, var_retain_window_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -556,41 +597,41 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
         hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
 
         refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(vcf.aln_to_vars(refseq, hap0, offset, hap0_probs))
-        vars_hap1 = list(vcf.aln_to_vars(refseq, hap1, offset, hap1_probs))
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, hap0_probs) if v.pos < offset + var_retain_window_size)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, hap1_probs) if v.pos < offset + var_retain_window_size)
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
 
-def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
-    for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
-        stepvars0 = {}
-        for v in vars_hap0:
-            if v.pos < (window_start + window_retain_size):
-                v.hap_model = 0
-                v.step = step_count
-                stepvars0[(v.pos, v.ref, v.alt)] = v
-        stepvars1 = {}
-        for v in vars_hap1:
-            if v.pos < (window_start + window_retain_size):
-                v.hap_model = 1
-                v.step = step_count
-                stepvars1[(v.pos, v.ref, v.alt)] = v
-
-        # swap haplotypes if supported by previous vars
-        same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
-        same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
-        opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
-        opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
-        if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-            stepvars1, stepvars0 = stepvars0, stepvars1
-
-        # add this step's vars to allvars
-        [allvars0[key].append(v) for key, v in stepvars0.items()]
-        [allvars1[key].append(v) for key, v in stepvars1.items()]
-        step_count = step_count + 1
-
-    return allvars0, allvars1
+# def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
+#     for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
+#         stepvars0 = {}
+#         for v in vars_hap0:
+#             if v.pos < (window_start + window_retain_size):
+#                 v.hap_model = 0
+#                 v.step = step_count
+#                 stepvars0[(v.pos, v.ref, v.alt)] = v
+#         stepvars1 = {}
+#         for v in vars_hap1:
+#             if v.pos < (window_start + window_retain_size):
+#                 v.hap_model = 1
+#                 v.step = step_count
+#                 stepvars1[(v.pos, v.ref, v.alt)] = v
+#
+#         # swap haplotypes if supported by previous vars
+#         same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
+#         same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
+#         opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
+#         opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
+#         if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
+#             stepvars1, stepvars0 = stepvars0, stepvars1
+#
+#         # add this step's vars to allvars
+#         [allvars0[key].append(v) for key, v in stepvars0.items()]
+#         [allvars1[key].append(v) for key, v in stepvars1.items()]
+#         step_count = step_count + 1
+#
+#     return allvars0, allvars1
 
 
 def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
@@ -674,39 +715,115 @@ def _call_vars_region(
       - create new prob from all duplicate calls?
     """
     cpname = mp.current_process().name
-    logger.info(
+    logger.debug(
         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
     )
 
-    allvars0 = defaultdict(list)
-    allvars1 = defaultdict(list)
     step_count = 0  # initialize
     var_retain_window_size = 125
-    batch_size = 64
+    batch_size = 128
 
     enctime_total = datetime.timedelta(0)
     calltime_total = datetime.timedelta(0)
     encstart = datetime.datetime.now()
-    
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
                                                max_read_depth,
                                                window_size=window_size,
                                                min_reads=min_reads,
                                                window_step=window_step,
                                                batch_size=batch_size):
-        logger.info(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+        logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size)
-        allvars0, allvars1 = update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, var_retain_window_size)
+        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
+        h0, h1 = merge_genotypes(batchvars)
+        for k, v in h0.items():
+            hap0[k].extend(v)
+        for k, v in h1.items():
+            hap1[k].extend(v)
         calltime_total += (datetime.datetime.now() - callstart)
 
         step_count += batch.shape[0]
 
     # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in allvars0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in allvars1.items() if start <= v[0].pos <= end}
+    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
+    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
 
-    logger.info(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+    logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
+
+
+def vars_dont_overlap(v0, v1):
+    """
+    True if the two variant do not share any reference bases
+    """
+    return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
+
+
+def merge_genotypes(genos):
+    """
+    Genos is a list of 2-tuples representing haplotypes called in overlapping windows. This function
+    attempts to merge the haplotypes in a way that makes sense, given the possibility of conflicting information
+
+    """
+    allvars = sorted(list(v for g in genos for v in g[0]) + list(v for g in genos for v in g[1]), key=lambda v: v.pos)
+    allkeys = set()
+    varsnodups = []
+    for v in allvars:
+        if v.key not in allkeys:
+            allkeys.add(v.key)
+            varsnodups.append(v)
+
+    results = [[], []]
+
+    prev_het = None
+    prev_het_index = None
+    for p in varsnodups:
+        homcount = 0
+        hetcount = 0
+        for g in genos:
+            a = p.key in [v.key for v in g[0]]
+            b = p.key in [v.key for v in g[1]]
+            if a and b:
+                homcount += 1
+            elif a or b:
+                hetcount += 1
+        if homcount > hetcount:
+            results[0].append(p)
+            results[1].append(p)
+        elif prev_het is None:
+            results[0].append(p)
+            prev_het = p
+            prev_het_index = 0
+        else:
+            # There was a previous het variant, so figure out where this new one should go
+            # determine if p should be in cis or trans with prev_het
+            cis = 0
+            trans = 0
+            for g in genos:
+                g0keys = [v.key for v in g[0]]
+                g1keys = [v.key for v in g[1]]
+                if (p.key in g0keys and prev_het.key in g0keys) or (p.key in g1keys and prev_het.key in g1keys):
+                    cis += 1
+                elif (p.key in g0keys and prev_het.key in g1keys) or (p.key in g1keys and prev_het.key in g0keys):
+                    trans += 1
+            if trans >= cis: # If there's a tie, assume trans. This covers the case where cis==0 and trans==0, because trans is safer
+                results[1 - prev_het_index].append(p)
+                prev_het = p
+                prev_het_index = 1 - prev_het_index
+            else:
+                results[prev_het_index].append(p)
+                prev_het = p
+                prev_het_index = prev_het_index
+
+    # Build dictionaries with correct haplotypes...
+    allvars0 = dict()
+    allvars1 = dict()
+    for v in results[0]:
+        allvars0[v.key] = [t for t in allvars if t.key == v.key]
+    for v in results[1]:
+        allvars1[v.key] = [t for t in allvars if t.key == v.key]
+    return allvars0, allvars1
 

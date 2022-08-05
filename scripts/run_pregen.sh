@@ -16,13 +16,17 @@ PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq/bin/main.py
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/multindel_novaav_conf.yaml
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_conf.yaml
+#CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_conf.yaml
+#CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_splits_chrsE.yaml
+#CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_bigvars_conf.yaml
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_splits_chrsB.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_snvs
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_bigger_fix_chrsB
 
-BATCH_SIZE=256
+BATCH_SIZE=512
 
 mkdir -p $DEST
+cp $CONF $DEST/
 
 $PYTHON $ds2s pregen -c $CONF -d $DEST --threads 24 --batch-size $BATCH_SIZE > $DEST/stdout.log 
 
