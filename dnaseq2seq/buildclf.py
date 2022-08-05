@@ -8,6 +8,7 @@ import scipy.stats as stats
 import pysam
 import pickle
 import sklearn
+import concurrent.futures
 from sklearn.ensemble import RandomForestClassifier
 
 from functools import lru_cache
@@ -136,6 +137,7 @@ def load_model(path):
     logger.info(f"Loading model from {path}")
     with open(path, 'rb') as fh:
         return pickle.load(fh)
+
 
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None):
     alltps = []
