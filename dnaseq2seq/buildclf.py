@@ -8,6 +8,7 @@ import bisect
 import pysam
 import pickle
 import sklearn
+from sklearn.model_selection import train_test_split
 import concurrent.futures
 from sklearn.ensemble import RandomForestClassifier
 import scipy.stats as stats
@@ -364,8 +365,16 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     total_tps = sum(x for x in alllabels)
     logger.info(f"Loaded {total_tps} TP and {len(alllabels) - total_tps} FPs")
 
+    feat_train, feat_test, labels_train, labels_test = train_test_split(np.array(allfeatures), np.array(alllabels), test_size=0.05)
+    logger.info(f"Holding out {len(labels_test)} for model validation")
     clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
-    clf.fit(np.array(allfeatures), np.array(alllabels))
+    clf.fit(feat_train, labels_train)
+
+    test_preds = clf.predict(feat_test)
+    for t, p in zip(labels_test, test_preds):
+        print(f"{t}\t{p:4f}")
+    accuracy = labels_test * test_preds + (1 - labels_test) * (1-test_preds)
+    logger.info(f"Accuracy: {accuracy*100:.4f}")
     return clf
 
 
