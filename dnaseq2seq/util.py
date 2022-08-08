@@ -1,3 +1,4 @@
+import itertools
 import os
 import torch
 import numpy as np
@@ -216,3 +217,29 @@ def dedup_vcf(input_vcf, dest):
                     clump = [var]
         if clump:
             ofh.write(str(clump[0]))
+
+
+def make_kmer_lookups(size):
+    """
+    Generate forward and reverse lookups for kmers
+    str2index returns the index int for a given kmer,
+    index2str returns the kmer string for a given index
+    """
+    bases = "ACGT"
+    baselist = [bases] * size
+    str2index = {}
+    index2str = [None] * (len(bases) ** size)
+    for i, combo in enumerate(itertools.product(*baselist)):
+        s = ''.join(combo)
+        str2index[s] = i
+        index2str[i] = s
+    return str2index, index2str
+
+
+def bases_to_kvec(bases, s2i, kmersize=4):
+    """ Return a list of indices for nonoverlapping kmers read from the base """
+    indices = []
+    for i in range(0, len(bases), kmersize):
+        kmer = bases[i:i+kmersize]
+        indices.append(s2i[kmer])
+    return indices

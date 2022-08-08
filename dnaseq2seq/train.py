@@ -28,6 +28,8 @@ if ENABLE_WANDB:
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
+TGT_KMER_SIZE=4
+s2i, i2s = util.make_kmer_lookups(TGT_KMER_SIZE)
 
 class TrainLogger:
     """ Simple utility for writing various items to a log file CSV """
@@ -87,8 +89,20 @@ def calc_time_sums(
         train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
     )
 
+def tgt_to_kmers(tgt):
+    result = []
+    for i in range(tgt.shape[0]):
+        tgtseq0 = util.tgt_str(tgt[i, 0, :])
+        tgtseq1 = util.tgt_str(tgt[i, 1, :])
+        tgtkmers0 = torch.tensor(util.bases_to_kvec(tgtseq0, s2i, TGT_KMER_SIZE), dtype=torch.int64)
+        tgtkmers1 = torch.tensor(util.bases_to_kvec(tgtseq1, s2i, TGT_KMER_SIZE), dtype=torch.int64)
+        t = torch.stack((tgtkmers0, tgtkmers1))
+        result.append(t)
+    return torch.stack(result, dim=0)
 
-def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, max_alt_reads, altpredictor=None):
+
+
+def train_epoch(model, optimizer, criterion, loader, batch_size):
     """
     Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
     :param model: Model to train
@@ -100,56 +114,44 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
     """
     epoch_loss_sum = None
     prev_epoch_loss = None
-    vafloss_sum = 0
     count = 0
     midmatch_hap0_sum = 0
     midmatch_hap1_sum = 0
-    vafloss = torch.tensor([0])
     # init time usage to zero
     epoch_times = {}
     start_time = datetime.now()
+    truncate_tgt_len = 148
     for batch, (src, tgt_seq, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
         if log_info:
             decomp_time = log_info.get("decomp_time", 0.0)
         else:
             decomp_time = 0.0
+
+        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len])
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-1])
         times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
 
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
 
-        seq_preds = model(src)
+        # Uh-oh - tgt must have same feature dimension as src - and in any case the default implementation cant handle
+        # two output sequences :(
+        seq_preds = model(src, tgt_kmers, tgt_mask)
         times["forward_pass"] = datetime.now()
 
         if type(criterion) == nn.CrossEntropyLoss:
-            # Compute losses in both configurations, and use the best?
-            #loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            # Compute losses in both configurations, and use the best
             with torch.no_grad():
                 for b in range(src.shape[0]):
-                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_seq[b, :, :].flatten())
-                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_seq[b, torch.tensor([1,0]), :].flatten())
+                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmers[b, :, :].flatten())
+                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmers[b, torch.tensor([1,0]), :].flatten())
 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :]
 
             loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
         else:
-            with torch.no_grad():
-                idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0]*seq_preds.shape[1], step=2),
-                                   torch.arange(start=1, end=seq_preds.shape[0]*seq_preds.shape[1], step=2)]).transpose(0, 1)
-
-                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten(start_dim=0, end_dim=1))
-                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
-                                  tgt_seq[:, torch.tensor([1,0]), :].flatten(start_dim=0, end_dim=1))
-                pairsum1 = loss1[idx].sum(dim=-1)
-                pairsum2 = loss2[idx].sum(dim=-1)
-
-                for b in range(src.shape[0]):
-                    if pairsum2[b] < pairsum1[b]:
-                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :, :]
-
-
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=1), tgt_seq.flatten(start_dim=0, end_dim=1)).mean()
+            raise ValueError("SmithWatterman loss not implemented")
 
         times["loss"] = datetime.now()
 
@@ -199,7 +201,7 @@ def train_epoch(model, optimizer, criterion, vaf_criterion, loader, batch_size, 
         start_time = datetime.now()  # reset timer for next batch
         del src
     torch.cuda.empty_cache()
-    logger.info(f"Trained {batch+1} batches in total.")
+    logger.info(f"Trained {batch+1} batches in total for epoch")
     return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
 
 
@@ -330,16 +332,18 @@ def train_epochs(epochs,
                  cl_args = {}
 ):
     attention_heads = 4
-    transformer_dim = 200
-    encoder_layers = 6
+    dim_feedforward = 512
+    encoder_layers = 3
+    decoder_layers = 3
     embed_dim_factor = 125
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
-                            out_dim=4,
+                            out_dim=256, # Number of possible kmers
+                            n_encoder_layers=encoder_layers,
+                            n_decoder_layers=decoder_layers,
                             embed_dim_factor=embed_dim_factor,
                             nhead=attention_heads, 
-                            d_hid=transformer_dim, 
-                            n_encoder_layers=encoder_layers,
+                            d_ff=dim_feedforward,
                             device=DEVICE)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
@@ -398,7 +402,7 @@ def train_epochs(epochs,
             batch_size=batch_size,
             read_depth=max_read_depth,
             attn_heads=attention_heads,
-            transformer_dim=transformer_dim,
+            transformer_dim=dim_feedforward,
             encoder_layers=encoder_layers,
             git_branch=git_repo.head.name,
             git_target=git_repo.head.target,
@@ -442,10 +446,8 @@ def train_epochs(epochs,
             loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
                                                                  optimizer,
                                                                  criterion,
-                                                                 None,
                                                                  dataloader,
-                                                                 batch_size=batch_size,
-                                                                 max_alt_reads=max_read_depth)
+                                                                 batch_size=batch_size)
 
             elapsed = datetime.now() - starttime
 

@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 import math
 
+from dnaseq2seq import transformer
 
 logger = logging.getLogger(__name__)
 
@@ -78,26 +79,18 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class TwoHapDecoder(nn.Module):
-
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(in_dim, 100)
-        self.fc_hap0 = nn.Linear(100, out_dim)
-        self.fc_hap1 = nn.Linear(100, out_dim)
-        self.elu = nn.ELU()
-        self.softmax = nn.Softmax(dim=2)
-
-    def forward(self, x):
-        x = self.elu(self.fc1(x))
-        x0 = self.softmax(self.fc_hap0(x))
-        x1 = self.softmax(self.fc_hap1(x))
-        return torch.stack((x0, x1), dim=1)
-
-
 class VarTransformer(nn.Module):
 
-    def __init__(self, read_depth, feature_count, out_dim, nhead=6, d_hid=256, embed_dim_factor=40, n_encoder_layers=2, p_dropout=0.1, device='cpu'):
+    def __init__(self,
+                 read_depth,
+                 feature_count,
+                 out_dim,
+                 nhead=6,
+                 d_ff=1024,
+                 embed_dim_factor=40,
+                 n_encoder_layers=3,
+                 n_decoder_layers=3,
+                 device='cpu'):
         super().__init__()
         self.device=device
         self.embed_dim = nhead * embed_dim_factor
@@ -108,26 +101,21 @@ class VarTransformer(nn.Module):
 
         # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
-        encoder_layers = nn.TransformerEncoderLayer(self.embed_dim, nhead, d_hid, p_dropout, batch_first=True, activation='gelu')
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, n_encoder_layers)
-        self.decoder = TwoHapDecoder(self.embed_dim, out_dim)
+        self.transformer = transformer.Transformer(
+            d_model=self.embed_dim,
+            num_encoder_layers=n_encoder_layers,
+            num_decoder_layers=n_decoder_layers,
+            nhead=nhead,
+            dim_feedforward=d_ff,
+            batch_first=True, activation='gelu')
+        self.tokmer = nn.Linear(self.embed_dim, out_dim)
         self.elu = torch.nn.ELU()
 
-    def forward(self, src):
-
-        # r contains a 1 if the read base matches the reference base, 0 otherwise
-        #r = (src[:, :, :, 0:4] * src[:, :, 0:1, 0:4]).sum(dim=-1) # x[:, :, 0:1..] is the reference seq
-        #src = torch.cat((src, r.unsqueeze(-1)), dim=3).to(self.device)
-
-
+    def forward(self, src, tgt, tgt_mask):
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
-        # src = self.pos_encoder(src)
-        output = self.transformer_encoder(src)
-        output = self.decoder(output)
-
-        return output
-
-
+        output = self.transformer(src, tgt, tgt_mask=tgt_mask)
+        kmerd = self.tokmer(output)
+        return kmerd
