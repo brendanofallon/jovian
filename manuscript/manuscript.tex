@@ -7,7 +7,7 @@
 \textwidth=380pt
 
 
-\title{Variant calling with transformers}
+\title{Sequence modeling enables direct inference of germline haplotypes from short read sequencing data}
 \author[1]{Brendan O'Fallon}
 \author[1]{Ashini Bolia}
 \author[1]{Jacob Durtschi}
@@ -24,17 +24,15 @@
 \maketitle
 
 \begin{abstract}
-	Detection of germline variants in next-generation sequencing data is an essential element of modern genomics. Variant detection tools typically rely on a variety of statistical algorithms and heuristic techniques to identify variants. Here we describe a new approach that replaces handcrafted statistical methods with a single, end-to-end deep learning model. Our model frames variant detection as a sequence-to-sequence modeling task, akin to language translation, and employs a transformer-based architecture to translate alignment columns into two predicted haplotype sequences. We demonstrate that this method predicts variant genotypes and phase accurately, has the ability to realign complex and ambiguous read mappings to produce accurate haplotype predictions, and uses the local surrounding read context to inform predictions about a given position. 
-
+	Detection of germline variants in next-generation sequencing data is an essential component of modern genomics analysis. Variant detection tools typically rely on statistical algorithms such as de Bruijn graphs, Hidden Markov Models and regression models, often coupled with heuristic techniques and thresholds to identify variants. Here we describe a new approach that replaces these handcrafted statistical methods with a single, end-to-end deep learning that directly infers germline haplotypes from short read pileups. Our model frames variant detection as a sequence-to-sequence modeling task, akin to language translation, and employs a transformer-based architecture to translate alignment columns into two predicted haplotype sequences. After training with 17 whole genome sequences from Genome-in-a-Bottle cell lines, we demonstrate that this method predicts variant genotypes and phase accurately, has the ability to realign complex and ambiguous read mappings to produce accurate haplotype predictions, and uses the local read context to inform predictions about a given position. We also demonstrate that a 2-dimensional positional encoding significantly improved precision of the detected variants. Compared to other callers, sensitivity and precision is higher than GATK HaplotypeCaller, but lower than DeepVariant and Strelka2. 
 \end{abstract}
 
-vim
 
 \section{Introduction}
 
-Accurate inference of the DNA sequence variants in a sample is a fundamental component of genomics analysis. Tools that aim to identify variants must overcome several challenges to produce an accurate set of variant calls. For instance, the sequenced reads themselves may contain errors in the form of miscalled bases or PCR-induced repeat length errors, or the tools used to align reads to the reference genome may produce incorrect mappings (e.g. Li et al. 2014, Goldfeder et al. 2016). Identifying these errors and differentiating them from real genomic variation is challenging, and modern variant detection tools employ a variety of statistical and heuristic techniques to achieve high precision and sensitivity (De Pristo et al. 2011, Nielson et al. 2011). 
+Accurate inference of the DNA sequence variants in a sample is a fundamental element of genomics analysis. Tools that aim to identify variants must overcome several challenges to produce an accurate set of variant calls. For instance, the sequenced reads themselves may contain errors in the form of miscalled bases or PCR-induced repeat length errors, or the tools used to align reads to the reference genome may produce incorrect mappings (e.g. Li et al. 2014, Goldfeder et al. 2016).  In addition, large or complex sequence variants may be obscured by limitations in the read alignment algorithm, and require a sophisticated assembly of reads to identify. Reconstructing real variation and discriminating it from technical error is challenging, and modern variant detection tools employ a variety of statistical and heuristic techniques to achieve high precision and sensitivity (e.g. De Pristo et al. 2011, Nielson et al. 2011). 
 
-All variant discovery tools must address two challenges. First, callers must identify the potential alleles in a region. Then, given a set of potential alleles, they must assess the likelihood of each candidate (or pairs of candidates in the diploid case), to determine which should be included in the caller output. Early callers, such as samtools / mpileup (Li et al. 2009) and the UnifiedGenotyper tool from the Genome Analysis ToolKit (GATK, De Pristo et al. 2011) rely on the read aligner to generate candidate allele candidates, and utilize ad-hoc heuristics and thresholds to determine likely alleles (Nielsen et al. 2011). Later tools (e.g. Poplin et al. 2018, Kim et al. 2018, Cooke et al. 2021) incorporated local re-assembly of reads in each region of interest, resulting in a significant improvement in the sensitivity and precision of variant calls. For instance, the HaplotypeCaller tool identifies candidate haplotypes by constructing de Bruijn graphs from k-mers present in the reads, and assesses haplotype likelihoods with a pair Hidden Markov Model (HMM). 
+All variant discovery tools must address two challenges. First, callers must identify the potential alleles in a region. Then, given a set of potential alleles, they must assess the likelihood of each candidate (or pairs of candidates in the diploid case), to determine which should be included in the caller output. Early callers, such as samtools / mpileup (Li et al. 2009) and the UnifiedGenotyper tool from the Genome Analysis ToolKit (GATK, De Pristo et al. 2011) rely on the read aligner to generate candidate allele candidates, and utilize several ad-hoc heuristics and thresholds to determine likely alleles (e.g. Nielsen et al. 2011). Later tools (e.g. Poplin et al. 2018, Kim et al. 2018, Cooke et al. 2021) incorporated local re-assembly of reads in each region of interest, resulting in a significant improvement in the sensitivity and precision of variant calls. For instance, the HaplotypeCaller tool identifies candidate haplotypes by constructing de Bruijn graphs from k-mers present in the reads, and assesses haplotype likelihoods with a pair Hidden Markov Model (HMM). 
 
 More recent tools have incorporated elements of deep learning into the allele likelihood calculation or allele generation steps. DeepVariant (Poplin et al. 2018) uses a statistical method based on the HaplotypeCaller approach to identify candidates, but adds a Convolutional Neural Net (CNN) to classify variants as true or false positive detections. HELLO (Ramachandran et al. 2020), designed to work on hybrid short- and long-read datasets, employs a mixture-of-experts approach with separate 1-dimensional convolutions across the read and allele dimensions of the input. Clair (Luo et al. 2019, Luo et al. 2020), uses a novel multitask deep learning approach to predict several properties of a potential variant at a given site, including zygosity and allele length. 
 
@@ -45,9 +43,9 @@ Here, we describe a new approach that replaces both the candidate allele generat
 
 \subsection{Model architecture \& read encoding}
 
-Our model consists of a transformer-based encoder and a simple, fixed-length decoder that produces two output sequences, one for each predicted haplotype. The encoder component is an unmodified transformer with GeLU activations as implemented in PyTorch 1.10 ((Vaswani et al. 2017, Paszke et al. 2019). Input tokens are the collection of bases that align to a given reference position across reads, with some modifications described below. We add an additional fully connected layer prior to the transformer encoders which embeds the encoded basecalls in $d$ dimensions, where $d=12$ for the analyses here. The embedded basecalls are `flattened' along the read dimension, producing an input token with size $dr$ where $r$ is the number of reads ($r=100$ for all experiments proposed here).  Instead of the typical 1-dimensional positional encoding, we employed a 2-dimensional encoding, enabling the model to retain information about which read contained a given base across input tokens. 
+Our model consists of a transformer-based encoder and a simple, fixed-length decoder that produces two output sequences, one for each predicted haplotype. The encoder component is an unmodified transformer with GeLU activations as implemented in PyTorch 1.10 (Vaswani et al. 2017, Paszke et al. 2019). Input tokens are the collection of bases that align to a given reference position across reads, with some modifications described below. We add an additional fully connected layer prior to the transformer encoders which embeds the encoded basecalls in $d$ dimensions, where $d=12$ for the analyses here. The embedded basecalls are `flattened' along the read dimension, producing an input token with size $dr$ where $r$ is the number of reads ($r=100$ for all experiments proposed here).  Instead of the typical 1-dimensional positional encoding, we employed a 2-dimensional encoding, allowing the model to differentiate across both the token (position) and read dimensions. The 2D encoding implementation follows Wang \& Jyh-Charn (2021).
 
-The decoder consists of a single fully-connected layer followed by two additional fully connected components that each generate a single haplotype. Predictions are discrete probability distributions over the four possible bases at each predicted output position, produced with a softmax function over the raw outputs. The decoder is of fixed length and produces two haplotype sequences equal in length to the number of input tokens $g$. The full model architecture is shown in \ref{fig:architecture}. 
+The decoder consists of a single fully-connected layer with ReLU activation followed by two additional fully connected components that each generate a single haplotype. Predictions are discrete probability distributions over the four possible bases at each predicted output position, produced with a softmax function over the raw outputs. The decoder is of fixed length and produces two haplotype sequences equal in length to the number of input tokens $g$. The full model architecture is shown in \ref{fig:architecture}. 
 
 
 \begin{figure}[htp]
@@ -65,16 +63,34 @@ Training data was obtained from 17 whole genomes sequenced from 5 Genome-in-a-Bo
 
 \subsection{Training data}
 
-To select regions to include for training data, we developed a scheme to sample regions in a biased manner, prioritizing regions containing variants and, especially, regions with multiple or complex variants. Regions of the reference genome overlapping the high-confidence regions from Genome-in-a-Bottle were subdivided into 150bp nonoverlapping windows, and these regions labelled according to the presence of variants. Separate labels were generated for regions conataining a single SNV, deletion, or insertion, as well as regions containing multiple insertion-deletions, or those containing variants intersecting low-complexity regions. We additionally included `true negative' regions where no known variant was present.  For all analyses described here, we obtain training data only from the human autosomes 1-20, and hold out chromosomes 21 and 22 for model evaluation.  We examine three different sizes of training data sets with 5.1M, 10.2M and 20.4M examples. 
+To select regions to include for training data, we developed a scheme to sample regions in a biased manner, prioritizing regions containing variants and, especially, regions with multiple or complex variants. Regions of the reference genome overlapping the high-confidence regions from Genome-in-a-Bottle were subdivided into 150bp nonoverlapping windows, and these regions labelled according to the presence of variants. Separate labels were generated for regions containing a single SNV, deletion, or insertion, as well as regions containing multiple insertion-deletions, or those containing variants intersecting low-complexity regions. We additionally included `true negative' regions where no known variant was present. In regions containing more than 100 overlapping reads, the reads were repeatedly downsampled to generate multiple training regions. For all analyses described here, we obtain training data only from the human autosomes 1-20, and hold out chromosomes 21 and 22 for model evaluation. Approximately 1.3M regions were obtained from each of the 17 samples, generating a full training data size of 24.3M regions. In addition to the "Full" training set we also examine a half-sized training data set of 12.1M regions, and quarter-sized set of 6.0M regions. The number of regions generated for each variant type is shown in Table \ref{table:regioncounts}. 
 
 Target / label haplotype sequences were produced by obtaining truth variants from the Genome-in-a-Bottle VCF files for each sample and inserting the variants into the reference sequence. Two sequences were generated for each region, one representing each haplotype. In regions where phasing of the variants was ambiguous, the reads in the sequenced sample were examined to determine phase status. Briefly, all possible genotypes (pairs of haplotypes) were generated and reads were aligned via Smith-Waterman to the possible haplotypes, and the highest scoring genotypes selected as the most likely phasing. This phasing procedure was only attempted for variants less than 100bp apart, otherwise the region was discarded.
 
+\begin{center}
+	\begin{tabular}{ lc }
+	 \textbf{Region type} & \textbf{Number of regions (per sample)} \\
+	 No variant & 200,000 \\
+	 SNV & 200,000 \\
+	 Insertions & 200,000 \\
+	 Deletions & 200,000 \\
+	 Insertion/Deletion + SNV & 50,000 \\
+	 Insertion + Deletion & 30,000 \\
+	 SNV (low complexity) & 80,000 \\
+	 Insertion (low complexity) & 80,000 \\
+	 Deletion (low complexity) & 80,000 \\  
+	 Insertion + Deletion (low complexity) & 20,000 \\
+	 Insertion/Deletion + SNV (low complexity) & 80,000 \\
+	\end{tabular}
+	\label{table:regioncounts}
+\end{center}
 
 \subsection{Training procedure \& loss function}
 
-Models were trained for 30 epochs unless noted otherwise, using the Adam optimizer and a learning rate of $5e-5$ and batch size of 512. Models were implemented in PyTorch (v1.10, Paszke et al 2019).
+Models were trained for 50 epochs unless noted otherwise, using the Adam optimizer and a learning rate of $5e^{-5}$ and batch size of 512. Models were implemented in PyTorch (v1.10, Paszke et al 2019).
 
-For a given haplotype we use a standard cross-entropy loss function to compare the prediction to the target sequence. However, two haplotypes exist for each region and they have no inherent order. For instance, a single heterozygous variant can appear on either haplotype, and the model cannot learn predict which because the assigment is random. To make the predictions opaque to haplotype order, we compute the loss in both haplotype configurations - predicted haplotype 0 with target haplotype 0 and 1 with 1, as well as predicted haplotype 1 with target haplotype 0, and 0 with 1, and backpropogate gradients only for the configuration with the lowest loss. 
+For a given haplotype we use a modified cross-entropy loss function to compare the predictions to the target sequence. However, two haplotypes exist for each region and they have no inherent order. For instance, a single heterozygous variant can appear on either haplotype, and the model cannot learn predict which because the assigment is random. To make the predictions opaque to haplotype order, we compute the loss in both haplotype configurations - predicted haplotype 0 with target haplotype 0 and 1 with 1, as well as predicted haplotype 1 with target haplotype 0, and 0 with 1, and backpropogate gradients only for the configuration with the lowest loss. 
+
 
 
 \subsection{Variant detection}
@@ -86,16 +102,38 @@ For a single region containing suspected variants, we perform multiple overlappi
 
 \subsection{Variant quality calculation}
 
-The above variant detection procedure has two shortcomings. First, if every potential variant is emitted, then specificity is poor. Second, the model does not innately produce well calibrated variant quality scores. To address these shortcomings we introduce a post-hoc random forest classifier that we train to discriminate true and false-positive variant calls (see table X for features).  The resulting score is used as a final variant quality score suitable for tuning the tradeoff between sensitivity and specificity. 
+The above variant detection procedure has two shortcomings. First, if every potential variant is emitted, then precision is poor. Second, the model does not innately produce well calibrated variant quality scores. To address these shortcomings we introduce a post-hoc random forest classifier that we train to discriminate true and false-positive variant calls (see table \ref{table:features} for list of features).  The resulting score is used as a final variant quality score suitable for tuning the tradeoff between sensitivity and specificity. 
 
-The random forest classifier is trained by calling variants on selected regions from autosomes 1-4 totalling approximately 120Mb. True and false positive variant calls were identified with the \textit{vcfeval} tool (Cleary et al. 2015). We used the scikit-learn implementation of the random forest with 100 trees, a maximum tree depth of 25, and 'balanced' class weighting option.  
+The random forest classifier is trained by calling variants on selected regions from autosomes 1-4 totalling approximately 120Mb. True and false positive variant calls were identified with the \textit{vcfeval} tool (Cleary et al. 2015). We used the scikit-learn implementation of the random forest with 100 trees, a maximum tree depth of 25, and `balanced' class weighting option.  
 
+\begin{center}
+	\begin{tabular}{ l }
+	 \textbf{Feature} \\
+	 Mean probability of base call at all positions affected by variant \\ 
+	 Number of reference bases affected \\
+	 Number of alternate bases affected \\
+	 Minimum probability of base call at all positions affected by variant \\
+	 Maximum probability of base call at all positions affected by variant \\
+	 Number of variants in \textit{cis} (same haplotype) with this variant \\
+	 Number of variants in \textit{trans} (other haplotype) with this variant \\ 
+	 Total number of variants in both \textit{cis} and \textit{trans} \\
+	 Distance in bases of call from beginning of window - minimum across windows \\
+	 Distance in bases of call from beginning of window - maximum across windows \\
+	 Read depth at variant position \\
+	 Gnomad genome frequency (v2.0.2) of variant \\
+	 Zygosity (heterozygous or homozygous) of variant \\
+	 Fraction of reads in BAM/CRAM supporting variant call \\
+	 Fraction of reads with mapping quality > 10 supporting variant call \\
+	 Total number of reads supporting variant call \\
+	\end{tabular}
+	\label{table:features}
+\end{center}
 
 \section{Results}
 
 \subsection{Model size and training data experiments}
 
-We explore the effects of model size and training data size on validation loss and variant detection accuracy. We evaluate three model sizes and two sets of training data.
+We explore the effects of model size and training data size on variant detection accuracy. Throughout, we calculate sensitivity and precision on a small set of evaluation regions from chromosomes 21 and 22 that were not used for training. Importantly, for performance reasons these sensitivity and precision calculations do \textit{not} include the full variant detection procedure with multiple overlapping windows and the post-calling classifier, and instead reflect results from a single inference procedure on the target window (accuracy of the full detection procedure is explored below).  We evaluate three model sizes and three sets of training data (Full, Half, and Quarter-sized, see section Training Data above for details).
 
 \begin{center}
 	\begin{tabular}{ lllll }
@@ -108,8 +146,13 @@ We explore the effects of model size and training data size on validation loss a
 	\end{tabular}
 \end{center}
 
+During training, sensitivity and precision as measured on the holdout regions from chromosomes 21 and 22 increase for all variant classes, with returns dwindling after 30-40 epochs of training. Little difference was observed between the "full" and "half" sized training data sets, but both sensitivity and precision were lower for the quarter-sied training set. These results indicate that additional training examples beyond the "half" size ($12e^6$ example regions) offer little improvement in accuracy, and suggest that performance becomes limited by other factors, such as model capacity, inaccuracies in the training data set, or a non-optimal loss function. 
 
-
+\begin{figure}[htp]
+	\includegraphics[scale=0.5]{./trainsize_effect.png}
+	\caption{ Sensitivity and precision curves for the 10M model during training for different training data sizes. Dashed lines are raw values, solid lines indicate rolling average with window size of 5. }
+	\label{fig:trainsize}
+\end{figure}
 
 
 \subsection{Variant detection accuracy}
@@ -204,6 +247,12 @@ For this work we have employed an unmodified transformer model with a very simpl
 
 In his essay `The Bitter Lesson' (Sutton 2019), noted researcher Richard Sutton commented that methods that leverage computation and search are often more successful in the long term when compared to methods that directly model human knowledge. Top performing chess engines, for instance, do not directly contain rules or strategies developed by humans and instead play millions of games to discover a successful approach. In the context of genomic variant discovery, approaches that enable machines to \textit{learn} the correct method for assembling reads are likely to yield better results.  
 
+
+Limitations
+ - Low SNV precision
+ - not using strand bias?
+ - 
+
 \section{Availability}
  
  Source code for is available via git at https://github.com/ARUP-NGS/somewhere
@@ -284,6 +333,9 @@ Sutton, R. "The Bitter Lesson", http://incompleteideas.net/IncIdeas/BitterLesson
 
 \vspace{8pt}
 Vaswani, Ashish, et al. "Attention is all you need." Advances in neural information processing systems 30 (2017).
+
+\vspace{8pt}
+Wang, Zelun, and Jyh-Charn Liu. "Translating math formula images to LaTeX sequences using deep neural networks with sequence-level training." International Journal on Document Analysis and Recognition (IJDAR) 24.1 (2021): 63-75.
 
 \vspace{8pt}
 Wu, Chuhan, et al. "Fastformer: Additive attention can be all you need." arXiv preprint arXiv:2108.09084 (2021).

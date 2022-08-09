@@ -37,88 +37,6 @@ def load_conf(confyaml):
     return conf
 
 
-def pregen_one_sample(dataloader, batch_size, output_dir):
-    """
-    Pregenerate tensors for a single sample
-    """
-    uid = "".join(random.choices(ascii_letters + digits, k=8))
-    src_prefix = "src"
-    tgt_prefix = "tgt"
-    vaf_prefix = "vaftgt"
-    metafile = tempfile.NamedTemporaryFile(
-        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
-    )
-    logger.info(f"Saving tensors to {output_dir}/")
-    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
-        logger.info(f"Saving batch {i} with uid {uid}")
-        for data, prefix in zip([src, tgt, vaftgt],
-                                [src_prefix, tgt_prefix, vaf_prefix]):
-            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
-                torch.save(data, fh)
-        for idx, varinfo in enumerate(varsinfo):
-            meta_str = "\t".join([
-                f"{idx}", f"{uid}-{i}", "\t".join(varinfo), dataloader.csv
-            ]) 
-            print(meta_str, file=metafile)
-        metafile.flush()
-
-    metafile.close()
-    return metafile.name
-
-
-def default_vals_per_class():
-    """
-    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
-    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
-    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not 
-    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
-    """
-    return 0
-
-
-def pregen(config, **kwargs):
-    """
-    Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
-    (this takes a long time)
-    """
-    conf = load_conf(config)
-    batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 100)
-    samples_per_pos = kwargs.get('samples_per_pos', 2)
-    vals_per_class = defaultdict(default_vals_per_class)
-    vals_per_class.update(conf['vals_per_class'])
-
-    output_dir = Path(kwargs.get('dir'))
-    metadata_file = kwargs.get("metadata_file", None)
-    if metadata_file is None:
-        str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
-        metadata_file = f"pregen_{str_time}.csv"
-    processes = kwargs.get('threads', 1)
-
-    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
-    dataloaders = [
-            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
-        for c in conf['data']
-    ]
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
-
-    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "vaf", "label"]
-    with open(metadata_file, "wb") as metafh:
-        metafh.write(("\t".join(meta_headers) + "\n").encode())
-        if processes == 1:
-            for dl in dataloaders:
-                sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
-                util.concat_metafile(sample_metafile, metafh)
-        else:
-            futures = []
-            with ProcessPoolExecutor(max_workers=processes) as executor:
-                for dl in dataloaders:
-                    futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
-            for fut in futures:
-                sample_metafile = fut.result()
-                util.concat_metafile(sample_metafile, metafh)
 
 def default_vals_per_class():
     """
@@ -175,7 +93,7 @@ def pregen(config, **kwargs):
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 100)
-    samples_per_pos = kwargs.get('samples_per_pos', 8)
+    samples_per_pos = kwargs.get('samples_per_pos', 2)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
@@ -297,7 +215,10 @@ def main():
     args = parser.parse_args()
     args.cmdline = " ".join(sys.argv[1:])
     args.cl_args = vars(args).copy()  # command line copy for logging
-    args.func(**vars(args))
+    if len(vars(args)) == 0 or getattr(args, 'func') is None:
+        print(args.usage())
+    else:
+        args.func(**vars(args))
 
 
 if __name__ == "__main__":

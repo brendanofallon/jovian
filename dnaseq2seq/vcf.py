@@ -24,6 +24,11 @@ class Variant:
     def __gt__(self, other):
         return self.pos > other.pos
 
+    @property
+    def key(self):
+        return self.pos, self.ref, self.alt
+
+
 @dataclass
 class Cigar:
     op: str
@@ -45,9 +50,7 @@ class VcfVar:
     depth: int
     phased: bool
     phase_set: int
-    model_haps: list
     haplotype: int
-    step_indexes: list
     window_idx: int
     window_var_count: int
     window_cis_vars: int
@@ -236,13 +239,11 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     :param mindepth: read depth cut off in bam to be labled as LowCov in filter field
     :return: single dict of vars for call window
     """
-    # get bam depths for now, not same as tensor depth
-    depths_hap0 = [var_depth(var, chrom, aln) for var in vars_hap0]
-    depths_hap1 = [var_depth(var, chrom, aln) for var in vars_hap1]
 
     # index vars by (pos, ref, alt) to make dealing with homozygous easier
     vcfvars_hap0 = {}
-    for var, depth in zip(vars_hap0, depths_hap0):
+    for var in vars_hap0:
+        depth = var_depth(var, chrom, aln)
         vcfvars_hap0[var] = VcfVar(
             chrom=chrom,
             pos=var[0] + 1,
@@ -254,9 +255,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             depth=depth,
             phased=False,  # default for now
             phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var in window for now
-            model_haps=[call.hap_model for call in vars_hap0[var]],
             haplotype=0,  # defalt vars_hap0 to haplotype 0 for now
-            step_indexes=[call.step for call in vars_hap0[var]],  # in which steps across window was var detected?
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=len(vars_hap0),
@@ -269,8 +268,10 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             window_offset=[call.window_offset for call in vars_hap0[var]],
             var_index=[call.var_index for call in vars_hap0[var]],
         )
+
     vcfvars_hap1 = {}
-    for var, depth in zip(vars_hap1, depths_hap1):
+    for var in vars_hap1:
+        depth = var_depth(var, chrom, aln)
         vcfvars_hap1[var] = VcfVar(
             chrom=chrom,
             pos=var[0] + 1,
@@ -282,9 +283,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             depth=depth,
             phased=False,  # default value for now
             phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var position in window
-            model_haps=[call.hap_model for call in vars_hap1[var]],
             haplotype=1,  # defalt vars_hap1 to haplotype 1 for now
-            step_indexes=[call.step for call in vars_hap1[var]],  # in which steps across window was var detected?
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=len(vars_hap1),
@@ -297,18 +296,16 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             window_offset=[call.window_offset for call in vars_hap1[var]],
             var_index=[call.var_index for call in vars_hap1[var]],
         )
+
     # check for homozygous vars
     homs = list(set(vcfvars_hap0) & set(vcfvars_hap1))
     for var in homs:
         # modify hap0 var info
         vcfvars_hap0[var].qual = (vcfvars_hap0[var].qual + vcfvars_hap1[var].qual) / 2  # Mean of each call??
         vcfvars_hap0[var].quals = vcfvars_hap0[var].quals + vcfvars_hap1[var].quals  # combine haps
-        vcfvars_hap0[var].model_haps = vcfvars_hap0[var].model_haps + vcfvars_hap1[var].model_haps  # combine haps
-        vcfvars_hap0[var].step_indexes = vcfvars_hap0[var].step_indexes + vcfvars_hap1[var].step_indexes  # combine haps
         vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
         vcfvars_hap0[var].window_trans_vars = 0  # moved all vars to cis
         vcfvars_hap0[var].call_count += vcfvars_hap1[var].call_count  # combine call counts in both haplotypes
-        vcfvars_hap0[var].step_count = len(set(vcfvars_hap0[var].step_indexes))  # combine call counts in both haplotypes
         vcfvars_hap0[var].genotype = (1, 1)
         vcfvars_hap0[var].het = False
         vcfvars_hap0[var].window_offset = sorted(set(vcfvars_hap0[var].window_offset + vcfvars_hap1[var].window_offset))
@@ -409,10 +406,6 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
                                  ('Description', 'Total cis variants called in same window(s)')])
     vcfh.add_meta('INFO', items=[('ID', "QUALS"), ('Number', "."), ('Type', 'Float'),
                                  ('Description', 'QUAL value(s) for calls in window(s)')])
-    vcfh.add_meta('INFO', items=[('ID', "MODEL_HAPS"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'Haplotypes of all model calls of this var')])
-    vcfh.add_meta('INFO', items=[('ID', "STEP_INDEXES"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'Step indexes of all model calls of this var in multi-step detection')])
     vcfh.add_meta('INFO', items=[('ID', "CALL_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Number of model haplotype calls of this var in multi-step detection')])
     vcfh.add_meta('INFO', items=[('ID', "STEP_COUNT"), ('Number', "."), ('Type', 'Integer'),
@@ -462,8 +455,6 @@ def create_vcf_rec(var, vcf_file):
     r.info['WIN_CIS_COUNT'] = var.window_cis_vars
     r.info['WIN_TRANS_COUNT'] = var.window_trans_vars
     r.info['QUALS'] = [float(x) for x in var.quals]
-    r.info['MODEL_HAPS'] = var.model_haps
-    r.info['STEP_INDEXES'] = var.step_indexes
     r.info['CALL_COUNT'] = var.call_count
     r.info['STEP_COUNT'] = var.step_count
     r.info['WIN_OFFSETS'] = [int(x) for x in var.window_offset]
