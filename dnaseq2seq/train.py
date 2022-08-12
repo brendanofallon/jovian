@@ -138,8 +138,8 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         else:
             decomp_time = 0.0
 
-        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float()
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-2])
+        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-2]).to(DEVICE)
         times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
 
         optimizer.zero_grad()
