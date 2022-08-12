@@ -90,25 +90,38 @@ class VarTransformer(nn.Module):
                  embed_dim_factor=40,
                  n_encoder_layers=3,
                  n_decoder_layers=3,
+                 p_dropout=0.1,
                  device='cpu'):
         super().__init__()
         self.device=device
+        self.kmer_dim = 256 # Probably this should be an argument, should be 4^(kmer len)
         self.embed_dim = nhead * embed_dim_factor
         self.fc1_hidden = 12
 
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
         self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
 
-        # self.pos_encoder = PositionalEncoding(self.embed_dim, p_dropout)
+        self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
-        self.transformer = transformer.Transformer(
+        encoder_layers = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
-            num_encoder_layers=n_encoder_layers,
-            num_decoder_layers=n_decoder_layers,
             nhead=nhead,
             dim_feedforward=d_ff,
-            batch_first=True, activation='gelu')
-        self.tokmer = nn.Linear(self.embed_dim, out_dim)
+            dropout=p_dropout,
+            batch_first=True,
+            activation='gelu')
+        self.encoder = nn.TransformerEncoder(encoder_layers, num_layers=n_encoder_layers)
+
+        decoder_layers = nn.TransformerDecoderLayer(
+            d_model=self.kmer_dim,
+            nhead=nhead,
+            dim_feedforward=d_ff,
+            dropout=p_dropout,
+            batch_first=True,
+            activation='gelu')
+        self.decoder0 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+        self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+
         self.elu = torch.nn.ELU()
 
     def forward(self, src, tgt, tgt_mask):
@@ -116,6 +129,9 @@ class VarTransformer(nn.Module):
         src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
-        output = self.transformer(src, tgt, tgt_mask=tgt_mask)
-        kmerd = self.tokmer(output)
-        return kmerd
+        mem = self.encoder(src)
+        mem_proj = self.converter(mem)
+        h0 = self.decoder0(tgt[:, 0, :, :], mem_proj, tgt_mask)
+        h1 = self.decoder1(tgt[:, 1, :, :], mem_proj, tgt_mask)
+
+        return torch.stack((h0, h1), dim=1)

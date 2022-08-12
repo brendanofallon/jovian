@@ -28,7 +28,7 @@ if ENABLE_WANDB:
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
-TGT_KMER_SIZE=4
+TGT_KMER_SIZE = 4
 s2i, i2s = util.make_kmer_lookups(TGT_KMER_SIZE)
 
 class TrainLogger:
@@ -89,14 +89,24 @@ def calc_time_sums(
         train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
     )
 
+def seq_to_onehot_kmers(seq):
+    h = []
+    for i in util.bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
+        t = torch.zeros(4 ** TGT_KMER_SIZE, dtype=torch.float)
+        t[i] = 1
+        h.append(t)
+    return torch.stack(h)
+
+
 def tgt_to_kmers(tgt):
     result = []
+    init_tok = torch.zeros((1, 4 ** TGT_KMER_SIZE), dtype=float)
     for i in range(tgt.shape[0]):
         tgtseq0 = util.tgt_str(tgt[i, 0, :])
         tgtseq1 = util.tgt_str(tgt[i, 1, :])
-        tgtkmers0 = torch.tensor(util.bases_to_kvec(tgtseq0, s2i, TGT_KMER_SIZE), dtype=torch.int64)
-        tgtkmers1 = torch.tensor(util.bases_to_kvec(tgtseq1, s2i, TGT_KMER_SIZE), dtype=torch.int64)
-        t = torch.stack((tgtkmers0, tgtkmers1))
+        h0 = torch.concat((init_tok, seq_to_onehot_kmers(tgtseq0)))
+        h1 = torch.concat((init_tok, seq_to_onehot_kmers(tgtseq1)))
+        t = torch.stack((h0, h1))
         result.append(t)
     return torch.stack(result, dim=0)
 
@@ -112,6 +122,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     :param batch_size:
     :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
     """
+    model.train()
     epoch_loss_sum = None
     prev_epoch_loss = None
     count = 0
@@ -127,8 +138,8 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         else:
             decomp_time = 0.0
 
-        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len])
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-1])
+        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float()
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-2])
         times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
 
         optimizer.zero_grad()
@@ -143,13 +154,14 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
             # Compute losses in both configurations, and use the best
             with torch.no_grad():
                 for b in range(src.shape[0]):
-                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmers[b, :, :].flatten())
-                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmers[b, torch.tensor([1,0]), :].flatten())
+                    tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmer_idx[b, :, :].flatten())
+                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmer_idx[b, torch.tensor([1,0]), :].flatten())
 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :]
 
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_kmer_idx.flatten())
         else:
             raise ValueError("SmithWatterman loss not implemented")
 
@@ -164,18 +176,6 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
             logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f} epoch loss dif: {lossdif:.3f}")
         #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
 
-        with torch.no_grad():
-            width = 200
-            mid = seq_preds.shape[2] // 2
-            midmatch_hap0 = (torch.argmax(seq_preds[:, 0, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq[:, 0, mid-width//2:mid+width//2].flatten()
-                         ).float().mean()
-            midmatch_hap0_sum += midmatch_hap0.item()
-
-            midmatch_hap1 = (torch.argmax(seq_preds[:, 1, mid-width//2:mid+width//2, :].flatten(start_dim=0, end_dim=1),
-                                     dim=1) == tgt_seq[:, 1, mid-width//2:mid+width//2].flatten()
-                         ).float().mean()
-            midmatch_hap1_sum += midmatch_hap1.item()
 
         times["midmatch"] = datetime.now()
 
@@ -194,7 +194,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         if np.isnan(epoch_loss_sum):
             logger.warning(f"Loss is NAN!!")
         if batch % 10 == 0:
-            logger.info(f"Batch {batch} : hap0 / 1 acc: {midmatch_hap0.item():.3f} / {midmatch_hap1.item():.3f} hap1loss: {loss.item():.3f}")
+            logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
             
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
@@ -202,14 +202,13 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         del src
     torch.cuda.empty_cache()
     logger.info(f"Trained {batch+1} batches in total for epoch")
-    return epoch_loss_sum, midmatch_hap0_sum / batch, midmatch_hap1_sum / batch, epoch_times
+    return epoch_loss_sum, epoch_times
 
 
 def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
     # Compute val accuracy
-    mid = seq_preds.shape[1] // 2
-    midmatch = (torch.argmax(seq_preds[:, mid - width // 2:mid + width // 2, :].flatten(start_dim=0, end_dim=1),
-                             dim=1) == tgt[:, mid - width // 2:mid + width // 2].flatten()
+    match = (torch.argmax(seq_preds[:, :, :].flatten(start_dim=0, end_dim=1),
+                             dim=1) == tgt[:, :].flatten()
                 ).float().mean()
 
     var_count = 0
@@ -222,15 +221,28 @@ def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
             'mnv': defaultdict(int),
         }
     for b in range(src.shape[0]):
-        predstr = util.readstr(seq_preds[b, :, :])
-        tgtstr = util.tgt_str(tgt[b, :])
+        predstr = util.kmer_preds_to_seq(seq_preds[b, :, :], i2s)
+        tgtstr = util.kmer_idx_to_str(tgt[b, :], i2s)
         var_count += len(list(vcf.aln_to_vars(tgtstr, predstr)))
         batch_size += 1
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
         result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, :], midwidth=300, counts=result_totals)
 
-    return midmatch, var_count, result_totals
+    return match, var_count, result_totals
+
+
+def predict_sequence(src, model, n_output_toks):
+    predictions = torch.zeros((src.shape[0], 2, 1, 4 ** TGT_KMER_SIZE))
+    for i in range(n_output_toks):
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2])
+        logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
+        new_preds = model(src, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
+        logging.info(f"new preds shape:  {new_preds.shape}")
+        predictions = torch.concat((predictions, new_preds), dim=2)
+    return predictions
+
+
 
 
 def calc_val_accuracy(loader, model, criterion):
@@ -242,7 +254,8 @@ def calc_val_accuracy(loader, model, criterion):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
-
+    truncate_seq_len = 148
+    model.eval()
     with torch.no_grad():
         match_sum0 = 0
         match_sum1 = 0
@@ -268,40 +281,29 @@ def calc_val_accuracy(loader, model, criterion):
 
             total_batches += 1
             tot_samples += src.shape[0]
-            seq_preds = model(src)
+            seq_preds = predict_sequence(src, model, n_output_toks=37) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
 
+            tgt_kmers = tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float()
+            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
             if type(criterion) == nn.CrossEntropyLoss:
                 # Compute losses in both configurations, and use the best?
                 # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
 
                 for b in range(src.shape[0]):
                     loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
-                                      tgt[b, :, :].flatten())
+                                      tgt_kmer_idx[b, :, :].flatten())
                     loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
-                                      tgt[b, torch.tensor([1, 0]), :].flatten())
+                                      tgt_kmer_idx[b, torch.tensor([1, 0]), :].flatten())
 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
-                loss_tot += criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt.flatten()).item()
+                loss_tot += criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_kmer_idx.flatten()).item()
             else:
-                idx = torch.stack([torch.arange(start=0, end=seq_preds.shape[0] * seq_preds.shape[1], step=2),
-                                   torch.arange(start=1, end=seq_preds.shape[0] * seq_preds.shape[1],
-                                                step=2)]).transpose(0, 1)
-
-                loss1 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
-                                  tgt.flatten(start_dim=0, end_dim=1))
-                loss2 = criterion(seq_preds.flatten(start_dim=0, end_dim=1),
-                                  tgt[:, torch.tensor([1, 0]), :].flatten(start_dim=0, end_dim=1))
-                pairsum1 = loss1[idx].sum(dim=-1)
-                pairsum2 = loss2[idx].sum(dim=-1)
-
-                for b in range(src.shape[0]):
-                    if pairsum2[b] < pairsum1[b]:
-                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :, :]
+                raise ValueError("Only cross entropy supported now")
 
 
-            midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt[:, 0, :], result_totals0)
-            midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt[:, 1, :], result_totals1)
+            midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt_kmer_idx[:, 0, :], result_totals0)
+            midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt_kmer_idx[:, 1, :], result_totals1)
             match_sum0 += midmatch0
             match_sum1 += midmatch1
 
@@ -382,7 +384,7 @@ def train_epochs(epochs,
 
 
     trainlogger = TrainLogger(trainlogpath, [
-            "epoch", "trainingloss", "train_accuracy", "val_accuracy",
+            "epoch", "trainingloss", "val_accuracy",
             "mean_var_count", "ppa_dels", "ppa_ins", "ppa_snv",
             "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
             "batch_time_mean", "decompress_frac", "train_frac", "io_frac",
@@ -443,11 +445,11 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, train_acc0, train_acc1, epoch_times = train_epoch(model,
-                                                                 optimizer,
-                                                                 criterion,
-                                                                 dataloader,
-                                                                 batch_size=batch_size)
+            loss, epoch_times = train_epoch(model,
+                                             optimizer,
+                                             criterion,
+                                             dataloader,
+                                             batch_size=batch_size)
 
             elapsed = datetime.now() - starttime
 
@@ -470,7 +472,7 @@ def train_epochs(epochs,
                 ppv_ins = 0
                 ppv_snv = 0
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} train acc: {train_acc0:.4f} / {train_acc1:.4f}, val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
 
             if epoch_times.get("batch_count", 0) > 0:
@@ -503,8 +505,6 @@ def train_epochs(epochs,
                     "epoch": epoch,
                     "trainingloss": loss,
                     "validation_loss": val_loss,
-                    "train_acc_hap0": train_acc0,
-                    "train_acc_hap1": train_acc1,
                     "accuracy/val_acc_hap0": acc0,
                     "accuracy/val_acc_hap1": acc1,
                     "accuracy/var_count0": var_count0,
@@ -533,7 +533,6 @@ def train_epochs(epochs,
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
-                "train_accuracy": train_acc0,
                 "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
                 "mean_var_count": var_count0,
                 "ppa_dels": ppa_dels,

@@ -236,6 +236,18 @@ def make_kmer_lookups(size):
     return str2index, index2str
 
 
+def kmer_preds_to_seq(preds, i2s):
+    """
+    Return a sequence of bases from the given predictions
+    """
+    m = torch.argmax(preds, dim=-1).detach().numpy()
+    return kmer_idx_to_str(m, i2s)
+
+
+def kmer_idx_to_str(kmer_idx, i2s):
+    return ''.join(i2s[i] for i in kmer_idx)
+
+
 def bases_to_kvec(bases, s2i, kmersize=4):
     """ Return a list of indices for nonoverlapping kmers read from the base """
     indices = []
