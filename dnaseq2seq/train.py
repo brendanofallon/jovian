@@ -14,11 +14,11 @@ from torch import nn
 
 logger = logging.getLogger(__name__)
 
-from dnaseq2seq import vcf
-from dnaseq2seq import loader
-from dnaseq2seq import util
-from dnaseq2seq.model import VarTransformer
-from dnaseq2seq.swloss import SmithWatermanLoss
+import vcf
+import loader
+import util
+from model import VarTransformer
+from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 

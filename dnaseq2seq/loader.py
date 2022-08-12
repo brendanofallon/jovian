@@ -21,14 +21,14 @@ import torch
 import torch.multiprocessing as mp
 import pysam
 
-from dnaseq2seq.bam import (
+from bam import (
     target_string_to_tensor,
     encode_with_ref,
     encode_and_downsample,
     ensure_dim,
 )
-from dnaseq2seq import util
-from dnaseq2seq import phaser
+import util
+import phaser
 
 
 class ReadLoader:
