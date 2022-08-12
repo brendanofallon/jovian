@@ -335,9 +335,9 @@ def train_epochs(epochs,
 ):
     attention_heads = 4
     dim_feedforward = 512
-    encoder_layers = 3
-    decoder_layers = 3
-    embed_dim_factor = 125
+    encoder_layers = 4
+    decoder_layers = 2
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=256, # Number of possible kmers
