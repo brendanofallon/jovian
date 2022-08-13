@@ -121,7 +121,7 @@ class VarTransformer(nn.Module):
             activation='gelu')
         self.decoder0 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
         self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
-
+        self.softmax = nn.LogSoftmax(dim=-1)
         self.elu = torch.nn.ELU()
 
     def forward(self, src, tgt, tgt_mask):
@@ -133,5 +133,6 @@ class VarTransformer(nn.Module):
         mem_proj = self.converter(mem)
         h0 = self.decoder0(tgt[:, 0, :, :], mem_proj, tgt_mask)
         h1 = self.decoder1(tgt[:, 1, :, :], mem_proj, tgt_mask)
-
+        h0 = self.softmax(h0)
+        h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)

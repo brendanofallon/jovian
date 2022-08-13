@@ -154,7 +154,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         seq_preds = model(src, tgt_kmers_input, tgt_mask)
         times["forward_pass"] = datetime.now()
 
-        if type(criterion) == nn.CrossEntropyLoss:
+        if type(criterion) == nn.NLLLoss:
             # Compute losses in both configurations, and use the best
             with torch.no_grad():
                 for b in range(src.shape[0]):
@@ -288,7 +288,7 @@ def calc_val_accuracy(loader, model, criterion):
 
             tgt_kmers = tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float()
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
-            if type(criterion) == nn.CrossEntropyLoss:
+            if type(criterion) == nn.NLLLoss:
                 # Compute losses in both configurations, and use the best?
                 # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
 
@@ -364,8 +364,8 @@ def train_epochs(epochs,
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
 
     if lossfunc == 'ce':
-        logger.info("Creating CrossEntropy loss function")
-        criterion = nn.CrossEntropyLoss()
+        logger.info("Creating N.L.L. Loss loss function")
+        criterion = nn.NLLLoss()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     elif lossfunc == 'sw':
         gap_open_penalty = -5
