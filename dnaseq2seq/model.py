@@ -103,6 +103,8 @@ class VarTransformer(nn.Module):
 
         self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
+        self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim).to(self.device)
+
         encoder_layers = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
             nhead=nhead,
@@ -124,15 +126,26 @@ class VarTransformer(nn.Module):
         self.softmax = nn.LogSoftmax(dim=-1)
         self.elu = torch.nn.ELU()
 
-    def forward(self, src, tgt, tgt_mask):
+    def encode(self, src):
         src = self.elu(self.fc1(src))
-        src = self.pos_encoder(src) # For 2D encoding we have to do this before flattening, right?
+        src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
         mem = self.encoder(src)
         mem_proj = self.converter(mem)
-        h0 = self.decoder0(tgt[:, 0, :, :], mem_proj, tgt_mask)
-        h1 = self.decoder1(tgt[:, 1, :, :], mem_proj, tgt_mask)
+        return mem_proj
+
+    def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
+        h0 = self.decoder0(tgt0, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        h1 = self.decoder1(tgt1, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h0 = self.softmax(h0)
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)
+
+    def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None):
+        mem = self.encode(src)
+        result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        return result
+

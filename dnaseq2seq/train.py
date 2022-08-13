@@ -89,6 +89,26 @@ def calc_time_sums(
         train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
     )
 
+def compute_twohap_loss(preds, tgt, criterion):
+    """
+    Iterate over every item in the batch, and compute the loss in both configurations (under torch.no_grad())
+    then swap haplotypes (dimension index 1) in the predictions if that leads to a lower loss
+    Finally, re-compute loss with the new configuration for all samples and return it, storing gradients this time
+    """
+    # Compute losses in both configurations, and use the best
+    with torch.no_grad():
+        for b in range(preds.shape[0]):
+            loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                              tgt[b, :, :].flatten())
+            loss2 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                              tgt[b, torch.tensor([1, 0]), :].flatten())
+
+            if loss2 < loss1:
+                preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
+
+    return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
+
+
 def seq_to_onehot_kmers(seq):
     h = []
     for i in util.bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
@@ -155,16 +175,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         times["forward_pass"] = datetime.now()
 
         if type(criterion) == nn.NLLLoss:
-            # Compute losses in both configurations, and use the best
-            with torch.no_grad():
-                for b in range(src.shape[0]):
-                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_expected[b, :, :].flatten())
-                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_expected[b, torch.tensor([1,0]), :].flatten())
-
-                    if loss2 < loss1:
-                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :]
-
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_expected.flatten())
+            loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
         else:
             raise ValueError("SmithWatterman loss not implemented")
 
@@ -236,14 +247,16 @@ def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
 
 
 def predict_sequence(src, model, n_output_toks):
-    predictions = torch.zeros((src.shape[0], 2, 1, 4 ** TGT_KMER_SIZE))
-    for i in range(n_output_toks):
+    predictions = torch.zeros((src.shape[0], 2, 1, 4 ** TGT_KMER_SIZE)).to(DEVICE)
+    mem = model.encode(src)
+    for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2])
+        tgt_key_padding_mask = torch.zeros((src.shape[0], predictions.shape[-2]))
         logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
-        new_preds = model(src, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
+        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         logging.info(f"new preds shape:  {new_preds.shape}")
         predictions = torch.concat((predictions, new_preds), dim=2)
-    return predictions
+    return predictions[:, :, 1:, :]
 
 
 
@@ -281,26 +294,14 @@ def calc_val_accuracy(loader, model, criterion):
         total_batches = 0
         loss_tot = 0
         for src, tgt, vaf, *_ in loader.iter_once(64):
-
             total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = predict_sequence(src, model, n_output_toks=37) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
-
-            tgt_kmers = tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float()
+            s = util.kmer_preds_to_seq(seq_preds[0, 0, :, :], i2s)
+            tgt_kmers = tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
             if type(criterion) == nn.NLLLoss:
-                # Compute losses in both configurations, and use the best?
-                # loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_seq.flatten())
-
-                for b in range(src.shape[0]):
-                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
-                                      tgt_kmer_idx[b, :, :].flatten())
-                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
-                                      tgt_kmer_idx[b, torch.tensor([1, 0]), :].flatten())
-
-                    if loss2 < loss1:
-                        seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1, 0]), :]
-                loss_tot += criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_kmer_idx.flatten()).item()
+                loss_tot = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             else:
                 raise ValueError("Only cross entropy supported now")
 
