@@ -14,11 +14,11 @@ from torch import nn
 
 logger = logging.getLogger(__name__)
 
-from dnaseq2seq import vcf
-from dnaseq2seq import loader
-from dnaseq2seq import util
-from dnaseq2seq.model import VarTransformer
-from dnaseq2seq.swloss import SmithWatermanLoss
+import vcf
+import loader
+import util
+from model import VarTransformer
+from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -138,10 +138,12 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         else:
             decomp_time = 0.0
 
-        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float()
+
+        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+        tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-2])
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
         times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
 
         optimizer.zero_grad()
@@ -149,14 +151,13 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
 
         # Uh-oh - tgt must have same feature dimension as src - and in any case the default implementation cant handle
         # two output sequences :(
-        seq_preds = model(src, tgt_kmers, tgt_mask)
+        seq_preds = model(src, tgt_kmers_input, tgt_mask)
         times["forward_pass"] = datetime.now()
 
         if type(criterion) == nn.CrossEntropyLoss:
             # Compute losses in both configurations, and use the best
             with torch.no_grad():
                 for b in range(src.shape[0]):
-
                     loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_expected[b, :, :].flatten())
                     loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_expected[b, torch.tensor([1,0]), :].flatten())
 
@@ -337,9 +338,9 @@ def train_epochs(epochs,
 ):
     attention_heads = 4
     dim_feedforward = 512
-    encoder_layers = 3
-    decoder_layers = 3
-    embed_dim_factor = 125
+    encoder_layers = 4
+    decoder_layers = 2
+    embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             out_dim=256, # Number of possible kmers

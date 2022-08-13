@@ -16,10 +16,10 @@ from concurrent.futures.process import ProcessPoolExecutor
 import argparse
 import yaml
 
-from dnaseq2seq import util
-from dnaseq2seq import loader
-from dnaseq2seq.train import train
-from dnaseq2seq.call import call
+import util
+import loader
+from train import train
+from call import call
 
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',

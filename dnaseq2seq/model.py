@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 import math
 
-from dnaseq2seq import transformer
+#from dnaseq2seq import transformer
 
 logger = logging.getLogger(__name__)
 
