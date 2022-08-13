@@ -139,6 +139,8 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
             decomp_time = 0.0
 
         tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float()
+        tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+        tgt_expected = tgt_kmer_idx[:, :, 1:]
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers.shape[-2])
         times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
 
@@ -154,14 +156,14 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
             # Compute losses in both configurations, and use the best
             with torch.no_grad():
                 for b in range(src.shape[0]):
-                    tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
-                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmer_idx[b, :, :].flatten())
-                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_kmer_idx[b, torch.tensor([1,0]), :].flatten())
+
+                    loss1 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_expected[b, :, :].flatten())
+                    loss2 = criterion(seq_preds[b, :, :, :].flatten(start_dim=0, end_dim=1), tgt_expected[b, torch.tensor([1,0]), :].flatten())
 
                     if loss2 < loss1:
                         seq_preds[b, :, :, :] = seq_preds[b, torch.tensor([1,0]), :]
 
-            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_kmer_idx.flatten())
+            loss = criterion(seq_preds.flatten(start_dim=0, end_dim=2), tgt_expected.flatten())
         else:
             raise ValueError("SmithWatterman loss not implemented")
 
