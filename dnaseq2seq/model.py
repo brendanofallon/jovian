@@ -59,15 +59,18 @@ class PositionalEncoding2D(nn.Module):
 
 class PositionalEncoding(nn.Module):
 
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500, batch_first=False):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
-
+        self.batch_first = batch_first
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_len, 1, d_model)
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
+        if self.batch_first:
+            pe = pe.transpose(0,1)
+
         self.register_buffer('pe', pe)
 
     def forward(self, x):
@@ -75,7 +78,10 @@ class PositionalEncoding(nn.Module):
         Args:
             x: Tensor, shape [seq_len, batch_size, embedding_dim]
         """
-        x = x + self.pe[:x.size(0)]
+        if self.batch_first:
+            x = x + self.pe[:, 0:x.size(1), :]
+        else:
+            x = x + self.pe[0:x.size(0), :, :]
         return self.dropout(x)
 
 
@@ -103,8 +109,7 @@ class VarTransformer(nn.Module):
 
         self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
-        self.tgt_pos_encoder0 = PositionalEncoding(self.kmer_dim).to(self.device)
-        self.tgt_pos_encoder1 = PositionalEncoding(self.kmer_dim).to(self.device)
+        self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim, batch_first=True, max_len=500).to(self.device)
 
         encoder_layers = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
@@ -137,8 +142,8 @@ class VarTransformer(nn.Module):
         return mem_proj
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        tgt0 = self.tgt_pos_encoder0(tgt[:, 0, :, :])
-        tgt1 = self.tgt_pos_encoder1(tgt[:, 1, :, :])
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
         h0 = self.decoder0(tgt0, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h1 = self.decoder1(tgt1, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h0 = self.softmax(h0)
