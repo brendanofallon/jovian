@@ -67,7 +67,10 @@ class PositionalEncoding(nn.Module):
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_len, 1, d_model)
         pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        if div_term.shape[0] % 2:
+            pe[:, 0, 1::2] = torch.cos(position * div_term)[:, 0:-1]
+        else:
+            pe[:, 0, 1::2] = torch.cos(position * div_term)
         if self.batch_first:
             pe = pe.transpose(0,1)
 
@@ -90,7 +93,7 @@ class VarTransformer(nn.Module):
     def __init__(self,
                  read_depth,
                  feature_count,
-                 out_dim,
+                 kmer_dim,
                  nhead=6,
                  d_ff=1024,
                  embed_dim_factor=40,
@@ -100,7 +103,7 @@ class VarTransformer(nn.Module):
                  device='cpu'):
         super().__init__()
         self.device=device
-        self.kmer_dim = 256 # Probably this should be an argument, should be 4^(kmer len)
+        self.kmer_dim = kmer_dim
         self.embed_dim = nhead * embed_dim_factor
         self.fc1_hidden = 12
 
