@@ -103,7 +103,8 @@ class VarTransformer(nn.Module):
 
         self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
-        self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim).to(self.device)
+        self.tgt_pos_encoder0 = PositionalEncoding(self.kmer_dim).to(self.device)
+        self.tgt_pos_encoder1 = PositionalEncoding(self.kmer_dim).to(self.device)
 
         encoder_layers = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
@@ -136,8 +137,8 @@ class VarTransformer(nn.Module):
         return mem_proj
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
+        tgt0 = self.tgt_pos_encoder0(tgt[:, 0, :, :])
+        tgt1 = self.tgt_pos_encoder1(tgt[:, 1, :, :])
         h0 = self.decoder0(tgt0, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h1 = self.decoder1(tgt1, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h0 = self.softmax(h0)
