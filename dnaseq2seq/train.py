@@ -30,6 +30,11 @@ DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_availa
 
 TGT_KMER_SIZE = 4
 s2i, i2s = util.make_kmer_lookups(TGT_KMER_SIZE)
+KMER_COUNT = 4 ** TGT_KMER_SIZE
+FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
+START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
+START_TOKEN[:, FEATURE_DIM-1] = 1
+
 
 class TrainLogger:
     """ Simple utility for writing various items to a log file CSV """
@@ -112,7 +117,7 @@ def compute_twohap_loss(preds, tgt, criterion):
 def seq_to_onehot_kmers(seq):
     h = []
     for i in util.bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
-        t = torch.zeros(4 ** TGT_KMER_SIZE, dtype=torch.float)
+        t = torch.zeros(FEATURE_DIM, dtype=torch.float)
         t[i] = 1
         h.append(t)
     return torch.stack(h)
@@ -120,12 +125,11 @@ def seq_to_onehot_kmers(seq):
 
 def tgt_to_kmers(tgt):
     result = []
-    init_tok = torch.zeros((1, 4 ** TGT_KMER_SIZE), dtype=float)
     for i in range(tgt.shape[0]):
         tgtseq0 = util.tgt_str(tgt[i, 0, :])
         tgtseq1 = util.tgt_str(tgt[i, 1, :])
-        h0 = torch.concat((init_tok, seq_to_onehot_kmers(tgtseq0)))
-        h1 = torch.concat((init_tok, seq_to_onehot_kmers(tgtseq1)))
+        h0 = torch.concat((START_TOKEN, seq_to_onehot_kmers(tgtseq0)))
+        h1 = torch.concat((START_TOKEN, seq_to_onehot_kmers(tgtseq1)))
         t = torch.stack((h0, h1))
         result.append(t)
     return torch.stack(result, dim=0)
@@ -146,8 +150,6 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     epoch_loss_sum = None
     prev_epoch_loss = None
     count = 0
-    midmatch_hap0_sum = 0
-    midmatch_hap1_sum = 0
     # init time usage to zero
     epoch_times = {}
     start_time = datetime.now()
@@ -169,8 +171,6 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
 
-        # Uh-oh - tgt must have same feature dimension as src - and in any case the default implementation cant handle
-        # two output sequences :(
         seq_preds = model(src, tgt_kmers_input, tgt_mask)
         times["forward_pass"] = datetime.now()
 
@@ -235,25 +235,25 @@ def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
             'mnv': defaultdict(int),
         }
     for b in range(src.shape[0]):
-        predstr = util.kmer_preds_to_seq(seq_preds[b, :, :], i2s)
-        tgtstr = util.kmer_idx_to_str(tgt[b, :], i2s)
+        predstr = util.kmer_preds_to_seq(seq_preds[b, :, 0:KMER_COUNT], i2s)
+        tgtstr = util.kmer_idx_to_str(tgt[b, 1:], i2s)
         var_count += len(list(vcf.aln_to_vars(tgtstr, predstr)))
         batch_size += 1
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
-        result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, :], midwidth=300, counts=result_totals)
+        result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, 0:KMER_COUNT], midwidth=300, counts=result_totals)
 
     return match, var_count, result_totals
 
 
 def predict_sequence(src, model, n_output_toks):
-    predictions = torch.zeros((src.shape[0], 2, 1, 4 ** TGT_KMER_SIZE)).to(DEVICE)
+    predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(DEVICE)
     mem = model.encode(src)
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2])
         tgt_key_padding_mask = torch.zeros((src.shape[0], predictions.shape[-2]))
         logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
-        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
+        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)[:, :, -1:, :]
         logging.info(f"new preds shape:  {new_preds.shape}")
         predictions = torch.concat((predictions, new_preds), dim=2)
     return predictions[:, :, 1:, :]
@@ -344,7 +344,7 @@ def train_epochs(epochs,
     embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
-                            out_dim=256, # Number of possible kmers
+                            kmer_dim=FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
                             n_decoder_layers=decoder_layers,
                             embed_dim_factor=embed_dim_factor,
