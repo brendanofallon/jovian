@@ -153,13 +153,13 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     # init time usage to zero
     epoch_times = {}
     start_time = datetime.now()
+
     truncate_tgt_len = 148
     for batch, (src, tgt_seq, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
         if log_info:
             decomp_time = log_info.get("decomp_time", 0.0)
         else:
             decomp_time = 0.0
-
 
         tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
@@ -170,14 +170,11 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
 
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
-
         seq_preds = model(src, tgt_kmers_input, tgt_mask)
         times["forward_pass"] = datetime.now()
 
-        if type(criterion) == nn.NLLLoss:
-            loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
-        else:
-            raise ValueError("SmithWatterman loss not implemented")
+        loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+
 
         times["loss"] = datetime.now()
 
@@ -188,11 +185,8 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
             else:
                 lossdif = 0
             logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f} epoch loss dif: {lossdif:.3f}")
-        #print(f"src: {src.shape} preds: {seq_preds.shape} tgt: {tgt_seq.shape}")
-
 
         times["midmatch"] = datetime.now()
-
         loss.backward()
         times["backward_pass"] = datetime.now()
 
@@ -213,9 +207,10 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
         start_time = datetime.now()  # reset timer for next batch
-        del src
-    torch.cuda.empty_cache()
+        # del src
+    # torch.cuda.empty_cache()
     logger.info(f"Trained {batch+1} batches in total for epoch")
+
     return epoch_loss_sum, epoch_times
 
 
@@ -251,12 +246,11 @@ def predict_sequence(src, model, n_output_toks):
     mem = model.encode(src)
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2])
-        tgt_key_padding_mask = torch.zeros((src.shape[0], predictions.shape[-2]))
-        logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
-        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)[:, :, -1:, :]
+        # tgt_key_padding_mask = torch.zeros((src.shape[0], predictions.shape[-2]))
+        # logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
+        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         tophit = torch.argmax(new_preds, dim=-1)
         p = torch.nn.functional.one_hot(tophit, num_classes=260)
-        logging.info(f"new preds shape:  {new_preds.shape}")
         predictions = torch.concat((predictions, p), dim=2)
     return predictions[:, :, 1:, :]
 
@@ -272,6 +266,7 @@ def calc_val_accuracy(loader, model, criterion):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
+
     truncate_seq_len = 148
     model.eval()
     with torch.no_grad():
@@ -295,13 +290,15 @@ def calc_val_accuracy(loader, model, criterion):
         tot_samples = 0
         total_batches = 0
         loss_tot = 0
+
         for src, tgt, vaf, *_ in loader.iter_once(64):
             total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = predict_sequence(src, model, n_output_toks=37) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
-            s = util.kmer_preds_to_seq(seq_preds[0, 0, :, :], i2s)
+
             tgt_kmers = tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
-            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
+            seq_preds = seq_preds[:, :, 0:tgt_kmer_idx.shape[-1], :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
             if type(criterion) == nn.NLLLoss:
                 loss_tot = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             else:
@@ -412,6 +409,7 @@ def train_epochs(epochs,
             attn_heads=attention_heads,
             transformer_dim=dim_feedforward,
             encoder_layers=encoder_layers,
+            decoder_layers=decoder_layers,
             git_branch=git_repo.head.name,
             git_target=git_repo.head.target,
             model_param_count=model_tot_params,
