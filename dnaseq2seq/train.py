@@ -254,8 +254,10 @@ def predict_sequence(src, model, n_output_toks):
         tgt_key_padding_mask = torch.zeros((src.shape[0], predictions.shape[-2]))
         logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)[:, :, -1:, :]
+        tophit = torch.argmax(new_preds, dim=-1)
+        p = torch.nn.functional.one_hot(tophit, num_classes=260)
         logging.info(f"new preds shape:  {new_preds.shape}")
-        predictions = torch.concat((predictions, new_preds), dim=2)
+        predictions = torch.concat((predictions, p), dim=2)
     return predictions[:, :, 1:, :]
 
 
@@ -572,17 +574,9 @@ def train_epochs(epochs,
         pass
 
     if model_dest is not None:
-        modelparts = str(model_dest).rsplit(".", maxsplit=1)
         logger.info(f"Saving model state dict to {model_dest}")
         m = model.module if isinstance(model, nn.DataParallel) else model
         torch.save(m.to('cpu').state_dict(), model_dest)
-        scripted_filename = modelparts[0] + f"_final.pt"
-        logger.info(f"Saving scripted model to {scripted_filename}")
-        try:
-            model_scripted = torch.jit.script(m)
-            model_scripted.save(scripted_filename)
-        except Exception as ex:
-            logger.warn(f"Error saving scripted module!\n{ex}\nContinuing on with saving scripted version...")
 
 
 def load_train_conf(confyaml):
