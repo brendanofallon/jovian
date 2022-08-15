@@ -1,11 +1,16 @@
 #!/bin/bash
 
-#SBATCH --account=notchpeak-gpu
-#SBATCH --partition=notchpeak-gpu
-#SBATCH --time=1-0
+##SBATCH --account=notchpeak-gpu
+##SBATCH --partition=notchpeak-gpu
+
+#SBATCH --account=arup-gpu-np
+#SBATCH --partition=arup-gpu-np
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=3-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a100|3090"
+#SBATCH --gres=gpu:1 --constraint="a6000|3090|a100"
 
 
 
@@ -15,7 +20,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="25m"
+GIT_BRANCH="decoder"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -27,16 +32,18 @@ CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_9feats_chr20_21only/
 VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/u6004674/dnaseq2seq/pregen_all_chr_except_20_21/
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_w150_nochr21or22_bigger
-
-
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_w150_nochr21or22_bigger
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_w150_nochr21or22_big
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_huge
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge_lc_bigvars_fpfns
 
 LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_25m_w150_bigger_cont"
-RUN_NOTES="150 width, 'bigger' training data, continued"
+RUN_NAME="wgs_decoder_hh_test"
+RUN_NOTES="A test of the decoder model"
 
 set -x
 
@@ -51,7 +58,7 @@ git clone $REPO_BASE
 
 cd dnaseq2seq
 git checkout $GIT_BRANCH
-ds2s=$(readlink -f main.py)
+ds2s=$(readlink -f dnaseq2seq/main.py)
 COMMIT=$(git rev-parse HEAD)
 
 
@@ -65,14 +72,16 @@ $PYTHON $ds2s train \
     -c $CONF \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
-    -n 100 \
+    -n 25 \
+    --batch-size 512 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    --threads 1 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/wgs_25m_w150_bigger/wgs_25m_w150_bigger_epoch2.model \
+    --threads 4 \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
 echo "Script is exiting"
+
+
