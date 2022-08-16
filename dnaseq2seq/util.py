@@ -20,6 +20,31 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+
+def make_kmer_lookups(size):
+    """
+    Generate forward and reverse lookups for kmers
+    str2index returns the index int for a given kmer,
+    index2str returns the kmer string for a given index
+    """
+    bases = "ACGT"
+    baselist = [bases] * size
+    str2index = {}
+    index2str = [None] * (len(bases) ** size)
+    for i, combo in enumerate(itertools.product(*baselist)):
+        s = ''.join(combo)
+        str2index[s] = i
+        index2str[i] = s
+    return str2index, index2str
+
+TGT_KMER_SIZE = 4
+s2i, i2s = make_kmer_lookups(TGT_KMER_SIZE)
+KMER_COUNT = 4 ** TGT_KMER_SIZE
+FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
+START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
+START_TOKEN[:, FEATURE_DIM-1] = 1
+
+
 def var_type(variant):
     if len(variant.ref) == 1 and len(variant.alt) == 1:
         return 'snv'
@@ -219,21 +244,6 @@ def dedup_vcf(input_vcf, dest):
             ofh.write(str(clump[0]))
 
 
-def make_kmer_lookups(size):
-    """
-    Generate forward and reverse lookups for kmers
-    str2index returns the index int for a given kmer,
-    index2str returns the kmer string for a given index
-    """
-    bases = "ACGT"
-    baselist = [bases] * size
-    str2index = {}
-    index2str = [None] * (len(bases) ** size)
-    for i, combo in enumerate(itertools.product(*baselist)):
-        s = ''.join(combo)
-        str2index[s] = i
-        index2str[i] = s
-    return str2index, index2str
 
 
 def kmer_preds_to_seq(preds, i2s):
@@ -255,3 +265,24 @@ def bases_to_kvec(bases, s2i, kmersize=4):
         kmer = bases[i:i+kmersize]
         indices.append(s2i[kmer])
     return indices
+
+
+def seq_to_onehot_kmers(seq):
+    h = []
+    for i in bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
+        t = torch.zeros(FEATURE_DIM, dtype=torch.float)
+        t[i] = 1
+        h.append(t)
+    return torch.stack(h)
+
+
+def tgt_to_kmers(tgt):
+    result = []
+    for i in range(tgt.shape[0]):
+        tgtseq0 = tgt_str(tgt[i, 0, :])
+        tgtseq1 = tgt_str(tgt[i, 1, :])
+        h0 = torch.concat((START_TOKEN, seq_to_onehot_kmers(tgtseq0)))
+        h1 = torch.concat((START_TOKEN, seq_to_onehot_kmers(tgtseq1)))
+        t = torch.stack((h0, h1))
+        result.append(t)
+    return torch.stack(result, dim=0)
