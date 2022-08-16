@@ -245,9 +245,7 @@ def predict_sequence(src, model, n_output_toks):
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(DEVICE)
     mem = model.encode(src)
     for i in range(n_output_toks + 1):
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2])
-        # tgt_key_padding_mask = torch.zeros((src.shape[0], predictions.shape[-2]))
-        # logging.info(f"Predicting output sequence {i} of {n_output_toks}, predictions shape: {predictions.shape}")
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(DEVICE)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         tophit = torch.argmax(new_preds, dim=-1)
         p = torch.nn.functional.one_hot(tophit, num_classes=260)
