@@ -28,13 +28,6 @@ if ENABLE_WANDB:
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
-TGT_KMER_SIZE = 4
-s2i, i2s = util.make_kmer_lookups(TGT_KMER_SIZE)
-KMER_COUNT = 4 ** TGT_KMER_SIZE
-FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
-START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
-START_TOKEN[:, FEATURE_DIM-1] = 1
-
 
 class TrainLogger:
     """ Simple utility for writing various items to a log file CSV """
@@ -114,27 +107,6 @@ def compute_twohap_loss(preds, tgt, criterion):
     return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
 
 
-def seq_to_onehot_kmers(seq):
-    h = []
-    for i in util.bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
-        t = torch.zeros(FEATURE_DIM, dtype=torch.float)
-        t[i] = 1
-        h.append(t)
-    return torch.stack(h)
-
-
-def tgt_to_kmers(tgt):
-    result = []
-    for i in range(tgt.shape[0]):
-        tgtseq0 = util.tgt_str(tgt[i, 0, :])
-        tgtseq1 = util.tgt_str(tgt[i, 1, :])
-        h0 = torch.concat((START_TOKEN, seq_to_onehot_kmers(tgtseq0)))
-        h1 = torch.concat((START_TOKEN, seq_to_onehot_kmers(tgtseq1)))
-        t = torch.stack((h0, h1))
-        result.append(t)
-    return torch.stack(result, dim=0)
-
-
 
 def train_epoch(model, optimizer, criterion, loader, batch_size):
     """
@@ -155,13 +127,13 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     start_time = datetime.now()
 
     truncate_tgt_len = 148
-    for batch, (src, tgt_seq, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
+    for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
         if log_info:
             decomp_time = log_info.get("decomp_time", 0.0)
         else:
             decomp_time = 0.0
 
-        tgt_kmers = tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
+        #tgt_kmers = util.tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
@@ -230,19 +202,19 @@ def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
             'mnv': defaultdict(int),
         }
     for b in range(src.shape[0]):
-        predstr = util.kmer_preds_to_seq(seq_preds[b, :, 0:KMER_COUNT], i2s)
-        tgtstr = util.kmer_idx_to_str(tgt[b, 1:], i2s)
+        predstr = util.kmer_preds_to_seq(seq_preds[b, :, 0:util.KMER_COUNT], util.i2s)
+        tgtstr = util.kmer_idx_to_str(tgt[b, 1:], util.i2s)
         var_count += len(list(vcf.aln_to_vars(tgtstr, predstr)))
         batch_size += 1
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
-        result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, 0:KMER_COUNT], midwidth=300, counts=result_totals)
+        result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, 0:util.KMER_COUNT], midwidth=300, counts=result_totals)
 
     return match, var_count, result_totals
 
 
 def predict_sequence(src, model, n_output_toks):
-    predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(DEVICE)
+    predictions = torch.stack((util.START_TOKEN, util.START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(DEVICE)
     mem = model.encode(src)
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(DEVICE)
@@ -289,19 +261,18 @@ def calc_val_accuracy(loader, model, criterion):
         total_batches = 0
         loss_tot = 0
 
-        for src, tgt, vaf, *_ in loader.iter_once(64):
+        for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
             total_batches += 1
             tot_samples += src.shape[0]
             seq_preds = predict_sequence(src, model, n_output_toks=37) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
 
-            tgt_kmers = tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
+            #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
             seq_preds = seq_preds[:, :, 0:tgt_kmer_idx.shape[-1], :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
             if type(criterion) == nn.NLLLoss:
                 loss_tot = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             else:
                 raise ValueError("Only cross entropy supported now")
-
 
             midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt_kmer_idx[:, 0, :], result_totals0)
             midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt_kmer_idx[:, 1, :], result_totals1)
@@ -341,7 +312,7 @@ def train_epochs(epochs,
     embed_dim_factor = 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
-                            kmer_dim=FEATURE_DIM, # Number of possible kmers
+                            kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
                             n_decoder_layers=decoder_layers,
                             embed_dim_factor=embed_dim_factor,
@@ -437,11 +408,11 @@ def train_epochs(epochs,
 
     if val_dir:
         logger.info(f"Using validation data in {val_dir}")
-        val_loader = loader.PregenLoader(device=DEVICE, datadir=val_dir, threads=4)
+        val_loader = loader.PregenLoader(device=DEVICE, datadir=val_dir, threads=4, tgt_prefix="tgkmers")
     else:
         logger.info(f"No val. dir. provided retaining a few training samples for validation")
         valpaths = dataloader.retain_val_samples(fraction=0.05)
-        val_loader = loader.PregenLoader(device=DEVICE, datadir=None, pathpairs=valpaths, threads=4)
+        val_loader = loader.PregenLoader(device=DEVICE, datadir=None, pathpairs=valpaths, threads=4, tgt_prefix="tgkmers")
         logger.info(f"Pulled {len(valpaths)} samples to use for validation")
 
     try:
@@ -648,7 +619,8 @@ def train(config, output_model, input_model, epochs, **kwargs):
     dataloader = loader.PregenLoader(DEVICE,
                                      kwargs.get("datadir"),
                                      threads=kwargs.get('threads'),
-                                     max_decomped_batches=kwargs.get('max_decomp_batches'))
+                                     max_decomped_batches=kwargs.get('max_decomp_batches'),
+                                     tgt_prefix="tgkmers")
 
 
     # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
