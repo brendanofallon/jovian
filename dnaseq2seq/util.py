@@ -250,7 +250,7 @@ def kmer_preds_to_seq(preds, i2s):
     """
     Return a sequence of bases from the given predictions
     """
-    m = torch.argmax(preds, dim=-1).detach().numpy()
+    m = torch.argmax(preds, dim=-1).cpu().detach().numpy()
     return kmer_idx_to_str(m, i2s)
 
 
