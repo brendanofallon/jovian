@@ -290,6 +290,21 @@ def calc_val_accuracy(loader, model, criterion):
             loss_tot)
 
 
+def safe_compute_ppav(results0, results1, key):
+    try:
+        ppa = (results0[key]['tp'] + results1[key]['tp']) / (
+                results0[key]['tp'] + results1[key]['tp'] + results0[key]['fn'] + results1[key]['fn'])
+    except ZeroDivisionError:
+        ppa = 0
+    try:
+        ppv = (results0[key]['tp'] + results1[key]['tp']) / (
+                results0[key]['tp'] + results1[key]['tp'] + results0[key]['fp'] + results1[key]['fp'])
+    except ZeroDivisionError:
+        ppv = 0
+
+    return ppa, ppv
+
+
 def train_epochs(epochs,
                  dataloader,
                  max_read_depth=50,
@@ -428,22 +443,9 @@ def train_epochs(epochs,
 
             acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
 
-            try:
-                ppa_dels = (results0['del']['tp'] + results1['del']['tp']) / (results0['del']['tp'] + results1['del']['tp'] + results0['del']['fn'] + results1['del']['fn'])
-                ppa_ins = (results0['ins']['tp'] + results1['ins']['tp']) / (results0['ins']['tp'] + results1['ins']['tp'] + results0['ins']['fn'] + results1['ins']['fn'])
-                ppa_snv = (results0['snv']['tp'] + results1['snv']['tp']) / (results0['snv']['tp'] + results1['snv']['tp'] + results0['snv']['fn'] + results1['snv']['fn'])
-
-                ppv_dels = (results0['del']['tp'] + results1['del']['tp']) / (results0['del']['tp'] + results1['del']['tp'] + results0['del']['fp'] + results1['del']['fp'])
-                ppv_ins = (results0['ins']['tp'] + results1['ins']['tp']) / (results0['ins']['tp'] + results1['ins']['tp'] + results0['ins']['fp'] + results1['ins']['fp'])
-                ppv_snv = (results0['snv']['tp'] + results1['snv']['tp']) / (results0['snv']['tp'] + results1['snv']['tp'] + results0['snv']['fp'] + results1['snv']['fp'])
-
-            except ZeroDivisionError:
-                ppa_dels = 0
-                ppa_ins = 0
-                ppa_snv = 0
-                ppv_dels = 0
-                ppv_ins = 0
-                ppv_snv = 0
+            ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
+            ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
+            ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
 
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
@@ -582,7 +584,7 @@ def eval_prediction(refseqstr, altseq, predictions, midwidth=None, counts=None):
             known_vars.append(v)
 
     pred_vars = []
-    predstr = util.readstr(predictions)
+    predstr = util.kmer_preds_to_seq(predictions[:, 0:util.KMER_COUNT], util.i2s)
     for v in vcf.aln_to_vars(refseqstr, predstr):
         if midstart < v.pos < midend:
             pred_vars.append(v)
