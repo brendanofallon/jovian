@@ -320,18 +320,20 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    attention_heads = 4
+    encoder_attention_heads = 6 # was 4
+    decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
     encoder_layers = 4
-    decoder_layers = 2
-    embed_dim_factor = 100
+    decoder_layers = 3 # was 2
+    embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
                             n_decoder_layers=decoder_layers,
                             embed_dim_factor=embed_dim_factor,
-                            nhead=attention_heads, 
+                            encoder_attention_heads=encoder_attention_heads,
+                            decoder_attention_heads=decoder_attention_heads,
                             d_ff=dim_feedforward,
                             device=DEVICE)
     if torch.cuda.device_count() > 1:
