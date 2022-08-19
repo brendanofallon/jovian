@@ -156,13 +156,15 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     else:
         probs = np.ones(len(altseq))
     aln = align_sequences(altseq, refseq)
+    ref_seq_consumed = 0
     q_offset = 0
     t_offset = 0
 
     variant_pos_offset = 0
     if aln.query_begin > 0:
-        q_offset += aln.query_begin # Maybe we don't want this?
+        q_offset += aln.query_begin # Maybe we don't want this? query is alt sequence, so nonzero indicates first alt base matches downstream of first ref base
     if aln.target_begin > 0:
+        ref_seq_consumed += aln.target_begin
         t_offset += aln.target_begin
 
     for cig in _cigtups(aln.cigar):
@@ -182,7 +184,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
         elif cig.op == "I":
             yield Variant(ref='',
                           alt=altseq[q_offset:q_offset+cig.len],
-                          pos=offset + variant_pos_offset,
+                          pos=offset + variant_pos_offset + aln.target_begin,
                           qual=_geomean(probs[q_offset:q_offset+cig.len]),
                           window_offset=variant_pos_offset,
                           var_index=num_vars)

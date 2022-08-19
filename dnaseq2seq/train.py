@@ -186,31 +186,66 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, epoch_times
 
 
-def _calc_hap_accuracy(src, seq_preds, tgt, result_totals=None, width=100):
+def add_result_dicts(src, add):
+    for key, subdict in add.items():
+        for subkey, value in subdict.items():
+            src[key][subkey] += value
+    return src
+
+
+def _calc_hap_accuracy(src, seq_preds, tgt, result_totals):
     # Compute val accuracy
     match = (torch.argmax(seq_preds[:, :, :].flatten(start_dim=0, end_dim=1),
                              dim=1) == tgt[:, :].flatten()
                 ).float().mean()
 
     var_count = 0
-    batch_size = 0
-    if result_totals is None:
-        result_totals = {
-            'del': defaultdict(int),
-            'ins': defaultdict(int),
-            'snv': defaultdict(int),
-            'mnv': defaultdict(int),
-        }
+
     for b in range(src.shape[0]):
         predstr = util.kmer_preds_to_seq(seq_preds[b, :, 0:util.KMER_COUNT], util.i2s)
-        tgtstr = util.kmer_idx_to_str(tgt[b, 1:], util.i2s)
-        var_count += len(list(vcf.aln_to_vars(tgtstr, predstr)))
-        batch_size += 1
+        tgtstr = util.kmer_idx_to_str(tgt[b, :], util.i2s)
+        vc = len(list(vcf.aln_to_vars(tgtstr, predstr)))
+        var_count += vc
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
-        result_totals = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, 0:util.KMER_COUNT], midwidth=300, counts=result_totals)
+        vartype_count = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, 0:util.KMER_COUNT], counts=init_count_dict())
+        result_totals = add_result_dicts(result_totals, vartype_count)
 
     return match, var_count, result_totals
+
+
+def eval_prediction(refseqstr, altseq, predictions, counts):
+    """
+    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
+    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
+    objects, then compares variant objects
+    :param tgt:
+    :param predictions:
+    :param midwidth:
+    :return: Sets of TP, FP, and FN vars
+    """
+    known_vars = []
+    for v in vcf.aln_to_vars(refseqstr, altseq):
+        known_vars.append(v)
+
+    pred_vars = []
+    predstr = util.kmer_preds_to_seq(predictions[:, 0:util.KMER_COUNT], util.i2s)
+    for v in vcf.aln_to_vars(refseqstr, predstr):
+        pred_vars.append(v)
+
+    for true_var in known_vars:
+        true_var_type = util.var_type(true_var)
+        if true_var in pred_vars:
+            counts[true_var_type]['tp'] += 1
+        else:
+            counts[true_var_type]['fn'] += 1
+
+    for detected_var in pred_vars:
+        if detected_var not in known_vars:
+            vartype = util.var_type(detected_var)
+            counts[vartype]['fp'] += 1
+
+    return counts
 
 
 def predict_sequence(src, model, n_output_toks):
@@ -223,8 +258,6 @@ def predict_sequence(src, model, n_output_toks):
         p = torch.nn.functional.one_hot(tophit, num_classes=260)
         predictions = torch.concat((predictions, p), dim=2)
     return predictions[:, :, 1:, :]
-
-
 
 
 def calc_val_accuracy(loader, model, criterion):
@@ -242,18 +275,8 @@ def calc_val_accuracy(loader, model, criterion):
     with torch.no_grad():
         match_sum0 = 0
         match_sum1 = 0
-        result_totals0 = {
-            'del': defaultdict(int),
-            'ins': defaultdict(int),
-            'snv': defaultdict(int),
-            'mnv': defaultdict(int),
-        }
-        result_totals1 = {
-            'del': defaultdict(int),
-            'ins': defaultdict(int),
-            'snv': defaultdict(int),
-            'mnv': defaultdict(int),
-        }
+        result_totals0 = init_count_dict()
+        result_totals1 = init_count_dict()
 
         var_counts_sum0 = 0
         var_counts_sum1 = 0
@@ -320,12 +343,12 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    encoder_attention_heads = 6 # was 4
+    encoder_attention_heads = 4 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
     encoder_layers = 4
-    decoder_layers = 3 # was 2
-    embed_dim_factor = 120 # was 100
+    decoder_layers = 2 # was 2
+    embed_dim_factor = 100 # was 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
@@ -392,7 +415,8 @@ def train_epochs(epochs,
             feats_per_read=feats_per_read,
             batch_size=batch_size,
             read_depth=max_read_depth,
-            attn_heads=attention_heads,
+            encoder_attn_heads=encoder_attention_heads,
+            decoder_attn_heads=decoder_attention_heads,
             transformer_dim=dim_feedforward,
             encoder_layers=encoder_layers,
             decoder_layers=decoder_layers,
@@ -558,52 +582,14 @@ def load_train_conf(confyaml):
     return conf
 
 
-def eval_prediction(refseqstr, altseq, predictions, midwidth=None, counts=None):
-    """
-    Given a target sequence and two predicted sequences, attempt to determine if the correct *Variants* are
-    detected from the target. This uses the vcf.align_seqs(seq1, seq2) method to convert string sequences to Variant
-    objects, then compares variant objects
-    :param tgt:
-    :param predictions:
-    :param midwidth:
-    :return: Sets of TP, FP, and FN vars
-    """
-    if midwidth is None:
-        midwidth = len(refseqstr)
+def init_count_dict():
+    return {
+        'del': defaultdict(int),
+        'ins': defaultdict(int),
+        'snv': defaultdict(int),
+        'mnv': defaultdict(int),
+    }
 
-    midstart = len(refseqstr) // 2 - midwidth // 2
-    midend  =  len(refseqstr) // 2 + midwidth // 2
-    if counts is None:
-        counts = {
-            'del': defaultdict(int),
-            'ins': defaultdict(int),
-            'snv': defaultdict(int),
-            'mnv': defaultdict(int),
-        }
-    known_vars = []
-    for v in vcf.aln_to_vars(refseqstr, altseq):
-        if midstart < v.pos < midend:
-            known_vars.append(v)
-
-    pred_vars = []
-    predstr = util.kmer_preds_to_seq(predictions[:, 0:util.KMER_COUNT], util.i2s)
-    for v in vcf.aln_to_vars(refseqstr, predstr):
-        if midstart < v.pos < midend:
-            pred_vars.append(v)
-
-    for true_var in known_vars:
-        true_var_type = util.var_type(true_var)
-        if true_var in pred_vars:
-            counts[true_var_type]['tp'] += 1
-        else:
-            counts[true_var_type]['fn'] += 1
-
-    for detected_var in pred_vars:
-        if detected_var not in known_vars:
-            vartype = util.var_type(detected_var)
-            counts[vartype]['fp'] += 1
-
-    return counts
 
 
 def train(config, output_model, input_model, epochs, **kwargs):

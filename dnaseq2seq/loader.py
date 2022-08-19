@@ -154,7 +154,7 @@ class PregenLoader:
             self.pathpairs = pathpairs
         else:
             self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
-            # random.shuffle(self.pathpairs)
+            random.shuffle(self.pathpairs)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
