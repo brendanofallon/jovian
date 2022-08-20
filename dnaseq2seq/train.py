@@ -248,17 +248,6 @@ def eval_prediction(refseqstr, altseq, predictions, counts):
     return counts
 
 
-def predict_sequence(src, model, n_output_toks):
-    predictions = torch.stack((util.START_TOKEN, util.START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(DEVICE)
-    mem = model.encode(src)
-    for i in range(n_output_toks + 1):
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(DEVICE)
-        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
-        tophit = torch.argmax(new_preds, dim=-1)
-        p = torch.nn.functional.one_hot(tophit, num_classes=260)
-        predictions = torch.concat((predictions, p), dim=2)
-    return predictions[:, :, 1:, :]
-
 
 def calc_val_accuracy(loader, model, criterion):
     """
@@ -269,8 +258,6 @@ def calc_val_accuracy(loader, model, criterion):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
-
-    truncate_seq_len = 148
     model.eval()
     with torch.no_grad():
         match_sum0 = 0
@@ -287,7 +274,7 @@ def calc_val_accuracy(loader, model, criterion):
         for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
             total_batches += 1
             tot_samples += src.shape[0]
-            seq_preds = predict_sequence(src, model, n_output_toks=37) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
+            seq_preds = util.predict_sequence(src, model, n_output_toks=37, device=DEVICE) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
 
             #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
