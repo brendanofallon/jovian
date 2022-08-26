@@ -63,7 +63,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     TRUNCATE_LEN=148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
-    tgt_prefix = "tgtkmers"
+    tgt_prefix = "tgkmers"
     vaf_prefix = "vaftgt"
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
