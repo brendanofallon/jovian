@@ -193,7 +193,7 @@ def decode(t):
 
 
 def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0) for b in bases])
+    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0, 50) for b in bases])
 
 
 def target_string_to_tensor(bases):
