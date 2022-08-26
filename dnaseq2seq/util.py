@@ -1,6 +1,7 @@
 import itertools
 import os
 import torch
+import torch.nn as nn
 import numpy as np
 import gzip
 import lz4.frame
@@ -286,3 +287,19 @@ def tgt_to_kmers(tgt):
         t = torch.stack((h0, h1))
         result.append(t)
     return torch.stack(result, dim=0)
+
+
+
+def predict_sequence(src, model, n_output_toks, device):
+    """
+    Generate a predicted sequence with next-word prediction be repeatedly calling the model
+    """
+    predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
+    mem = model.encode(src)
+    for i in range(n_output_toks + 1):
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
+        new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
+        tophit = torch.argmax(new_preds, dim=-1)
+        p = torch.nn.functional.one_hot(tophit, num_classes=260)
+        predictions = torch.concat((predictions, p), dim=2)
+    return predictions[:, :, 1:, :]

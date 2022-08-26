@@ -120,25 +120,22 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     
-    # 25m
-    attention_heads = 8
-    encoder_layers = 8
-    transformer_dim = 400
-    embed_dim_factor = 100
-    
-    # 10m
-    #attention_heads = 6
-    #encoder_layers = 6
-    #transformer_dim = 250
-    #embed_dim_factor = 100
+    encoder_attention_heads = 4 # was 4
+    decoder_attention_heads = 4 # was 4
+    dim_feedforward = 512
+    encoder_layers = 4
+    decoder_layers = 2 # was 2
+    embed_dim_factor = 100 # was 100
     model = VarTransformer(read_depth=100,
-                           feature_count=9,
-                           out_dim=4,
-                           embed_dim_factor=embed_dim_factor,
-                           nhead=attention_heads,
-                           d_hid=transformer_dim,
-                           n_encoder_layers=encoder_layers,
-                           device=DEVICE)
+                            feature_count=9,
+                            kmer_dim=util.FEATURE_DIM, # Number of possible kmers
+                            n_encoder_layers=encoder_layers,
+                            n_decoder_layers=decoder_layers,
+                            embed_dim_factor=embed_dim_factor,
+                            encoder_attention_heads=encoder_attention_heads,
+                            decoder_attention_heads=decoder_attention_heads,
+                            d_ff=dim_feedforward,
+                            device=DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()
     model.to(DEVICE)
@@ -587,52 +584,20 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
     mismatching parts
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
-    seq_preds = model(encoded_reads.to(DEVICE))
+    n_output_toks = 37 # OK, this should be made a little more general...
+    seq_preds = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
     calledvars = []
     for b in range(seq_preds.shape[0]):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         offset = batch_pos_offsets[b]
-        hap0 = util.readstr(hap0_t)
-        hap1 = util.readstr(hap1_t)
-        hap0_probs = hap0_t.detach().cpu().numpy().max(axis=-1)
-        hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
+        hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
+        hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
 
         refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, hap0_probs) if v.pos < offset + var_retain_window_size)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, hap1_probs) if v.pos < offset + var_retain_window_size)
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset) if v.pos < offset + var_retain_window_size)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset) if v.pos < offset + var_retain_window_size)
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
-
-
-# def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
-#     for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
-#         stepvars0 = {}
-#         for v in vars_hap0:
-#             if v.pos < (window_start + window_retain_size):
-#                 v.hap_model = 0
-#                 v.step = step_count
-#                 stepvars0[(v.pos, v.ref, v.alt)] = v
-#         stepvars1 = {}
-#         for v in vars_hap1:
-#             if v.pos < (window_start + window_retain_size):
-#                 v.hap_model = 1
-#                 v.step = step_count
-#                 stepvars1[(v.pos, v.ref, v.alt)] = v
-#
-#         # swap haplotypes if supported by previous vars
-#         same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
-#         same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
-#         opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
-#         opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
-#         if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-#             stepvars1, stepvars0 = stepvars0, stepvars1
-#
-#         # add this step's vars to allvars
-#         [allvars0[key].append(v) for key, v in stepvars0.items()]
-#         [allvars1[key].append(v) for key, v in stepvars1.items()]
-#         step_count = step_count + 1
-#
-#     return allvars0, allvars1
 
 
 def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):

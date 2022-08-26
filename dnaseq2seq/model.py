@@ -93,7 +93,8 @@ class VarTransformer(nn.Module):
                  read_depth,
                  feature_count,
                  kmer_dim,
-                 nhead=6,
+                 encoder_attention_heads=6,
+                 decoder_attention_heads=6,
                  d_ff=1024,
                  embed_dim_factor=40,
                  n_encoder_layers=3,
@@ -103,7 +104,7 @@ class VarTransformer(nn.Module):
         super().__init__()
         self.device=device
         self.kmer_dim = kmer_dim
-        self.embed_dim = nhead * embed_dim_factor
+        self.embed_dim = encoder_attention_heads * embed_dim_factor
         self.fc1_hidden = 12
 
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
@@ -115,7 +116,7 @@ class VarTransformer(nn.Module):
 
         encoder_layers = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
-            nhead=nhead,
+            nhead=encoder_attention_heads,
             dim_feedforward=d_ff,
             dropout=p_dropout,
             batch_first=True,
@@ -124,7 +125,7 @@ class VarTransformer(nn.Module):
 
         decoder_layers = nn.TransformerDecoderLayer(
             d_model=self.kmer_dim,
-            nhead=nhead,
+            nhead=decoder_attention_heads,
             dim_feedforward=d_ff,
             dropout=p_dropout,
             batch_first=True,
