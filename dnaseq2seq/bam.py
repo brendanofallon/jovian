@@ -272,7 +272,7 @@ def iterate_bases(rec):
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
         readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped)
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped, rec.mapping_quality)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
