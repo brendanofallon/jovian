@@ -45,8 +45,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_mqfeattest"
-RUN_NOTES="Decoder model with MapQ feature"
+RUN_NAME="wgs_decoder_35m_mqfeattest"
+RUN_NOTES="Decoder model with MapQ feature, bigger 35M model"
 
 set -x
 
