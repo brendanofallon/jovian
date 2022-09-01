@@ -101,7 +101,7 @@ setup(
     license="",
     install_requires=requires,
     scripts=[
-        "dnaseq2seq/bin/main.py",
+        "dnaseq2seq/main.py",
     ],
     cmdclass={"install": DNAseq2seqInstallCommand},
     tests_require=["pytest"],
