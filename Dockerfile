@@ -9,8 +9,6 @@ WORKDIR $HOME
 
 USER $DEFAULT_USERNAME
 
-COPY pip_requirements.txt .
-COPY conda_requirements.yaml .
 
 RUN curl -O https://repo.anaconda.com/miniconda/Miniconda3-py38_4.12.0-Linux-x86_64.sh
 RUN chmod u+x Miniconda3-py38_4.12.0-Linux-x86_64.sh
@@ -21,11 +19,13 @@ ENV PATH $HOME/miniconda3/bin/:$PATH
 
 COPY . $HOME/dnaseq2seq
 
+
 #RUN chown -R $DEFAULT_USERNAME ./dnaseq2seq/
 #RUN chown -R $DEFAULT_USERNAME ./miniconda3/
 
 
 RUN pip install $HOME/dnaseq2seq
 
+ENV JOVIAN_MODEL $HOME/dnaseq2seq/wgs_10m_halfhuge_rep2_cont3_epoch12.model
 RUN python dnaseq2seq/dnaseq2seq/main.py -h
 ENTRYPOINT ["python", "dnaseq2seq/dnaseq2seq/main.py"]
