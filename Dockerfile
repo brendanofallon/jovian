@@ -27,5 +27,7 @@ COPY . $HOME/dnaseq2seq
 RUN pip install $HOME/dnaseq2seq
 
 ENV JOVIAN_MODEL $HOME/dnaseq2seq/wgs_10m_halfhuge_rep2_cont3_epoch12.model
+ENV JOVIAN_CLASSIFIER $HOME/dnaseq2seq/varmerge.model
+
 RUN python dnaseq2seq/dnaseq2seq/main.py -h
 ENTRYPOINT ["python", "dnaseq2seq/dnaseq2seq/main.py"]
