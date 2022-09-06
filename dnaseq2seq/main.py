@@ -170,7 +170,7 @@ def alphanumeric_no_spaces(name):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='NGS variant detection with')
+    parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
 
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
@@ -224,8 +224,8 @@ def main():
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
-    if len(vars(args)) == 0 or hasattr(args, 'func'):
-        print(parser.usage)
+    if len(vars(args)) == 0 or not hasattr(args, 'func'):
+        parser.print_help()
     else:
         args.cmdline = " ".join(sys.argv[1:])
         args.cl_args = vars(args).copy()  # command line copy for logging
