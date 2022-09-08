@@ -120,14 +120,15 @@ def reconcile_current_window(prev_win, current_win):
 
 def load_model(model_path):
     
-    encoder_attention_heads = 4 # was 4
+    # 35M params
+    encoder_attention_heads = 6 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
-    encoder_layers = 4
-    decoder_layers = 2 # was 2
-    embed_dim_factor = 100 # was 100
+    encoder_layers = 8
+    decoder_layers = 4 # was 2
+    embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
-                            feature_count=9,
+                            feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
                             n_decoder_layers=decoder_layers,

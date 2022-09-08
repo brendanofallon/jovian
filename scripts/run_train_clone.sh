@@ -45,8 +45,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_35m_mqfeattest"
-RUN_NOTES="Decoder model with MapQ feature, bigger 35M model"
+RUN_NAME="wgs_decoder_35m_mqfeattest_cont"
+RUN_NOTES="Decoder model with MapQ feature, bigger 35M model, continued"
 
 set -x
 
@@ -82,6 +82,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 4 \
     --max-decomp-batches 4 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_35m_mqfeattest/wgs_decoder_35m_mqfeattest_epoch7.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
