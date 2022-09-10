@@ -428,6 +428,7 @@ def train_epochs(epochs,
                 dir=current_working_dir,
                 name=wandb_run_name,
                 notes=wandb_notes,
+                resume=True,
         )
         wandb.watch(model, log="all", log_freq=1000)
 
