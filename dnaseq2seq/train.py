@@ -318,7 +318,7 @@ def safe_compute_ppav(results0, results1, key):
 def train_epochs(epochs,
                  dataloader,
                  max_read_depth=50,
-                 feats_per_read=9,
+                 feats_per_read=10,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  statedict=None,
@@ -330,12 +330,12 @@ def train_epochs(epochs,
                  wandb_notes="",
                  cl_args = {}
 ):
-    encoder_attention_heads = 4 # was 4
+    encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
-    encoder_layers = 4
-    decoder_layers = 2 # was 2
-    embed_dim_factor = 100 # was 100
+    encoder_layers = 6
+    decoder_layers = 4 # was 2
+    embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
@@ -611,7 +611,7 @@ def train(config, output_model, input_model, epochs, **kwargs):
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=100,
-                 feats_per_read=9,
+                 feats_per_read=10,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,

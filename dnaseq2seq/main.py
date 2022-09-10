@@ -60,17 +60,19 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
     """
+    TRUNCATE_LEN=148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
-    tgt_prefix = "tgt"
+    tgt_prefix = "tgkmers"
     vaf_prefix = "vaftgt"
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+        tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
-        for data, prefix in zip([src, tgt, vaftgt],
+        for data, prefix in zip([src, tgt_kmers, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)

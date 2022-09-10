@@ -72,8 +72,8 @@ class DNAseq2seqInstallCommand(install):
     """
 
     def run(self):
-        install_required_conda_packages()
-        install_required_pip_packages()
+        #install_required_conda_packages()
+        #install_required_pip_packages()
         install.run(self)
 
 
@@ -101,7 +101,7 @@ setup(
     license="",
     install_requires=requires,
     scripts=[
-        "dnaseq2seq/bin/main.py",
+        "dnaseq2seq/main.py",
     ],
     cmdclass={"install": DNAseq2seqInstallCommand},
     tests_require=["pytest"],
