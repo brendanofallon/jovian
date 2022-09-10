@@ -24,4 +24,4 @@ def main(pregendir):
             print(f"Scanned {i}, converted {converted}")
 
 if __name__=="__main__":
-    main("/Users/brendanofallon/src/dnaseq2seq/test_pregen/")
+    main(sys.argv[1])
