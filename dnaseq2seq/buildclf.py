@@ -214,25 +214,25 @@ def bamfeats(var, aln):
 
 def var_feats(var, aln, var_freq_file):
     feats = []
-    bamreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
-    if pos_ref + neg_ref + pos_alt + neg_alt > 0:
-        vaf = (pos_alt + neg_alt) / (pos_ref + neg_ref + pos_alt + neg_alt)
-    else:
-        vaf = 0.0
+    #amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
+    #if pos_ref + neg_ref + pos_alt + neg_alt > 0:
+    #    vaf = (pos_alt + neg_alt) / (pos_ref + neg_ref + pos_alt + neg_alt)
+    #else:
+    #    vaf = 0.0
 
-    if (highmq_ref + highmq_alt) > 0:
-        mq_vaf = (highmq_alt) / (highmq_alt + highmq_ref)
-    else:
-        mq_vaf = 0.0
+    #if (highmq_ref + highmq_alt) > 0:
+    #    mq_vaf = (highmq_alt) / (highmq_alt + highmq_ref)
+    #else:
+    #    mq_vaf = 0.0
   
     # Fisher exact test for strand bias
-    strandbias_stat = stats.fisher_exact([[pos_alt, neg_alt], [pos_ref, neg_ref]], alternative='two-sided')[1]
+    #strandbias_stat = stats.fisher_exact([[pos_alt, neg_alt], [pos_ref, neg_ref]], alternative='two-sided')[1]
 
-    feats.append(var.qual)
+    #feats.append(var.qual)
     feats.append(len(var.ref))
     feats.append(max(len(a) for a in var.alts))
-    feats.append(min(var.info['QUALS']))
-    feats.append(max(var.info['QUALS']))
+    #feats.append(min(var.info['QUALS']))
+    #feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
     feats.append(var.info['WIN_TRANS_COUNT'][0])
@@ -241,22 +241,22 @@ def var_feats(var, aln, var_freq_file):
     feats.append(min(var.info['WIN_OFFSETS']))
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
-    feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
+    #feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
-    feats.append(vaf)
-    feats.append(mq_vaf)
-    feats.append(pos_alt + neg_alt)
+    #feats.append(vaf)
+    #feats.append(mq_vaf)
+    #feats.append(pos_alt + neg_alt)
     #feats.append(strandbias_stat)
     return np.array(feats)
 
 
 def feat_names():
     return [
-            "qual",
+            #"qual",
             "ref_len",
             "alt_len",
-            "min_qual",
-            "max_qual",
+            #"min_qual",
+            #"max_qual",
             "var_count",
             "cis_count",
             "trans_count",
@@ -265,11 +265,11 @@ def feat_names():
             "min_win_offset",
             "max_win_offset",
             "dp",
-            "af",
+            #"af",
             "het",
-            "vaf",
-            "highmq_vaf",
-            "altreads",
+            #"vaf",
+            #"highmq_vaf",
+            #"altreads",
           #  "strandbias_stat",
         ]
 
@@ -304,7 +304,7 @@ def load_model(path):
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
     alltps = []
     allfps = []
-    var_freq_file = pysam.VariantFile(var_freq_file)
+    var_freq_file = None #pysam.VariantFile(var_freq_file)
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")

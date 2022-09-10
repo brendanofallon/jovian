@@ -350,7 +350,7 @@ def call_variants_on_chrom(
     :return: a VCF file with called variants for the given chromosome.
     """
     max_read_depth = 100
-    window_step = 11
+    window_step = 25
     logger.info(f"Max read depth: {max_read_depth} window step: {window_step}") 
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
@@ -419,7 +419,7 @@ def call_variants_on_chrom(
                 logger.info(f"Submitted {len(futs)} jobs for variant calling")
                 for i, fut in enumerate(futs):
                     try:
-                        nvars, chunk_vcf = fut.result(timeout= 5 * 60 * 60)
+                        nvars, chunk_vcf = fut.result(timeout= 10 * 60 * 60)
                         logger.debug(f"Got result {i} of {len(futs)} results for chunked variant calling with {nvars} vars")
                         chrom_nvar += nvars
                         for var in pysam.VariantFile(chunk_vcf):
@@ -633,7 +633,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = start - 2 * window_step  # We start with regions a bit upstream of the focal / target region
+    window_start = int(start - 0.75 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
