@@ -22,7 +22,7 @@ in the main project directory
 
 ### Calling variants
 
-Calling variants requires an alignment file in bam / cram format, a model file, 
+Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basically calling command looks like: 
 
     dnaseq2seq/main.py call -r <reference genome fasta> 
       --threads <number of threads to use> 
