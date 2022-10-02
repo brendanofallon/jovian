@@ -2,36 +2,32 @@
 
 import sys
 
-sys.path.insert(0, "/home/brendan/src/dnaseq2seq/dnaseq2seq/")
+sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq")
 
 from dnaseq2seq import call
 import pysam
-
-reference_fasta="/home/brendan/Public/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
-bamfile="/home/brendan/Public/genomics/WGS/99702211631_1ug.bam"
-chrom="2"
-window_start=25260000
-window_end=25370000
+import random
 
 
-def emit(bampath, chrom, window_start,window_end, reference_fasta):
-    for start, end in call.cluster_positions(
-        call.gen_suspicious_spots(bam, chrom, window_start, window_end, reference_fasta), maxdist=100,
-        ):
-    print(f"{chrom}\t{start}\t{end}")
 
 
 def main(reference_path, bampath, input_bed):
     for line in open(input_bed).readlines():
-        toks = line.split("\t")
+        toks = line.strip().split("\t")
         chrom = toks[0]
         window_start = int(toks[1])
         window_end = int(toks[2])
-        
-        pos = list(call.cluster_positions(
-            call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
-        ))
-        if pos:
+        region_type = toks[3]
+
+        if region_type == "tn" and random.random() < 0.25:
+            pos = list(call.cluster_positions(
+                call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
+            ))
+            if pos:
+                print(line.strip() + "-sus")
+            else:
+                print(line.strip())
+        else:
             print(line.strip())
 
 

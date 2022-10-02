@@ -187,6 +187,7 @@ class PregenLoader:
         :param batch_size: The number of samples in a minibatch.
         """
         src, tgt, vaftgt = [], [], []
+        random.shuffle(self.pathpairs)
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]

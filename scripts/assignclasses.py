@@ -47,12 +47,6 @@ for line in open(sys.argv[3]):
     toks = line.split("\t")
     start = int(toks[1])
     end = int(toks[2])
-    label = toks[3].strip()
-    if label != 'tn':
-        print(line, end='')
-        continue
-    if random.random() > 0.10:
-        continue
 
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
@@ -82,17 +76,20 @@ for line in open(sys.argv[3]):
         label = "snv"
     else:
         label = "tn"
-    #found = False
-    #for i in intervals:
-    #    if any(i.start < v.pos < i.end for v in variants):
-    #        found = True
-
+    found = False
+    for i in intervals:
+        if any(i.start < v.pos < i.end for v in variants):
+            found = True
 
     if var_size > 10:
         label = label + "-big"
 
-    #if found:
-    #    label = label + "-lc"
+    if found:
+        label = label + "-lc"
+
+    if label == 'tn' and random.random() < 0.5:
+        continue
+
     toks = '\t'.join(line.strip().split('\t')[0:3])
     print(f"{toks}\t{label}")
 

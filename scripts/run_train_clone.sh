@@ -7,10 +7,10 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
-#SBATCH --time=8-0
+#SBATCH --time=5-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a6000|3090|a100"
+#SBATCH --gres=gpu:1 --constraint="a6000|a100"
 
 
 
@@ -39,14 +39,17 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_huge
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge_lc_bigvars_fpfns
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all_plus_susregions
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_smallsus
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
 
 LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_35m_mqfeattest_cont2"
-RUN_NOTES="Decoder model with MapQ feature, bigger 35M model, continued2"
+RUN_NAME="wgs_decoder_mq_lcbig_partial"
+RUN_NOTES="Decoder 35M model with MapQ feature, four new nextera samples, sus regions plus big vars, about 100k training files. Continued from epoch 2 of previous run to save a day"
 
 set -x
 
@@ -82,7 +85,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 4 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_35m_mqfeattest_cont/wgs_decoder_35m_mqfeattest_cont_epoch7.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_35m_mqfeattest/wgs_decoder_35m_mqfeattest_epoch2.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
