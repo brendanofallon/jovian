@@ -10,6 +10,7 @@ import io
 from pathlib import Path
 import logging
 import shutil
+from itertools import chain
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,8 @@ s2i, i2s = make_kmer_lookups(TGT_KMER_SIZE)
 KMER_COUNT = 4 ** TGT_KMER_SIZE
 FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
 START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
-START_TOKEN[:, FEATURE_DIM-1] = 1
+START_TOKEN_INDEX = FEATURE_DIM - 1
+START_TOKEN[:, START_TOKEN_INDEX] = 1
 
 
 def var_type(variant):
@@ -290,9 +292,10 @@ def tgt_to_kmers(tgt):
 
 
 
-def predict_sequence(src, model, n_output_toks, device):
+def predict_sequence_greedy(src, model, n_output_toks, device):
     """
     Generate a predicted sequence with next-word prediction be repeatedly calling the model
+    We just grab the kmer with the highest predicted probability and use it no matter what
     """
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
     mem = model.encode(src)
@@ -303,3 +306,135 @@ def predict_sequence(src, model, n_output_toks, device):
         p = torch.nn.functional.one_hot(tophit, num_classes=260)
         predictions = torch.concat((predictions, p), dim=2)
     return predictions[:, :, 1:, :]
+
+
+def search_one_step(paths, probs, model, mem, device, split_threshold):
+    path0, path1 = paths
+    prob0, prob1 = probs
+    pred0_input = nn.functional.one_hot(path0, num_classes=START_TOKEN.shape[1])
+    pred1_input = nn.functional.one_hot(path1, num_classes=START_TOKEN.shape[1])
+    input = torch.stack((pred0_input, pred1_input), dim=0).unsqueeze(0)
+    tgt_mask = nn.Transformer.generate_square_subsequent_mask(input.shape[-2]).to(device)
+    new_preds = model.decode(mem, input, tgt_mask=tgt_mask)[:, :, -1:, :]
+    tophits = new_preds.topk(k=2)
+    diffs = tophits.values[0, :, :, 0] - tophits.values[0, :, :, 1]
+
+    path_result = [
+        (torch.cat((path0, tophits.indices[0, 0:1, -1, 0]), dim=0),
+         torch.cat((path1, tophits.indices[0, 1:2, -1, 0]), dim=0))
+    ]
+    prob_result = [
+        (prob0 + [tophits.values[0, 0, -1, 0].item()], prob1 + [tophits.values[0, 1, -1, 0].item()])
+    ]
+
+    if diffs[0] >= split_threshold and diffs[1] < split_threshold:
+        path_result.append(
+            (torch.cat((path0, tophits.indices[0, 0:1, -1, 0]), dim=0),
+             torch.cat((path1, tophits.indices[0, 1:2, -1, 1]), dim=0))
+        )
+         # Use highest val from path 0 and second highest from path 1
+        prob_result.append(
+            (prob0 + [tophits.values[0, 0, -1, 0].item()], prob1 + [tophits.values[0, 1, -1, 1].item()])
+        )
+
+    elif diffs[0] < split_threshold and diffs[1] >= split_threshold:
+        path_result.append(
+            (torch.cat((path0, tophits.indices[0, 0:1, -1, 1]), dim=0),  # Second highest val from path 0 and highest from path 1
+             torch.cat((path1, tophits.indices[0, 1:2, -1, 0]), dim=0))
+        )
+        prob_result.append(
+            (prob0 + [tophits.values[0, 0, -1, 1].item()], prob1 + [tophits.values[0, 1, -1, 0].item()])
+        )
+
+    elif diffs[0] < split_threshold and diffs[1] < split_threshold:
+        # This should be rare and I'm not sure how to handle it, for now we add *one* new path
+        # with second-best values from both haplotypes, instead of two new paths (one with each second-best values)
+        # or both each one individually and both together
+        path_result.append(
+            (torch.cat((path0, tophits.indices[0, 0:1, -1, 1]), dim=0),  # Second highest val from path 0 and second highest from path 1
+             torch.cat((path1, tophits.indices[0, 1:2, -1, 1]), dim=0))
+        )
+        prob_result.append(
+            (prob0 + [tophits.values[0, 0, -1, 1].item()], prob1 + [tophits.values[0, 1, -1, 1].item()])
+        )
+
+    return path_result, prob_result
+
+def search_sequence_paths(src, model, n_output_toks, device, split_thresh):
+    """
+    Generate a predicted sequence with next-word prediction be repeatedly calling the model
+    Modified beam search, only exploring other paths if they have a probability sufficiently close
+    to the highest probability
+    """
+    assert src.shape[0] == 1, f"Can only handle batch size of 1 for now"
+    mem = model.encode(src)
+    path0 = torch.tensor(START_TOKEN_INDEX).unsqueeze(0)
+    path1 = torch.tensor(START_TOKEN_INDEX).unsqueeze(0)
+    paths = [(path0, path1)]
+    probs = [([0.0], [0.0])]
+    for i in range(n_output_toks):
+        newpaths = []
+        newprobs = []
+        for path, prob in zip(paths, probs):
+            pth, prb = search_one_step(path, prob, model, mem, device, split_thresh)
+            newpaths.extend(pth)
+            newprobs.extend(prb)
+        paths = newpaths
+        probs = newprobs
+
+    trimmed_paths = []
+    trimmed_probs = []
+    for (p0, p1), (b0, b1) in zip(paths, probs):
+        trimmed_paths.append((p0[1:], p1[1:]))
+        trimmed_probs.append((b0[1:], b1[1:]))
+
+    return trimmed_paths, trimmed_probs
+
+
+def expand_to_bases(probs, expansion_factor=TGT_KMER_SIZE):
+    result = []
+    for a,b in probs:
+        newa = list(chain(*([k]*expansion_factor for k in a)))
+        newb = list(chain(*([k]*expansion_factor for k in b)))
+        result.append((newa, newb))
+    return result
+
+
+def predict_sequence_search(src, model, n_output_toks, device, split_thresh=1.0):
+    allpaths = []
+    allprobs = []
+    for i in range(src.shape[0]):
+        paths, probs = search_sequence_paths(src[i:i+1, :, :, :], model, n_output_toks, device, split_thresh=split_thresh)
+        allpaths.append(paths)
+        baseprobs = expand_to_bases(probs)
+        allprobs.append(baseprobs)
+
+        # if len(paths) > 1:
+        #     x0 = kmer_idx_to_str(paths[0][0].cpu().detach().numpy()[1:], i2s)
+        #     y0 = kmer_idx_to_str(paths[0][1].cpu().detach().numpy()[1:], i2s)
+        #
+        #     x1 = kmer_idx_to_str(paths[1][0].cpu().detach().numpy()[1:], i2s)
+        #     y1 = kmer_idx_to_str(paths[1][1].cpu().detach().numpy()[1:], i2s)
+        #     z0 = x0 == x1
+        #     z1 = y0 == y1
+        # for j, (p0, p1) in enumerate(baseprobs):
+        #     psums.append(sum(p0) + sum(p1))
+        #     print(f"P0 sum: {sum(p0) :.5f}: P1 sum: {sum(p1) :.5f}")
+        #     p0str = ' '.join(f"{np.exp(x):.3f}" for x in p0[4:])
+        #     p1str = ' '.join(f"{np.exp(x):.3f}" for x in p1[4:])
+        #     b0 = '     '.join(b for b in kmer_idx_to_str(paths[j][0].cpu().detach().numpy()[1:], i2s))
+        #     b1 = '     '.join(b for b in kmer_idx_to_str(paths[j][1].cpu().detach().numpy()[1:], i2s))
+        #     print(p0str)
+        #     print(b0)
+        #     print(p1str)
+        #     print(b1)
+            # print(kmer_idx_to_str(paths[j][1].cpu().detach().numpy()[1:-1], i2s))
+
+        # best_path = np.argmax(psums)
+        # if best_path != 0:
+        #     logger.info("Its not 0!!")
+        # winners.append(torch.stack(paths[best_path], dim=0))
+
+    return allpaths, allprobs
+
+

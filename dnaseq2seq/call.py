@@ -1,7 +1,6 @@
-import itertools
+
 import os
 import time
-import math
 import datetime
 import logging
 import string
@@ -12,10 +11,10 @@ from tempfile import NamedTemporaryFile as NTFile
 from concurrent.futures import ProcessPoolExecutor
 
 
+import numpy as np
 import torch
 import torch.multiprocessing as mp
 import pysam
-import pyranges as pr
 import pandas as pd
 
 from model import VarTransformer
@@ -587,18 +586,22 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     n_output_toks = 37 # OK, this should be made a little more general...
-    seq_preds = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
-    calledvars = []
-    for b in range(seq_preds.shape[0]):
-        hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
-        offset = batch_pos_offsets[b]
-        hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
-        hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
 
+    calledvars = []
+    for b in range(encoded_reads.shape[0]):
+        with torch.no_grad():
+            paths, probs = util.predict_sequence_search(encoded_reads[b:b+1, :, :, :].to(DEVICE), model, n_output_toks=n_output_toks,
+                                                     device=DEVICE)
+        offset = batch_pos_offsets[b]
         refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset) if v.pos < offset + var_retain_window_size)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset) if v.pos < offset + var_retain_window_size)
-        calledvars.append((vars_hap0, vars_hap1))
+
+        for path, prob in zip(paths[0], probs[0]): # Zero index since we only pass a single batch item to predict at a time
+            hap0 = util.kmer_idx_to_str(path[0].detach().cpu().numpy(), util.i2s)
+            hap1 = util.kmer_idx_to_str(path[1].detach().cpu().numpy(), util.i2s)
+            vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=np.exp(prob[0])) if v.pos < offset + var_retain_window_size)
+            vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=np.exp(prob[1])) if v.pos < offset + var_retain_window_size)
+            calledvars.append((vars_hap0, vars_hap1))
+
     return calledvars
 
 

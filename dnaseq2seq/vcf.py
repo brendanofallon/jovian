@@ -1,8 +1,8 @@
 
 import numpy as np
-import ssw_aligner
 from dataclasses import dataclass
 import pysam
+from skbio.alignment import StripedSmithWaterman
 
 @dataclass
 class Variant:
@@ -91,13 +91,12 @@ def align_sequences(query, target):
     """
     Return Smith-Watterman alignment of both sequences
     """
-    aln = ssw_aligner.local_pairwise_align_ssw(query,
-                                               target,
-                                               gap_open_penalty=3,
-                                               gap_extend_penalty=1,
-                                               match_score=2,
-                                               mismatch_score=-1)
-    return aln
+    ssw = StripedSmithWaterman(query,
+                                gap_open_penalty=3,
+                                gap_extend_penalty=1,
+                                match_score=2,
+                                mismatch_score=-1)
+    return ssw(target)
 
 
 def _mismatches_to_vars(query, target, offset, probs):
@@ -156,15 +155,13 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     else:
         probs = np.ones(len(altseq))
     aln = align_sequences(altseq, refseq)
-    ref_seq_consumed = 0
     q_offset = 0
     t_offset = 0
 
     variant_pos_offset = 0
     if aln.query_begin > 0:
-        q_offset += aln.query_begin # Maybe we don't want this? query is alt sequence, so nonzero indicates first alt base matches downstream of first ref base
+        q_offset += aln.query_begin # Maybe we don't want this?
     if aln.target_begin > 0:
-        ref_seq_consumed += aln.target_begin
         t_offset += aln.target_begin
 
     for cig in _cigtups(aln.cigar):
@@ -184,7 +181,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
         elif cig.op == "I":
             yield Variant(ref='',
                           alt=altseq[q_offset:q_offset+cig.len],
-                          pos=offset + variant_pos_offset + aln.target_begin,
+                          pos=offset + variant_pos_offset,
                           qual=_geomean(probs[q_offset:q_offset+cig.len]),
                           window_offset=variant_pos_offset,
                           var_index=num_vars)

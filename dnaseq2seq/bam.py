@@ -61,6 +61,23 @@ class ReadCache:
             return False
 
 
+def pick_items(items, num):
+    """ Non-random sample of num items from the list """
+    if len(items) <= num:
+        return items
+    step = 10
+    result = []
+    k = 0
+    shift = 0
+    while len(result) < num:
+        result.append(items[k])
+        k += step
+        if k >= len(items):
+            shift = shift + 1
+            k = shift
+    return result
+
+
 class ReadWindow:
 
     def __init__(self, aln, chrom, start, end):
@@ -97,7 +114,8 @@ class ReadWindow:
         else:
             num_reads_to_sample = max_reads
         if len(allreads) > num_reads_to_sample:
-            allreads = random.sample(allreads, num_reads_to_sample)
+            # allreads = random.sample(allreads, num_reads_to_sample)
+            allreads = pick_items(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
