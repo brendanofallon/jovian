@@ -20,7 +20,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="decoder"
+GIT_BRANCH="decoder_big"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -48,8 +48,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_mq_lcbig_partial"
-RUN_NOTES="Decoder 35M model with MapQ feature, four new nextera samples, sus regions plus big vars, about 100k training files. Continued from epoch 2 of previous run to save a day"
+RUN_NAME="wgs_decoder_biggermodel"
+RUN_NOTES="Decoder model 8 encoder and 6 decoder layers"
 
 set -x
 
@@ -85,7 +85,6 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 4 \
     --max-decomp-batches 4 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_35m_mqfeattest/wgs_decoder_35m_mqfeattest_epoch2.model \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
