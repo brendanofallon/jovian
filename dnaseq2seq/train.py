@@ -147,7 +147,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         seq_preds = model(src, tgt_kmers_input, tgt_mask)
         times["forward_pass"] = datetime.now()
 
-        loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+        loss = compute_twohap_loss(seq_preds.float(), tgt_expected, criterion)
 
 
         times["loss"] = datetime.now()

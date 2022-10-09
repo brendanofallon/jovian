@@ -4,7 +4,7 @@
 #SBATCH --partition=notchpeak-gpu
 
 ##SBATCH --account=arup-gpu-np
-#SBATCH --partition=arup-gpu-np
+##SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
 #SBATCH --time=2-0
