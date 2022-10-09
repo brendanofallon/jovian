@@ -29,6 +29,8 @@ if ENABLE_WANDB:
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
+MODEL_DTYPE=torch.float16
+
 class TrainLogger:
     """ Simple utility for writing various items to a log file CSV """
 
@@ -348,7 +350,7 @@ def train_epochs(epochs,
                             device=DEVICE)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    model = model.to(DEVICE)
+    model = model.to(MODEL_DTYPE).to(DEVICE)
 
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Creating model with {model_tot_params} trainable params")

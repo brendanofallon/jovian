@@ -31,6 +31,9 @@ import util
 import phaser
 
 
+src_dtype=torch.float16
+
+
 class ReadLoader:
     """
     The simplest loader, this one just has a src and tgt tensor and iterates over them
@@ -218,7 +221,7 @@ class PregenLoader:
                 start = n * batch_size
                 end = (n + 1) * batch_size
                 yield (
-                    src_t[start:end].to(self.device).float(),
+                    src_t[start:end].to(self.device).to(src_dtype),
                     tgt_t[start:end].to(self.device).long(),
                     None, #vaftgt_t[start:end].to(self.device), 
                     None,
@@ -239,7 +242,7 @@ class PregenLoader:
         if len(src) > 0:
             # We need to yield the last batch.
             yield (
-                torch.cat(src, dim=0).to(self.device).float(),
+                torch.cat(src, dim=0).to(self.device).to(src_dtype),
                 torch.cat(tgt, dim=0).to(self.device).long(),
                 None, #atorch.cat(vaftgt, dim=0).to(self.device),
                 None,
