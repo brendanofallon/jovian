@@ -29,7 +29,7 @@ if ENABLE_WANDB:
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
-MODEL_DTYPE=torch.float16
+MODEL_DTYPE=torch.float
 
 class TrainLogger:
     """ Simple utility for writing various items to a log file CSV """
