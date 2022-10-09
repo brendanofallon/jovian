@@ -1,16 +1,16 @@
 #!/bin/bash
 
-##SBATCH --account=notchpeak-gpu
-##SBATCH --partition=notchpeak-gpu
+#SBATCH --account=notchpeak-gpu
+#SBATCH --partition=notchpeak-gpu
 
-#SBATCH --account=arup-gpu-np
+##SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
-#SBATCH --time=5-0
+#SBATCH --time=2-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a6000|a100"
+#SBATCH --gres=gpu:1 --constraint="3090|a6000|a100"
 
 
 
@@ -20,7 +20,7 @@ ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transfor
 
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
-GIT_BRANCH="decoder_big"
+GIT_BRANCH="float16"
 
 PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
 
@@ -72,14 +72,14 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
-    --batch-size 384 \
+    --batch-size 512 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \

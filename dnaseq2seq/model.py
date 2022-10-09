@@ -133,7 +133,7 @@ class VarTransformer(nn.Module):
         self.decoder0 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
         self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
         self.softmax = nn.LogSoftmax(dim=-1)
-        self.elu = torch.nn.ELU()
+        self.elu = torch.nn.ReLU()
 
     def encode(self, src):
         src = self.elu(self.fc1(src))
