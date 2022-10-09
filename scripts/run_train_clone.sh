@@ -48,8 +48,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_biggermodel"
-RUN_NOTES="Decoder model 8 encoder and 6 decoder layers"
+RUN_NAME="wgs_float16"
+RUN_NOTES="Try 16-bit float precision"
 
 set -x
 
@@ -72,7 +72,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+export ENABLE_WANDB=
 
 $PYTHON $ds2s train \
     -c $CONF \
