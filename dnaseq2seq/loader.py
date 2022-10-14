@@ -24,6 +24,7 @@ from datetime import datetime
 import traceback as tb
 from concurrent.futures import ProcessPoolExecutor
 import io
+import functools
 
 import scipy.stats as stats
 import numpy as np
@@ -205,7 +206,7 @@ class PregenLoader:
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         logger.info(f"Possible sharing strategies: {mp.get_all_sharing_strategies()}")
-        mp.set_sharing_strategy("file_system")
+        #mp.set_sharing_strategy("file_system")
         logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
@@ -239,7 +240,7 @@ class PregenLoader:
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)
+            decomped = decompress_multi_ppe(chain.from_iterable(paths), self.threads)
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
