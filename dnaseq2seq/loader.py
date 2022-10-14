@@ -19,11 +19,10 @@ import math
 from pathlib import Path
 from collections import defaultdict
 from itertools import chain
-import gzip
 import lz4.frame
 from datetime import datetime
 import traceback as tb
-
+from concurrent.futures import ProcessPoolExecutor
 import io
 
 import scipy.stats as stats
@@ -31,6 +30,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 import pysam
+
 
 from bam import (
     target_string_to_tensor,
@@ -136,8 +136,17 @@ def decompress_multi(paths, threads):
     :returns : List of Tensors (all on CPU)
     """
     start = datetime.now()
+    result = []
+    futs = []
+    with ProcessPoolExecutor(threads) as pool:
+        for path in paths:
+            fut = pool.submit(decomp_single, path)
+            futs.append(fut)
 
-    result = [decomp_single(p) for p in paths]
+    for f in fut:
+        result.append(f.result(timeout=120))
+
+    # result = [decomp_single(p) for p in paths]
     elapsed = datetime.now() - start
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
