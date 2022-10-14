@@ -121,9 +121,9 @@ class WeightedLoader:
             yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
 
 
-def decomp_single(path):
+def decomp_single(path, queue):
     with open(path, 'rb') as fh:
-        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
+        queue.put(torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu'))
 
 
 def decompress_multi_ppe(paths, threads):
@@ -135,14 +135,18 @@ def decompress_multi_ppe(paths, threads):
     start = datetime.now()
     result = []
     futs = []
+    q = mp.Queue()
+    dfunc = functools.partial(decomp_single, queue=q)
     with ProcessPoolExecutor(threads) as pool:
         for path in paths:
-            fut = pool.submit(decomp_single, path)
+            fut = pool.submit(dfunc, path)
             futs.append(fut)
 
     for f in futs:
-        data = f.result(timeout=20)
-        result.append(torch.load(io.BytesIO(data), map_location='cpu'))
+        f.result(timeout=20)
+        r = queue.get()
+        logger.info(f"Got : {r}")
+        result.append(r)
 
     #for i, r in enumerate(result):
     #    logger.info(f"Result item {i}: {r.shape}")
