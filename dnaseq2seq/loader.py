@@ -136,11 +136,13 @@ def decompress_multi(paths, threads):
     :returns : List of Tensors (all on CPU)
     """
     start = datetime.now()
-    with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, paths)
-        elapsed = datetime.now() - start
-        logger.info(f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds()/len(result):.3f} secs per item)")
-        return result
+
+    result = [decomp_single(p) for p in paths]
+    elapsed = datetime.now() - start
+    logger.info(
+        f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
+    )
+    return result
 
 
 class PregenLoader:
@@ -164,8 +166,8 @@ class PregenLoader:
         if pathpairs:
             self.pathpairs = pathpairs
         else:
-            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
-            self.pathpairs = random.shuffle(self.pathpairs)
+            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix)
+            random.shuffle(self.pathpairs)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -197,7 +199,7 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        src, tgt, vaftgt = [], [], []
+        src, tgt = [], []
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
@@ -205,10 +207,10 @@ class PregenLoader:
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
-            for j in range(0, len(decomped), 3):
+            for j in range(0, len(decomped), 2):
                 src.append(decomped[j])
                 tgt.append(decomped[j+1])
-                vaftgt.append(decomped[j+2])
+                # vaftgt.append(decomped[j+2])
 
             total_size = sum([s.shape[0] for s in src])
             if total_size < batch_size:
@@ -218,7 +220,7 @@ class PregenLoader:
             # Make a big tensor.
             src_t = torch.cat(src, dim=0)
             tgt_t = torch.cat(tgt, dim=0)
-            vaftgt_t = torch.cat(vaftgt, dim=0)
+            # vaftgt_t = torch.cat(vaftgt, dim=0)
 
             nbatch = total_size // batch_size
             remain = total_size % batch_size
@@ -241,9 +243,9 @@ class PregenLoader:
                 # The remaining data points will be in next batch. 
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
-                vaftgt = [vaftgt_t[nbatch * batch_size:]]
+                # vaftgt = [vaftgt_t[nbatch * batch_size:]]
             else:
-                src, tgt, vaftgt = [], [], []
+                src, tgt = [], []
 
 
         if len(src) > 0:
@@ -355,71 +357,6 @@ class MultiLoader:
                 yield src, tgt, None, None, None
 
 
-class BWASimLoader:
-
-    def __init__(self, device, regions, refpath, readsperpileup, readlength, error_rate, clip_prob):
-        self.batches_in_epoch = 10
-        self.regions = bwasim.load_regions(regions)
-        self.refpath = refpath
-        self.device = device
-        self.readsperpileup = readsperpileup
-        self.readlength = readlength
-        self.error_rate = error_rate
-        self.clip_prob = clip_prob
-        self.sim_data = []
-
-
-    def iter_once(self, batch_size):
-        if len(self.sim_data):
-            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
-
-        for i in range(self.batches_in_epoch):
-            if len(self.sim_data) <= i:
-                src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
-                                                              self.regions,
-                                                              self.refpath,
-                                                              numreads=self.readsperpileup,
-                                                              readlength=self.readlength,
-                                                              vaf_func=bwasim.betavaf,
-                                                              var_funcs=None,
-                                                              error_rate=self.error_rate,
-                                                              clip_prob=self.clip_prob)
-
-                self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[i]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
-
-
-class SimLoader:
-
-    def __init__(self, device, seqlen, readsperbatch, readlength, error_rate, clip_prob):
-        self.batches_in_epoch = 10
-        self.device = device
-        self.seqlen = seqlen
-        self.readsperbatch = readsperbatch
-        self.readlength = readlength
-        self.error_rate = error_rate
-        self.clip_prob = clip_prob
-        self.sim_data = []
-
-
-    def iter_once(self, batch_size):
-        if len(self.sim_data):
-            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
-
-        for i in range(self.batches_in_epoch):
-            if len(self.sim_data) <= i:
-                src, tgt, vaftgt, altmask = sim.make_mixed_batch(batch_size,
-                                            seqlen=self.seqlen,
-                                            readsperbatch=self.readsperbatch,
-                                            readlength=self.readlength,
-                                            error_rate=self.error_rate,
-                                            clip_prob=self.clip_prob)
-                self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[-1]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
-
-
 def trim_pileuptensor(src, tgt, width):
     """
     Trim or zero-pad the sequence dimension of src and target (first dimension of src, second of target)
@@ -440,30 +377,6 @@ def trim_pileuptensor(src, tgt, width):
         tgt = tgt[:, start:start+width]
 
     return src, tgt
-
-
-# def assign_class_indexes(rows):
-#     """
-#     Iterate over every row in rows and create a list of class indexes for each element
-#     , where class index is currently row.vtype-row.status. So a class will be something like
-#     snv-TP or small_del-FP, and each class gets a unique number
-#     :returns : 1. List of class indexes across rows.
-#                2. A dictionary keyed by class index and valued by class names.
-#     """
-#     classcount = 0
-#     classes = defaultdict(int)
-#     idxs = []
-#     for row in rows:
-#         clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
-#         if clz in classes:
-#             idx = classes[clz]
-#         else:
-#             idx = classcount
-#             classcount += 1
-#             classes[clz] = idx
-#         idxs.append(idx)
-#     class_names = {v: k for k, v in classes.items()}
-#     return idxs, class_names
 
 
 def parse_rows_classes(bed):

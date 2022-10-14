@@ -8,23 +8,24 @@
 
 
 \title{Jovian enables direct inference of germline haplotypes from short reads via sequence-to-sequence modeling}
-\author[1]{Brendan O'Fallon}
-\author[1]{Ashini Bolia}
-\author[1]{Jacob Durtschi}
-\author[1]{Luobin Yang}
-\author[1]{Eric Frederickson}
-\author[1]{Katherine Noble}
-\author[1]{Joshua Coleman}
-\author[1]{Hunter Best}
+\author{Author names witheld during review}
+%\author[1]{Brendan O'Fallon}
+%\author[1]{Ashini Bolia}
+%\author[1]{Jacob Durtschi}
+%\author[1]{Luobin Yang}
+%\author[1]{Eric Frederickson}
+%\author[1]{Katherine Noble}
+%\author[1]{Joshua Coleman}
+%\author[1]{Hunter Best}
 
-\affil[1]{ARUP Institute for Clinical and Experimental Pathology, Salt Lake City, UT}
+%\affil[1]{ARUP Institute for Clinical and Experimental Pathology, Salt Lake City, UT}
 \date{}
 \begin{document}
 
 \maketitle
 
 \begin{abstract}
-	Detection of germline variants in next-generation sequencing data is an essential component of modern genomics analysis. Variant detection tools typically rely on statistical algorithms such as de Bruijn graphs, Hidden Markov Models and regression models, often coupled with heuristic techniques and thresholds to identify variants. Here we describe a new approach that replaces these handcrafted statistical methods with a single, end-to-end deep learning model that directly infers germline haplotypes from short read pileups. Our model, called Jovian, frames variant detection as a sequence-to-sequence modeling task, akin to language translation, and employs a transformer-based architecture to translate alignment columns into two predicted haplotype sequences. After training with 17 whole genome sequences from Genome-in-a-Bottle cell lines, we demonstrate that this method learns to realign complex and ambiguous read mappings to produce accurate haplotype predictions, predicts variant genotypes and phase accurately, and leverages the local read context to inform predictions about a given position. We also demonstrate that a 2-dimensional positional encoding significantly improved precision of the detected variants. Compared to other callers, sensitivity and precision is higher than GATK HaplotypeCaller, but lower than DeepVariant and Strelka2. 
+	Detection of germline variants in next-generation sequencing data is an essential component of modern genomics analysis. Variant detection tools typically rely on statistical algorithms such as de Bruijn graphs, Hidden Markov Models and regression models, often coupled with heuristic techniques and thresholds to identify variants. Here we describe a new approach that replaces these handcrafted statistical methods with a single, end-to-end deep learning model that directly infers germline haplotypes from short read pileups. Our model, called Jovian, frames variant detection as a sequence-to-sequence modeling task, akin to language translation, and employs a transformer-based architecture to translate alignment columns into two predicted haplotype sequences. After training with 17 whole genome sequences from Genome-in-a-Bottle cell lines, we demonstrate that this method learns to realign complex and ambiguous read mappings to produce accurate haplotype predictions, infers variant genotype and phase accurately, and leverages the local read context to inform predictions about a given position. We also demonstrate that a 2-dimensional positional encoding significantly improved precision of the detected variants. Compared to other callers, sensitivity and precision are higher than GATK HaplotypeCaller, but lower than DeepVariant and Strelka2. 
 \end{abstract}
 
 
@@ -126,7 +127,7 @@ The random forest classifier is trained by calling variants on selected regions 
 	 Gnomad genome frequency (v2.0.2) of variant \\
 	 Zygosity (heterozygous or homozygous) of variant \\
 	 Fraction of reads in BAM/CRAM supporting variant call \\
-	 Fraction of reads with mapping quality > 10 supporting variant call \\
+	 Fraction of reads with mapping quality $>$ 10 supporting variant call \\
 	 Total number of reads supporting variant call \\
 	\end{tabular}
 	\label{table:features}
@@ -263,7 +264,7 @@ To our knowledge, the transformer architecture has not been previously explored 
 
 In this work we have used a standard cross-entropy loss function that simply compares each prediction at base $i$ to the label at base $i$ for each haplotype. While training with this loss yields accurate results, it has two shortcomings. First, the impact of an insertion / deletion (indel) error depends on its position in the region, with indels at lower indices leading to a greater number of mismatches and high loss compared to indels at higher indices. Secondly, indel errors are punished more severely than similar SNV errors. We hypothesize the second fact contributes to the lower performance of our model on SNV calls compared to indels. Alternative, alignment-based loss functions such as those described by Baid et al. (2021) and Petti et al. (2021) may provide a path forward, however the Petti implementation lead to lower sensitivity and much longer training times in our experiments. 
 
-Our model uses an unmodified transformer encoder with a very simple decoder consisting of just two fully connected layers, and we leave to future work exploration of the many transformer variations proposed in recent years (e.g. Dosovitskiy 2018, Fedus et al. 2021, Liu et al. 2021, Wu et al. 2021). Our simple decoder has a fixed length equal to the number of input tokens (genomic positions), but a natural improvement would be to add a more sophisticated decoder capable of producing a variable length sequence to handle larger insertion and deletion events.  In addition, newer transformer models that avoid the $O(n^2)$ scaling with the number of input tokens may be able to handle longer input sequence lengths, and therefore may be able to detect larger variants. 
+Our model uses an unmodified transformer encoder with a very simple decoder consisting of just two fully connected layers, and we leave to future work exploration of the many transformer variations proposed in recent years (e.g. Dosovitskiy 2018, Fedus et al. 2021, Liu et al. 2021, Wu et al. 2021). Our simple decoder has a fixed length equal to the number of input tokens (genomic positions), but a natural improvement would be to add a more sophisticated autoregressive decoder capable of producing a variable length sequence to handle larger insertion and deletion events.  In addition, newer transformer models that avoid the $O(n^2)$ scaling with the number of input tokens may be able to handle longer input sequence lengths, and therefore may be able to detect larger variants. 
 
 
 \section{Availability}
