@@ -126,7 +126,7 @@ def decomp_single(path):
         return lz4.frame.decompress(fh.read())
 
 
-def decompress_multi(paths, threads):
+def decompress_multi_ppe(paths, threads):
     """
     Read & decompress all of the items in the paths with lz4, then load them into Tensors
     but keep them on the CPU
@@ -146,6 +146,24 @@ def decompress_multi(paths, threads):
 
     #for i, r in enumerate(result):
     #    logger.info(f"Result item {i}: {r.shape}")
+        
+    elapsed = datetime.now() - start
+    logger.info(
+        f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
+    )
+    return result
+
+def decompress_multi_map(paths, threads):
+    """
+    Read & decompress all of the items in the paths with lz4, then load them into Tensors
+    but keep them on the CPU
+    :returns : List of Tensors (all on CPU)
+    """
+    start = datetime.now()
+    result = []
+    with mp.Pool(threads) as pool:
+        result = pool.map(decomp_single, path)
+
         
     elapsed = datetime.now() - start
     logger.info(
@@ -180,6 +198,8 @@ class PregenLoader:
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
+        logger.info(f"Possible sharing strategies: {mp.get_all_sharing_strategies()}")
+        logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
 
@@ -212,7 +232,7 @@ class PregenLoader:
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_multi(chain.from_iterable(paths), self.threads)
+            decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 

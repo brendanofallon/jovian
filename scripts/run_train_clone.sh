@@ -48,8 +48,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_biggermodel_cont"
-RUN_NOTES="Decoder model 8 encoder and 6 decoder layers, continued"
+RUN_NAME="test_deadlock4"
+RUN_NOTES="deadlock testing"
 
 set -x
 
@@ -72,7 +72,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+export ENABLE_WANDB=
 
 $PYTHON $ds2s train \
     -c $CONF \
@@ -83,7 +83,7 @@ $PYTHON $ds2s train \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    --threads 4 \
+    --threads 8 \
     -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_biggermodel/wgs_decoder_biggermodel_epoch6.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
