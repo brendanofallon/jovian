@@ -125,8 +125,10 @@ class WeightedLoader:
 def decomp_single(path, queue):
     logger.info("Entering function")
     with open(path, 'rb') as fh:
+        logger.info("Decompressing...")
+        d = io.BytesIO(lz4.frame.decompress(fh.read()))
         logger.info("Putting item in queue...")
-        queue.put(torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu'))
+        queue.put(torch.load(d, map_location='cpu'))
     logger.info("func returning...")
 
 
