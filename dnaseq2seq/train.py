@@ -447,7 +447,7 @@ def train_epochs(epochs,
 
     if val_dir:
         logger.info(f"Using validation data in {val_dir}")
-        val_loader = loader.PregenLoader(device=DEVICE, datadir=val_dir, threads=8, tgt_prefix="tgkmers")
+        val_loader = loader.PregenLoader(device=DEVICE, datadir=val_dir, max_decomped_batches=4, threads=8, tgt_prefix="tgkmers")
     else:
         logger.info(f"No val. dir. provided retaining a few training samples for validation")
         valpaths = dataloader.retain_val_samples(fraction=0.05)

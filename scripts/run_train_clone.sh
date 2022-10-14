@@ -6,7 +6,7 @@
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --time=5-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
