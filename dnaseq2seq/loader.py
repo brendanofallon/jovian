@@ -122,11 +122,8 @@ class WeightedLoader:
 
 
 def decomp_single(path):
-    if str(path).endswith('.lz4'):
-        with open(path, 'rb') as fh:
-            return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
-    else:
-        return torch.load(path, map_location='cpu')
+    with open(path, 'rb') as fh:
+        return lz4.frame.decompress(fh.read())
 
 
 def decompress_multi(paths, threads):
@@ -143,10 +140,13 @@ def decompress_multi(paths, threads):
             fut = pool.submit(decomp_single, path)
             futs.append(fut)
 
-    for f in fut:
-        result.append(f.result(timeout=120))
+    for f in futs:
+        data = f.result(timeout=20)
+        result.append(torch.load(io.BytesIO(data), map_location='cpu'))
 
-    # result = [decomp_single(p) for p in paths]
+    #for i, r in enumerate(result):
+    #    logger.info(f"Result item {i}: {r.shape}")
+        
     elapsed = datetime.now() - start
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
@@ -169,7 +169,6 @@ class PregenLoader:
         self.datadir = Path(datadir) if datadir else None
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
-        self.vaftgt_prefix = vaftgt_prefix
         if pathpairs and datadir:
             raise ValueError(f"Both datadir and pathpairs specified for PregenLoader - please choose just one")
         if pathpairs:
@@ -220,7 +219,6 @@ class PregenLoader:
             for j in range(0, len(decomped), 2):
                 src.append(decomped[j])
                 tgt.append(decomped[j+1])
-                # vaftgt.append(decomped[j+2])
 
             total_size = sum([s.shape[0] for s in src])
             if total_size < batch_size:
@@ -230,7 +228,6 @@ class PregenLoader:
             # Make a big tensor.
             src_t = torch.cat(src, dim=0)
             tgt_t = torch.cat(tgt, dim=0)
-            # vaftgt_t = torch.cat(vaftgt, dim=0)
 
             nbatch = total_size // batch_size
             remain = total_size % batch_size
@@ -253,7 +250,6 @@ class PregenLoader:
                 # The remaining data points will be in next batch. 
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
-                # vaftgt = [vaftgt_t[nbatch * batch_size:]]
             else:
                 src, tgt = [], []
 
@@ -263,7 +259,7 @@ class PregenLoader:
             yield (
                 torch.cat(src, dim=0).to(self.device).float(),
                 torch.cat(tgt, dim=0).to(self.device).long(),
-                None, #atorch.cat(vaftgt, dim=0).to(self.device),
+                None, 
                 None,
                 {"decomp_time": 0.0},
             )
