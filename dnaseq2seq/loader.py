@@ -123,7 +123,7 @@ class WeightedLoader:
 
 def decomp_single(path):
     with open(path, 'rb') as fh:
-        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read()), map_location='cpu')
+        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
 
 
 def decompress_multi_ppe(paths, threads):
