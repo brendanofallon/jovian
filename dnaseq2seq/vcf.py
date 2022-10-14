@@ -1,8 +1,9 @@
 
 import numpy as np
-import ssw_aligner
 from dataclasses import dataclass
 import pysam
+
+from skbio.alignment import StripedSmithWaterman
 
 @dataclass
 class Variant:
@@ -91,13 +92,12 @@ def align_sequences(query, target):
     """
     Return Smith-Watterman alignment of both sequences
     """
-    aln = ssw_aligner.local_pairwise_align_ssw(query,
-                                               target,
-                                               gap_open_penalty=3,
-                                               gap_extend_penalty=1,
-                                               match_score=2,
-                                               mismatch_score=-1)
-    return aln
+    ssw = StripedSmithWaterman(query,
+                               gap_open_penalty=3,
+                               gap_extend_penalty=1,
+                               match_score=2,
+                               mismatch_score=-1)
+    return ssw(target)
 
 
 def _mismatches_to_vars(query, target, offset, probs):
@@ -477,3 +477,8 @@ def vars_to_vcf(vcf_file, variants):
     for var in variants:
         r = create_vcf_rec(var, vcf_file)
         vcf_file.write(r)
+
+
+if __name__=="__main__":
+    aln = align_sequences("ACTGACTG", "ACGACTG")
+    print(aln)

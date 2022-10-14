@@ -1,4 +1,15 @@
 
+"""
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this program.
+If not, see <https://www.gnu.org/licenses/>.
+"""
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -125,11 +136,13 @@ def decompress_multi(paths, threads):
     :returns : List of Tensors (all on CPU)
     """
     start = datetime.now()
-    with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, paths)
-        elapsed = datetime.now() - start
-        logger.info(f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds()/len(result):.3f} secs per item)")
-        return result
+
+    result = [decomp_single(p) for p in paths]
+    elapsed = datetime.now() - start
+    logger.info(
+        f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
+    )
+    return result
 
 
 class PregenLoader:
@@ -153,7 +166,7 @@ class PregenLoader:
         if pathpairs:
             self.pathpairs = pathpairs
         else:
-            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
+            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix)
             random.shuffle(self.pathpairs)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
@@ -186,8 +199,8 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        src, tgt, vaftgt = [], [], []
         random.shuffle(self.pathpairs)
+        src, tgt = [], []
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
@@ -195,10 +208,10 @@ class PregenLoader:
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
-            for j in range(0, len(decomped), 3):
+            for j in range(0, len(decomped), 2):
                 src.append(decomped[j])
                 tgt.append(decomped[j+1])
-                vaftgt.append(decomped[j+2])
+                # vaftgt.append(decomped[j+2])
 
             total_size = sum([s.shape[0] for s in src])
             if total_size < batch_size:
@@ -208,7 +221,7 @@ class PregenLoader:
             # Make a big tensor.
             src_t = torch.cat(src, dim=0)
             tgt_t = torch.cat(tgt, dim=0)
-            vaftgt_t = torch.cat(vaftgt, dim=0)
+            # vaftgt_t = torch.cat(vaftgt, dim=0)
 
             nbatch = total_size // batch_size
             remain = total_size % batch_size
@@ -231,9 +244,9 @@ class PregenLoader:
                 # The remaining data points will be in next batch. 
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
-                vaftgt = [vaftgt_t[nbatch * batch_size:]]
+                # vaftgt = [vaftgt_t[nbatch * batch_size:]]
             else:
-                src, tgt, vaftgt = [], [], []
+                src, tgt = [], []
 
 
         if len(src) > 0:
@@ -365,30 +378,6 @@ def trim_pileuptensor(src, tgt, width):
         tgt = tgt[:, start:start+width]
 
     return src, tgt
-
-
-# def assign_class_indexes(rows):
-#     """
-#     Iterate over every row in rows and create a list of class indexes for each element
-#     , where class index is currently row.vtype-row.status. So a class will be something like
-#     snv-TP or small_del-FP, and each class gets a unique number
-#     :returns : 1. List of class indexes across rows.
-#                2. A dictionary keyed by class index and valued by class names.
-#     """
-#     classcount = 0
-#     classes = defaultdict(int)
-#     idxs = []
-#     for row in rows:
-#         clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
-#         if clz in classes:
-#             idx = classes[clz]
-#         else:
-#             idx = classcount
-#             classcount += 1
-#             classes[clz] = idx
-#         idxs.append(idx)
-#     class_names = {v: k for k, v in classes.items()}
-#     return idxs, class_names
 
 
 def parse_rows_classes(bed):
@@ -584,33 +573,33 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
 
 
 
-def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
-    allsrc = []
-    alltgt = []
-    count = 0
-    seq_len = 150
-    logger.info(f"Creating new data loader from {bampath}")
-    counter = defaultdict(int)
-    classes = []
-    for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
-        status, vtype = row.status, row.vtype
-        label_class = "-".join((status, vtype))
-        classes.append(label_class)
-        counter[label_class] += 1
-        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
-        assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
-        assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
-        allsrc.append(src)
-        alltgt.append(tgt)
-        count += 1
-        if count % 100 == 0:
-            logger.info(f"Loaded {count} tensors from {csv}")
-        if count == max_to_load:
-            logger.info(f"Stopping tensor load after {max_to_load}")
-            break
-    logger.info(f"Loaded {count} tensors from {csv}")
-    logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
-    weights = np.array([1.0 / counter[c] for c in classes])
-    return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
+# def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
+#     allsrc = []
+#     alltgt = []
+#     count = 0
+#     seq_len = 150
+#     logger.info(f"Creating new data loader from {bampath}")
+#     counter = defaultdict(int)
+#     classes = []
+#     for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+#         status, vtype = row.status, row.vtype
+#         label_class = "-".join((status, vtype))
+#         classes.append(label_class)
+#         counter[label_class] += 1
+#         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+#         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
+#         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+#         allsrc.append(src)
+#         alltgt.append(tgt)
+#         count += 1
+#         if count % 100 == 0:
+#             logger.info(f"Loaded {count} tensors from {csv}")
+#         if count == max_to_load:
+#             logger.info(f"Stopping tensor load after {max_to_load}")
+#             break
+#     logger.info(f"Loaded {count} tensors from {csv}")
+#     logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
+#     weights = np.array([1.0 / counter[c] for c in classes])
+#     return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
 
 

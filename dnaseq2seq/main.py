@@ -1,5 +1,16 @@
 #!/usr/bin/env python
 
+"""
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this program.
+If not, see <https://www.gnu.org/licenses/>.
+"""
+
 import sys
 import logging
 import random
@@ -161,7 +172,7 @@ def alphanumeric_no_spaces(name):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
 
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
@@ -215,11 +226,11 @@ def main():
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()
-    args.cmdline = " ".join(sys.argv[1:])
-    args.cl_args = vars(args).copy()  # command line copy for logging
-    if len(vars(args)) == 0 or getattr(args, 'func') is None:
-        print(args.usage())
+    if len(vars(args)) == 0 or not hasattr(args, 'func'):
+        parser.print_help()
     else:
+        args.cmdline = " ".join(sys.argv[1:])
+        args.cl_args = vars(args).copy()  # command line copy for logging
         args.func(**vars(args))
 
 
