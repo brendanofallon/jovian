@@ -201,6 +201,7 @@ class PregenLoader:
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         logger.info(f"Possible sharing strategies: {mp.get_all_sharing_strategies()}")
+        mp.set_sharing_strategy("file_system")
         logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
