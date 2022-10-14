@@ -124,7 +124,9 @@ class WeightedLoader:
 
 def decomp_single(path, queue):
     with open(path, 'rb') as fh:
+        logger.info("PUtting item in queue...")
         queue.put(torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu'))
+    logger.info("func returning...")
 
 
 def decompress_multi_ppe(paths, threads):
@@ -143,9 +145,11 @@ def decompress_multi_ppe(paths, threads):
             fut = pool.submit(dfunc, path)
             futs.append(fut)
 
+    logger.info(f"Submitted all the funcs, now waiting for results, length: {len(q)}")
     for f in futs:
+        logger.info("Waiting for item...")
         f.result(timeout=20)
-        r = queue.get()
+        r = q.get()
         logger.info(f"Got : {r}")
         result.append(r)
 
