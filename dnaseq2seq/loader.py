@@ -135,6 +135,7 @@ def decompress_multi_ppe(paths, threads):
     but keep them on the CPU
     :returns : List of Tensors (all on CPU)
     """
+    logger.info("Hey we are in the function")
     start = datetime.now()
     result = []
     futs = []
