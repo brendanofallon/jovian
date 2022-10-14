@@ -48,8 +48,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_biggermodel"
-RUN_NOTES="Decoder model 8 encoder and 6 decoder layers"
+RUN_NAME="wgs_decoder_biggermodel_cont"
+RUN_NOTES="Decoder model 8 encoder and 6 decoder layers, continued"
 
 set -x
 
@@ -84,6 +84,7 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 4 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_biggermodel/wgs_decoder_biggermodel_epoch6.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
