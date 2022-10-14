@@ -153,6 +153,7 @@ def decompress_multi_ppe(paths, threads):
     )
     return result
 
+
 def decompress_multi_map(paths, threads):
     """
     Read & decompress all of the items in the paths with lz4, then load them into Tensors
@@ -160,11 +161,12 @@ def decompress_multi_map(paths, threads):
     :returns : List of Tensors (all on CPU)
     """
     start = datetime.now()
-    result = []
+    decompressed = []
     with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, paths)
-
-        
+        decompressed = pool.map(decomp_single, paths)
+    
+    result = [torch.load(io.BytesIO(d), map_location='cpu') for d in decompressed]
+           
     elapsed = datetime.now() - start
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
