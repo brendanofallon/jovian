@@ -162,7 +162,7 @@ def decompress_multi_map(paths, threads):
     start = datetime.now()
     result = []
     with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, path)
+        result = pool.map(decomp_single, paths)
 
         
     elapsed = datetime.now() - start
