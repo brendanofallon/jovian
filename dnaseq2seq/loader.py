@@ -191,9 +191,9 @@ def decompress_multi_map(paths, threads):
 
 def decomp_profile(paths, threads):
     result = []
-    read_sum = 0
-    decomp_sum = 0
-    load_sum = 0
+    read_sum = datetime.timedelta(0)
+    decomp_sum = datetime.timedelta(0)
+    load_sum = datetime.timedelta(0)
     for path in paths:
         start = datetime.now()
         with open(path, 'rb') as fh:
