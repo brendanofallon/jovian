@@ -189,6 +189,34 @@ def decompress_multi_map(paths, threads):
     return result
 
 
+def decomp_profile(paths, threads):
+    result = []
+    read_sum = 0
+    decomp_sum = 0
+    load_sum = 0
+    for path in paths:
+        start = datetime.now()
+        with open(path, 'rb') as fh:
+            r = fh.read()
+        read_dt = datetime.now()
+        d = io.BytesIO(lz4.frame.decompress(r))
+        decomp_dt = datetime.now()
+        t = torch.load(d, map_location='cpu')
+        load_dt = datetime.now()
+        result.append(t)        
+        read_sum += read_dt - start
+        decomp_sum += decomp_dt - read_dt
+        load_sum += load_dt - decomp-dt
+
+    tot = read_sum + decomp_sum + load_sum
+    logger.info(f"Decomped {len(paths)} items")
+    logger.info(f"Total decomp time (secs): {tot.total_seconds() :.6f}")
+    logger.info(f"Read frac: {read_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    logger.info(f"Decomp frac: {decomp_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    logger.info(f"Load frac: {load_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    return result
+
+
 class PregenLoader:
 
     def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
@@ -250,7 +278,7 @@ class PregenLoader:
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_multi_ppe(chain.from_iterable(paths), self.threads)
+            decomped = decompress_profile(chain.from_iterable(paths), self.threads)
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
