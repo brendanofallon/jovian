@@ -48,8 +48,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="test_deadlock4"
-RUN_NOTES="deadlock testing"
+RUN_NAME="profile_loading"
+RUN_NOTES="profiling exprs"
 
 set -x
 

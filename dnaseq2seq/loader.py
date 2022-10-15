@@ -278,7 +278,7 @@ class PregenLoader:
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_profile(chain.from_iterable(paths), self.threads)
+            decomped = decomp_profile(chain.from_iterable(paths), self.threads)
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
