@@ -20,7 +20,7 @@ from pathlib import Path
 from collections import defaultdict
 from itertools import chain
 import lz4.frame
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback as tb
 from concurrent.futures import ProcessPoolExecutor
 import io
@@ -191,9 +191,9 @@ def decompress_multi_map(paths, threads):
 
 def decomp_profile(paths, threads):
     result = []
-    read_sum = datetime.timedelta(0)
-    decomp_sum = datetime.timedelta(0)
-    load_sum = datetime.timedelta(0)
+    read_sum = timedelta(0)
+    decomp_sum = timedelta(0)
+    load_sum = timedelta(0)
     for path in paths:
         start = datetime.now()
         with open(path, 'rb') as fh:
