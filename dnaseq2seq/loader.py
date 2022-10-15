@@ -191,6 +191,7 @@ def decompress_multi_map(paths, threads):
 
 def decomp_profile(paths, threads):
     result = []
+    paths = list(paths)
     read_sum = timedelta(0)
     decomp_sum = timedelta(0)
     load_sum = timedelta(0)
