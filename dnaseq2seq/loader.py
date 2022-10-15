@@ -122,14 +122,9 @@ class WeightedLoader:
             yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
 
 
-def decomp_single(path, queue):
-    logger.info("Entering function")
+def decomp_single(path):
     with open(path, 'rb') as fh:
-        logger.info("Decompressing...")
-        d = io.BytesIO(lz4.frame.decompress(fh.read()))
-        logger.info("Putting item in queue...")
-        queue.put(torch.load(d, map_location='cpu'))
-    logger.info("func returning...")
+        return lz4.frame.decompress(fh.read())
 
 
 def decompress_multi_ppe(paths, threads):
@@ -178,9 +173,9 @@ def decompress_multi_map(paths, threads):
     start = datetime.now()
     decompressed = []
     with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, paths)
+        decompressed = pool.map(decomp_single, paths)
     
-    #result = [torch.load(io.BytesIO(d), map_location='cpu') for d in decompressed]
+    result = [torch.load(io.BytesIO(d), map_location='cpu') for d in decompressed]
            
     elapsed = datetime.now() - start
     logger.info(
@@ -280,7 +275,7 @@ class PregenLoader:
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decomp_profile(chain.from_iterable(paths), self.threads)
+            decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
