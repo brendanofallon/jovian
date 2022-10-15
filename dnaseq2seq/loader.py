@@ -204,9 +204,10 @@ def decomp_profile(paths, threads):
         t = torch.load(d, map_location='cpu')
         load_dt = datetime.now()
         result.append(t)        
-        read_sum += read_dt - start
-        decomp_sum += decomp_dt - read_dt
-        load_sum += load_dt - decomp-dt
+        
+        read_sum = read_sum + (read_dt - start)
+        decomp_sum = decomp_sum + (decomp_dt - read_dt)
+        load_sum = load_sum + (load_dt - decomp_dt)
 
     tot = read_sum + decomp_sum + load_sum
     logger.info(f"Decomped {len(paths)} items")
