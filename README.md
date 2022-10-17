@@ -8,6 +8,10 @@ any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or deci
 quality cutoffs, kmer-sizes, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
+
+Please refer to [the preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for more details
+
+
 ### Installation
 
 Just navigate to the repository directory and 
