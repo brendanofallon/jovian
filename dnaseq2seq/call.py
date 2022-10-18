@@ -134,8 +134,8 @@ def load_model(model_path):
     encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
-    encoder_layers = 6
-    decoder_layers = 4 # was 2
+    encoder_layers = 8
+    decoder_layers = 6 # was 2
     embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,

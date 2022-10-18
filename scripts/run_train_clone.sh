@@ -49,7 +49,7 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_biggermodel_cont2"
+RUN_NAME="wgs_decoder_biggermodel_cont3"
 RUN_NOTES="Contination of wgs bigger model, with train data on vast system"
 
 set -x
@@ -85,7 +85,7 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 8 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_biggermodel_cont/wgs_decoder_biggermodel_cont_epoch0.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_biggermodel_cont2/wgs_decoder_biggermodel_cont2_epoch0.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
