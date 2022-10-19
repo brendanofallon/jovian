@@ -14,6 +14,7 @@ If not, see <https://www.gnu.org/licenses/>.
 import sys
 import logging
 import random
+import os
 from collections import defaultdict
 from pathlib import Path
 from string import ascii_letters, digits
@@ -35,7 +36,8 @@ from call import call
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
-                    level=logging.INFO) # handlers=[RichHandler()])
+                    level=os.environ.get('JV_LOGLEVEL', logger.INFO)) # handlers=[RichHandler()])
+
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
