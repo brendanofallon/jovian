@@ -36,7 +36,7 @@ from call import call
 
 logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
-                    level=os.environ.get('JV_LOGLEVEL', logger.INFO)) # handlers=[RichHandler()])
+                    level=os.environ.get('JV_LOGLEVEL', logging.INFO)) # handlers=[RichHandler()])
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,7 @@ def alphanumeric_no_spaces(name):
 
 
 def main():
+    logger.debug("Turning on DEBUG log level")
     parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
 

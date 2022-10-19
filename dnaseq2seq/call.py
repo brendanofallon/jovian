@@ -422,7 +422,7 @@ def call_variants_on_chrom(
                 chrom_nvar += chunk_nvar
         else:
             futs = []
-            with ProcessPoolExecutor(max_workers=threads) as pool:
+            with ProcessPoolExecutor(max_workers=2) as pool:
                 for chunk in chunks:
                     fut = pool.submit(process_chunk_func, chunk)
                     futs.append(fut)
@@ -597,9 +597,12 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     n_output_toks = 37 # OK, this should be made a little more general...
+    logger.debug(f"Predicting sequence for batch of size {encoded_reads.shape[0]}, first offset is: {batch_pos_offsets[0]}")
     seq_preds = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
+    logger.debug("Done predicting")
     calledvars = []
     for b in range(seq_preds.shape[0]):
+        logger.debug(f"Computing variants for batch item {b}")
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         offset = batch_pos_offsets[b]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
