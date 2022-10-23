@@ -10,6 +10,7 @@ import io
 from pathlib import Path
 import logging
 import shutil
+from itertools import chain
 
 logger = logging.getLogger(__name__)
 
@@ -289,17 +290,22 @@ def tgt_to_kmers(tgt):
     return torch.stack(result, dim=0)
 
 
+def expand_to_bases(probs, expansion_factor=TGT_KMER_SIZE):
+    return list(chain(*([k]*expansion_factor for k in probs)))
+
 
 def predict_sequence(src, model, n_output_toks, device):
     """
     Generate a predicted sequence with next-word prediction be repeatedly calling the model
     """
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
+    probs = torch.zeros(src.shape[0], 2, 1).float()
     mem = model.encode(src)
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
-        tophit = torch.argmax(new_preds, dim=-1)
+        new_probs, tophit = torch.max(new_preds, dim=-1)
         p = torch.nn.functional.one_hot(tophit, num_classes=260)
         predictions = torch.concat((predictions, p), dim=2)
-    return predictions[:, :, 1:, :]
+        probs = torch.concat((probs, new_probs), dim=-1)
+    return predictions[:, :, 1:, :], probs[:, :, 1:]

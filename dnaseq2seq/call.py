@@ -27,6 +27,7 @@ import torch
 import torch.multiprocessing as mp
 import pysam
 import pandas as pd
+import numpy as np
 
 from model import VarTransformer
 import buildclf
@@ -81,51 +82,6 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                     yield col.reference_pos
                     break
 
-
-# def reconcile_current_window(prev_win, current_win):
-#     """
-#     modify variant parameters in current window depending on any overlapping variants in previous window
-#     :param prev_win: variant dict for previous window (to left of current)
-#     :param current_win: variant dict for current window (most recent variants called)
-#     :return: modified variant dict for current window
-#     """
-#     overlap_vars = set(prev_win) & set(current_win)
-#
-#     # swap haplotypes if supported by previous window
-#     same_hap_var_count, opposite_hap_var_count = 0, 0
-#     for v in overlap_vars:
-#         if prev_win[v].het and current_win[v].het:
-#             if prev_win[v].haplotype == current_win[v].haplotype:
-#                 same_hap_var_count += 1
-#             else:
-#                 opposite_hap_var_count += 1
-#     if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-#         for k, v in current_win.items():
-#             current_win[k].genotype = tuple(reversed(current_win[k].genotype))
-#             if v.het and v.haplotype == 0:
-#                 v.haplotype = 1
-#             elif v.het and v.haplotype == 1:
-#                 v.haplotype = 0
-#
-#     for var in overlap_vars:
-#         # if hom in both windows
-#         #   - just mark as DUPLICATE
-#         if not prev_win[var].het and not current_win[var].het:
-#             current_win[var].duplicate = True
-#         # if het in both windows and same genotype order ( 0|1 or 1|0 )
-#         #   - change phase set (PS) of current window to previous window
-#         #   - mark var as DUPLICATE in current window
-#         if prev_win[var].het and current_win[var].het and prev_win[var].genotype == current_win[var].genotype:
-#             current_win[var].duplicate = True
-#             for v in current_win:
-#                 current_win[v].phase_set = prev_win[var].phase_set
-#         # if het in both windows and different haplotype (hap0 or hap1)
-#         #   - change phase set (PS) of current window to prev window
-#         #   - mark var as DUPLICATE in current window
-#         #   - reverse genotype of all current window vars (i.e., (0,1) to (1,0))
-#         if prev_win[var].het and current_win[var].het and prev_win[var].genotype != current_win[var].genotype:
-#             current_win[var].duplicate = True
-#     return current_win
 
 
 def load_model(model_path):
@@ -599,17 +555,20 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     n_output_toks = 37 # OK, this should be made a little more general...
-    seq_preds = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
+    seq_preds, probs = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
+    probs = probs.detach().cpu().numpy()
     calledvars = []
     for b in range(seq_preds.shape[0]):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         offset = batch_pos_offsets[b]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
+        probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
+        probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
         refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset) if v.pos < offset + var_retain_window_size)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset) if v.pos < offset + var_retain_window_size)
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if v.pos < offset + var_retain_window_size)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if v.pos < offset + var_retain_window_size)
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
