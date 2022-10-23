@@ -597,12 +597,9 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     n_output_toks = 37 # OK, this should be made a little more general...
-    logger.debug(f"Predicting sequence for batch of size {encoded_reads.shape[0]}, first offset is: {batch_pos_offsets[0]}")
     seq_preds = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
-    logger.debug("Done predicting")
     calledvars = []
     for b in range(seq_preds.shape[0]):
-        logger.debug(f"Computing variants for batch item {b}")
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         offset = batch_pos_offsets[b]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
@@ -646,11 +643,13 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.75 * window_size)  # We start with regions a bit upstream of the focal / target region
+    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
-    while window_start <= end:
+    logger.debug(f"Encoding region {chrom}:{start}-{end}")
+    while window_start <= (end - 0.1 * window_size):
+        logger.debug(f"Window start: {window_start}")
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
@@ -807,4 +806,5 @@ def merge_genotypes(genos):
     for v in results[1]:
         allvars1[v.key] = [t for t in allvars if t.key == v.key]
     return allvars0, allvars1
+
 

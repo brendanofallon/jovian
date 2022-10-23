@@ -214,11 +214,11 @@ def bamfeats(var, aln):
 
 def var_feats(var, aln, var_freq_file):
     feats = []
-    #amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
-    #if pos_ref + neg_ref + pos_alt + neg_alt > 0:
-    #    vaf = (pos_alt + neg_alt) / (pos_ref + neg_ref + pos_alt + neg_alt)
-    #else:
-    #    vaf = 0.0
+    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
+    if pos_ref + neg_ref + pos_alt + neg_alt > 0:
+        vaf = (pos_alt + neg_alt) / (pos_ref + neg_ref + pos_alt + neg_alt)
+    else:
+        vaf = 0.0
 
     #if (highmq_ref + highmq_alt) > 0:
     #    mq_vaf = (highmq_alt) / (highmq_alt + highmq_ref)
@@ -243,7 +243,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(var.samples[0]['DP'])
     #feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
-    #feats.append(vaf)
+    feats.append(vaf)
     #feats.append(mq_vaf)
     #feats.append(pos_alt + neg_alt)
     #feats.append(strandbias_stat)
@@ -346,8 +346,9 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     return clf
 
 
-def predict(model, vcf, **kwargs):
+def predict(model, vcf, bam, reference, **kwargs):
     model = load_model(model)
+    bam = pysam.AlignmentFile(bam, reference_filename=reference)
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
     if kwargs.get('freq_file'):
         var_freq_file = pysam.VariantFile(kwargs.get('freq_file'))
@@ -355,7 +356,7 @@ def predict(model, vcf, **kwargs):
         var_freq_file = None
     print(vcf.header, end='')
     for var in vcf:
-        proba = predict_one_record(model, var, var_freq_file)
+        proba = predict_one_record(model, var, bam, var_freq_file)
         var.qual = proba
         print(var, end='')
 
@@ -403,6 +404,8 @@ def main():
 
     predictparser = subparser.add_parser("predict", help="Predict")
     predictparser.add_argument("-m", "--model", help="Model file")
+    predictparser.add_argument("-r", "--reference", help="Reference fasta")
+    predictparser.add_argument("-b", "--bam", help="BAM/CRAM file")
     predictparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     predictparser.add_argument("-v", "--vcf", help="Input VCF")
     predictparser.set_defaults(func=predict)

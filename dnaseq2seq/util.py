@@ -1,4 +1,5 @@
 import itertools
+import datetime
 import os
 import torch
 import torch.nn as nn
@@ -13,14 +14,34 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
-import logging
-logger = logging.getLogger(__name__)
 
 
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+def log_timer(func):
+    """
+    A decorator which when applied will make the total time taken to complete the function
+    appear as a log message when the function completes
+    :param func:
+    :return: Decorator
+    """
+
+    def wrapper(*args, **kwargs):
+        starttime = datetime.now()
+        result = func(*args, **kwargs)
+        elapsed = datetime.now() - starttime
+        try:
+            fname = func.__name__
+        except:
+            fname = "?"
+        logger.debug(
+            f"Function {fname} completed in {elapsed.total_seconds()} seconds"
+        )
+        return result
+
+    return wrapper
 
 def make_kmer_lookups(size):
     """
