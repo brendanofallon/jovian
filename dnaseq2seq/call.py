@@ -82,50 +82,50 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                     break
 
 
-def reconcile_current_window(prev_win, current_win):
-    """
-    modify variant parameters in current window depending on any overlapping variants in previous window
-    :param prev_win: variant dict for previous window (to left of current)
-    :param current_win: variant dict for current window (most recent variants called)
-    :return: modified variant dict for current window
-    """
-    overlap_vars = set(prev_win) & set(current_win)
-
-    # swap haplotypes if supported by previous window
-    same_hap_var_count, opposite_hap_var_count = 0, 0
-    for v in overlap_vars:
-        if prev_win[v].het and current_win[v].het:
-            if prev_win[v].haplotype == current_win[v].haplotype:
-                same_hap_var_count += 1
-            else:
-                opposite_hap_var_count += 1
-    if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-        for k, v in current_win.items():
-            current_win[k].genotype = tuple(reversed(current_win[k].genotype))
-            if v.het and v.haplotype == 0:
-                v.haplotype = 1
-            elif v.het and v.haplotype == 1:
-                v.haplotype = 0
-
-    for var in overlap_vars:
-        # if hom in both windows
-        #   - just mark as DUPLICATE
-        if not prev_win[var].het and not current_win[var].het:
-            current_win[var].duplicate = True
-        # if het in both windows and same genotype order ( 0|1 or 1|0 )
-        #   - change phase set (PS) of current window to previous window
-        #   - mark var as DUPLICATE in current window
-        if prev_win[var].het and current_win[var].het and prev_win[var].genotype == current_win[var].genotype:
-            current_win[var].duplicate = True
-            for v in current_win:
-                current_win[v].phase_set = prev_win[var].phase_set
-        # if het in both windows and different haplotype (hap0 or hap1)
-        #   - change phase set (PS) of current window to prev window
-        #   - mark var as DUPLICATE in current window
-        #   - reverse genotype of all current window vars (i.e., (0,1) to (1,0))
-        if prev_win[var].het and current_win[var].het and prev_win[var].genotype != current_win[var].genotype:
-            current_win[var].duplicate = True
-    return current_win
+# def reconcile_current_window(prev_win, current_win):
+#     """
+#     modify variant parameters in current window depending on any overlapping variants in previous window
+#     :param prev_win: variant dict for previous window (to left of current)
+#     :param current_win: variant dict for current window (most recent variants called)
+#     :return: modified variant dict for current window
+#     """
+#     overlap_vars = set(prev_win) & set(current_win)
+#
+#     # swap haplotypes if supported by previous window
+#     same_hap_var_count, opposite_hap_var_count = 0, 0
+#     for v in overlap_vars:
+#         if prev_win[v].het and current_win[v].het:
+#             if prev_win[v].haplotype == current_win[v].haplotype:
+#                 same_hap_var_count += 1
+#             else:
+#                 opposite_hap_var_count += 1
+#     if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
+#         for k, v in current_win.items():
+#             current_win[k].genotype = tuple(reversed(current_win[k].genotype))
+#             if v.het and v.haplotype == 0:
+#                 v.haplotype = 1
+#             elif v.het and v.haplotype == 1:
+#                 v.haplotype = 0
+#
+#     for var in overlap_vars:
+#         # if hom in both windows
+#         #   - just mark as DUPLICATE
+#         if not prev_win[var].het and not current_win[var].het:
+#             current_win[var].duplicate = True
+#         # if het in both windows and same genotype order ( 0|1 or 1|0 )
+#         #   - change phase set (PS) of current window to previous window
+#         #   - mark var as DUPLICATE in current window
+#         if prev_win[var].het and current_win[var].het and prev_win[var].genotype == current_win[var].genotype:
+#             current_win[var].duplicate = True
+#             for v in current_win:
+#                 current_win[v].phase_set = prev_win[var].phase_set
+#         # if het in both windows and different haplotype (hap0 or hap1)
+#         #   - change phase set (PS) of current window to prev window
+#         #   - mark var as DUPLICATE in current window
+#         #   - reverse genotype of all current window vars (i.e., (0,1) to (1,0))
+#         if prev_win[var].het and current_win[var].het and prev_win[var].genotype != current_win[var].genotype:
+#             current_win[var].duplicate = True
+#     return current_win
 
 
 def load_model(model_path):
@@ -134,8 +134,8 @@ def load_model(model_path):
     encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
-    encoder_layers = 6
-    decoder_layers = 4 # was 2
+    encoder_layers = 8
+    decoder_layers = 6 # was 2
     embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,
@@ -163,7 +163,9 @@ def read_bed_regions(bedpath):
             if len(line) == 0 or line.startswith("#"):
                 continue
             toks = line.split("\t")
-            yield toks[0], int(toks[1]), int(toks[2])
+            chrom, start, end = toks[0], int(toks[1]), int(toks[2])
+            assert end > start, f"End position {end} must be strictly greater start {start}"
+            yield chrom, start, end
 
 
 def split_large_regions(regions, max_region_size):
