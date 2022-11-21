@@ -8,9 +8,10 @@ import bisect
 import pysam
 import pickle
 import sklearn
+import multiprocessing as mp
 from sklearn.ensemble import RandomForestClassifier
 import scipy.stats as stats
-
+from xgboost import XGBClassifier
 from functools import lru_cache
 import logging
 import argparse
@@ -228,11 +229,11 @@ def var_feats(var, aln, var_freq_file):
     # Fisher exact test for strand bias
     #strandbias_stat = stats.fisher_exact([[pos_alt, neg_alt], [pos_ref, neg_ref]], alternative='two-sided')[1]
 
-    #feats.append(var.qual)
+    feats.append(var.qual)
     feats.append(len(var.ref))
     feats.append(max(len(a) for a in var.alts))
-    #feats.append(min(var.info['QUALS']))
-    #feats.append(max(var.info['QUALS']))
+    feats.append(min(var.info['QUALS']))
+    feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
     feats.append(var.info['WIN_TRANS_COUNT'][0])
@@ -252,11 +253,11 @@ def var_feats(var, aln, var_freq_file):
 
 def feat_names():
     return [
-            #"qual",
+            "qual",
             "ref_len",
             "alt_len",
-            #"min_qual",
-            #"max_qual",
+            "min_qual",
+            "max_qual",
             "var_count",
             "cis_count",
             "trans_count",
@@ -267,7 +268,7 @@ def feat_names():
             "dp",
             #"af",
             "het",
-            #"vaf",
+            "vaf",
             #"highmq_vaf",
             #"altreads",
           #  "strandbias_stat",
@@ -301,6 +302,29 @@ def load_model(path):
         return pickle.load(fh)
 
 
+def _process_sample(args):
+    sample, bampath, reference_filename, tps, fps = args
+    feat_fh = None
+    var_freq_file = None
+    logger.info(f"Processing sample {sample}")
+    aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
+    tp_feats = []
+    fp_feats = []
+    if type(tps) == str:
+        tp_feats.extend(extract_feats(tps, aln, var_freq_file, feat_fh))
+    elif type(tps) == list:
+        for tp in tps:
+            tp_feats.extend(extract_feats(tp, aln, var_freq_file, feat_fh))
+    if type(fps) == str:
+        fp_feats.extend(extract_feats(fps, aln, var_freq_file, feat_fh))
+    elif type(fps) == list:
+        fp_feats = []
+        for fp in fps:
+            fp_feats.extend(extract_feats(fp, aln, var_freq_file, feat_fh))
+    logger.info(f"Done with {sample} : TPs: {len(tp_feats)} FPs: {len(fp_feats)}")
+    return tp_feats, fp_feats
+
+
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
     alltps = []
     allfps = []
@@ -311,23 +335,13 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         feat_fh.write("varstr," + ",".join(feat_names()) + "\n")
     else:
         feat_fh = None
+    
+    with mp.Pool(24) as pool:
+        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
 
-    for sample in conf.keys():
-        logger.info(f"Processing sample {sample}")
-        aln = pysam.AlignmentFile(conf[sample]['bam'], reference_filename=reference_filename)
-        tps = conf[sample].get('tps')
-        if type(tps) == str:
-            alltps.extend(extract_feats(tps, aln, var_freq_file, feat_fh))
-        elif type(tps) == list:
-            for tp in tps:
-                alltps.extend(extract_feats(tp, aln, var_freq_file, feat_fh))
-        fps = conf[sample].get('fps')
-        if type(fps) == str:
-            allfps.extend(extract_feats(fps, aln, var_freq_file, feat_fh))
-        elif type(fps) == list:
-            for fp in fps:
-                allfps.extend(extract_feats(fp, aln, var_freq_file, feat_fh))
-        logger.info(f"TPs: {len(alltps)} FPs: {len(allfps)}")
+    for tpfeats, fpfeats in results:
+        alltps.extend(tpfeats)
+        allfps.extend(fpfeats)
 
     if feat_fh:
         feat_fh.close()
@@ -341,14 +355,16 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
             for val in y:
                 fh.write(str(val) + "\n")
 
-    clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
+    #clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
+    clf = XGBClassifier(n_estimators=100, max_depth=25, learning_rate=1, objective='binary:logistic')
+    
     clf.fit(feats, y)
     return clf
 
 
-def predict(model, vcf, bam, reference, **kwargs):
+def predict(model, vcf, **kwargs):
     model = load_model(model)
-    bam = pysam.AlignmentFile(bam, reference_filename=reference)
+    bam = pysam.AlignmentFile(kwargs.get('bam'))
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
     if kwargs.get('freq_file'):
         var_freq_file = pysam.VariantFile(kwargs.get('freq_file'))
@@ -404,8 +420,7 @@ def main():
 
     predictparser = subparser.add_parser("predict", help="Predict")
     predictparser.add_argument("-m", "--model", help="Model file")
-    predictparser.add_argument("-r", "--reference", help="Reference fasta")
-    predictparser.add_argument("-b", "--bam", help="BAM/CRAM file")
+    predictparser.add_argument("-b", "--bam", help="Path to the bam")
     predictparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     predictparser.add_argument("-v", "--vcf", help="Input VCF")
     predictparser.set_defaults(func=predict)

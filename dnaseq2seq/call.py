@@ -499,7 +499,7 @@ def process_chunk_regions(
                 logger.error(f"Error converting variants to VCF records in window {window_idx}: {ex}")
                 raise ex
 
-            #logger.info(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
+            logger.debug(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
             for var in pysam.VariantFile(vcfname):
                 chunk_vfh.write(str(var))
             os.unlink(vcfname)
