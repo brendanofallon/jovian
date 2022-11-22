@@ -21,6 +21,7 @@ from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
 from concurrent.futures import ProcessPoolExecutor
+from xgboost import XGBClassifier
 
 
 import torch

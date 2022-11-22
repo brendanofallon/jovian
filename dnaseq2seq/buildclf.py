@@ -279,15 +279,15 @@ def varstr(var):
     return f"{var.chrom}:{var.pos}-{var.ref}-{var.alts[0]}"
 
 
-def extract_feats(vcf, aln, var_freq_file, fh=None):
+def extract_feats(vcf, aln, var_freq_file):
     allfeats = []
+    featstrs = []
     for var in pysam.VariantFile(vcf, ignore_truncation=True):
         feats = var_feats(var, aln, var_freq_file)
-        if fh:
-            fstr = ",".join(str(x) for x in feats)
-            fh.write(f"{varstr(var)},{fstr}\n")
         allfeats.append(feats)
-    return allfeats
+        fstr = ",".join(str(x) for x in feats)
+        featstrs.append(f"{varstr(var)},{fstr}")
+    return allfeats, featstrs
 
 
 def save_model(mdl, path):
@@ -302,27 +302,38 @@ def load_model(path):
         return pickle.load(fh)
 
 
+
 def _process_sample(args):
     sample, bampath, reference_filename, tps, fps = args
-    feat_fh = None
     var_freq_file = None
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
     tp_feats = []
     fp_feats = []
+    featstrs = []
+    labels = []
+    if tps is None:
+        tps = []
     if type(tps) == str:
-        tp_feats.extend(extract_feats(tps, aln, var_freq_file, feat_fh))
-    elif type(tps) == list:
-        for tp in tps:
-            tp_feats.extend(extract_feats(tp, aln, var_freq_file, feat_fh))
+        tps = [tps]
+    for tp in tps:
+        tpf, tpfeatstrs = extract_feats(tp, aln, var_freq_file)
+        tp_feats.extend(tpf)
+        featstrs.extend(tpfeatstrs)
+        labels.extend([1] * len(tpf))
+
+    if fps is None:
+        fps = []
     if type(fps) == str:
-        fp_feats.extend(extract_feats(fps, aln, var_freq_file, feat_fh))
-    elif type(fps) == list:
-        fp_feats = []
-        for fp in fps:
-            fp_feats.extend(extract_feats(fp, aln, var_freq_file, feat_fh))
+        fps = [fps]
+    for fp in fps:
+        fpf, fpfeatstrs = extract_feats(fp, aln, var_freq_file)
+        fp_feats.extend(fpf)
+        featstrs.extend(fpfeatstrs)
+        labels.extend([0] * len(fpf))
+
     logger.info(f"Done with {sample} : TPs: {len(tp_feats)} FPs: {len(fp_feats)}")
-    return tp_feats, fp_feats
+    return tp_feats, fp_feats, featstrs, labels
 
 
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
@@ -335,25 +346,35 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         feat_fh.write("varstr," + ",".join(feat_names()) + "\n")
     else:
         feat_fh = None
-    
+    if labels_csv:
+        label_fh = open(labels_csv, "w")
+        label_fh.write("label\n")
+    else:
+        label_fh = None
+
     with mp.Pool(24) as pool:
         results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
 
-    for tpfeats, fpfeats in results:
+    y = []
+    for tpfeats, fpfeats, fstrs, labs in results:
         alltps.extend(tpfeats)
         allfps.extend(fpfeats)
+        y.extend(labs)
+        if feat_fh:
+            for fstr in fstrs:
+                feat_fh.write(fstr + "\n")
+        if label_fh:
+            for l in labs:
+                label_fh.write(str(l) + "\n")
+
 
     if feat_fh:
         feat_fh.close()
+    if label_fh:
+        label_fh.close()
 
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
-    y = np.array([1.0 for _ in range(len(alltps))] + [0.0 for _ in range(len(allfps))])
-    if labels_csv:
-        with open(labels_csv, "w") as fh:
-            fh.write("label\n") 
-            for val in y:
-                fh.write(str(val) + "\n")
 
     #clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
     clf = XGBClassifier(n_estimators=100, max_depth=25, learning_rate=1, objective='binary:logistic')
