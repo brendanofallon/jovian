@@ -157,6 +157,8 @@ class VarTransformer(nn.Module):
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
+        if tgt_mask.shape[0] != tgt_mask.shape[1]:
+            tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
         h0 = self.decoder0(tgt0, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h1 = self.decoder1(tgt1, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h0 = self.softmax(h0)
