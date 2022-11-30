@@ -10,7 +10,7 @@
 #SBATCH --time=5-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a6000|a100"
+#SBATCH --gres=gpu:2 --constraint="a6000|a100"
 
 
 
@@ -49,8 +49,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="wgs_decoder_biggermodel_cont3"
-RUN_NOTES="Contination of wgs bigger model, with train data on vast system"
+RUN_NAME="testmultgpu"
+RUN_NOTES="Testing multigpu training"
 
 set -x
 
@@ -73,7 +73,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+export ENABLE_WANDB=
 
 $PYTHON $ds2s train \
     -c $CONF \
@@ -85,7 +85,6 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 8 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/wgs_decoder_biggermodel_cont2/wgs_decoder_biggermodel_cont2_epoch0.model \
     --max-decomp-batches 4 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"

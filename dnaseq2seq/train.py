@@ -147,8 +147,10 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
+        logger.info(f"tgt_kmers_input shape: {tgt_kmers_input.shape}")
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
         times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
+        logger.info(f"tgt_mask shape: {tgt_mask.shape}")
 
         optimizer.zero_grad()
         times["zero_grad"] = datetime.now()
