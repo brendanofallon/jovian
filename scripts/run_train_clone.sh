@@ -49,7 +49,7 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="testmultgpu"
+RUN_NAME="testmultgpu2"
 RUN_NOTES="Testing multigpu training"
 
 set -x
@@ -73,19 +73,19 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
-    --batch-size 384 \
+    --batch-size 800 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    --threads 8 \
-    --max-decomp-batches 4 \
+    --threads 16 \
+    --max-decomp-batches 8 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
