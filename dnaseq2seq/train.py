@@ -359,7 +359,7 @@ def train_epochs(epochs,
                             d_ff=dim_feedforward,
                             device=DEVICE)
     if torch.cuda.device_count() > 1:
-        model = nn.DistributedDataParallel(model)
+        model = nn.parallel.DistributedDataParallel(model)
     model = model.to(DEVICE)
 
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

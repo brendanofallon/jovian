@@ -49,7 +49,7 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="testmultgpu2"
+RUN_NAME="testmultgpu3"
 RUN_NOTES="Testing multigpu training"
 
 set -x
