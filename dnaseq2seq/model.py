@@ -62,7 +62,7 @@ class PositionalEncoding2D(nn.Module):
         if len(tensor.shape) != 4:
             raise RuntimeError("The input tensor has to be 4d!")
         batch_size, x, y, orig_ch = tensor.shape
-        emb = self._from_cache(tensor)
+        emb = self._from_cache(tensor).to(tensor.get_device())
         return tensor + emb[None, :, :, :orig_ch].expand(batch_size, -1, -1, -1)
 
 
