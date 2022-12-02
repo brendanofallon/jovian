@@ -319,6 +319,9 @@ def predict_sequence(src, model, n_output_toks, device):
     """
     Generate a predicted sequence with next-word prediction be repeatedly calling the model
     """
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
     probs = torch.zeros(src.shape[0], 2, 1).float()
     mem = model.encode(src)

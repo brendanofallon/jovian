@@ -61,12 +61,6 @@ def default_vals_per_class():
     return 0
 
 
-def load_conf(confyaml):
-    logger.info(f"Loading configuration from {confyaml}")
-    conf = yaml.safe_load(open(confyaml).read())
-    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
-    assert 'data' in conf, "Expected 'data' entry in training configuration"
-    return conf
 
 
 def pregen_one_sample(dataloader, batch_size, output_dir):

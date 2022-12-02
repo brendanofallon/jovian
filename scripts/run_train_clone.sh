@@ -7,7 +7,7 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=5-0
+#SBATCH --time=3-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 #SBATCH --gres=gpu:2 --constraint="a6000|a100"
@@ -43,13 +43,14 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all_plus_susregions
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_smallsus
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
-PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
+#PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
 
 LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="testmultgpu3"
+RUN_NAME="testmultgpu4"
 RUN_NOTES="Testing multigpu training"
 
 set -x
@@ -73,7 +74,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+export ENABLE_WANDB=
 
 $PYTHON $ds2s train \
     -c $CONF \
