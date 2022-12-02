@@ -292,8 +292,9 @@ def calc_val_accuracy(loader, model, criterion):
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
             logger.info(f"tgt_kmer_idx {tgt_kmer_idx}")
             logger.info(f"tgt_kmer_idx.shape {tgt_kmer_idx.shape}")
-            logger.info(f"tgt_kmer_idx.shape[-1] {tgt_kmer_idx.shape[-1]}")
-            seq_preds = seq_preds[:, :, 0:tgt_kmer_idx.shape[-1], :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
+            j = tgt_kmer_idx.shape[-1]
+            logger.info(f"tgt_kmer_idx.shape[-1]: {j}")
+            seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
             if type(criterion) == nn.NLLLoss:
                 loss_tot = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             else:
