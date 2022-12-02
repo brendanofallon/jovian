@@ -188,14 +188,45 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
         if batch % 10 == 0:
             logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
             
-        #logger.info(f"batch: {batch} loss: {loss.item()} vafloss: {vafloss.item()}")
         epoch_times = calc_time_sums(time_sums=epoch_times, **times)
         start_time = datetime.now()  # reset timer for next batch
-        # del src
-    # torch.cuda.empty_cache()
+
     logger.info(f"Trained {batch+1} batches in total for epoch")
 
     return epoch_loss_sum, epoch_times
+
+
+def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
+
+    samples_seen = 0
+    loss_sum = 0
+    model.train()
+    for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
+        # tgt_kmers = util.tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
+        tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+        tgt_kmers_input = tgt_kmers[:, :, :-1]
+        tgt_expected = tgt_kmer_idx[:, :, 1:]
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
+
+        optimizer.zero_grad()
+        seq_preds = model(src, tgt_kmers_input, tgt_mask)
+        loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+        loss.backward()
+        loss_sum += loss.item()
+        torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        optimizer.step()
+        samples_seen += src.shape[0]
+        if samples_seen > num_samples:
+            return loss_sum
+
+
+def iter_indefinitely(loader, batch_size):
+    iterations = 0
+    while True:
+        iterations += 1
+        for items in loader.iter_once(batch_size):
+            yield items
+        logger.info(f"Completed iteration {iterations} of all training data")
 
 
 def add_result_dicts(src, add):
@@ -341,7 +372,8 @@ def train_epochs(epochs,
                  lossfunc='ce',
                  wandb_run_name=None,
                  wandb_notes="",
-                 cl_args = {}
+                 cl_args = {},
+                 samples_per_epoch=10000,
 ):
     # 50M model params
     #encoder_attention_heads = 8 # was 4
@@ -352,12 +384,21 @@ def train_epochs(epochs,
     #embed_dim_factor = 120 # was 100
 
 
+    # 100M params
     encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 10 # was 4
     dim_feedforward = 512
     encoder_layers = 10
     decoder_layers = 8 # was 2
     embed_dim_factor = 160 # was 100
+
+    # Small, for testing params
+    encoder_attention_heads = 2  # was 4
+    decoder_attention_heads = 2  # was 4
+    dim_feedforward = 512
+    encoder_layers = 2
+    decoder_layers = 2  # was 2
+    embed_dim_factor = 160  # was 100
 
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
@@ -470,11 +511,11 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss, epoch_times = train_epoch(model,
-                                             optimizer,
-                                             criterion,
-                                             dataloader,
-                                             batch_size=batch_size)
+            loss = train_n_samples(model,
+                                  optimizer,
+                                  criterion,
+                                  iter_indefinitely(dataloader, batch_size),
+                                  samples_per_epoch)
 
             elapsed = datetime.now() - starttime
 
@@ -485,32 +526,6 @@ def train_epochs(epochs,
             ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
 
             logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
-
-
-            if epoch_times.get("batch_count", 0) > 0:
-                mean_batch_time = epoch_times.get("batch_time",0.0) / epoch_times.get("batch_count")
-            else:
-                mean_batch_time = 0.0
-            if epoch_times.get("batch_time", 0.0) > 0.0:
-                decompress_time_frac = epoch_times.get("decomp_time", 0.0) / epoch_times.get("batch_time")
-                load_time_frac = epoch_times.get("load_time", 0.0) / epoch_times.get("batch_time")
-                train_time_frac = epoch_times.get("train_time", 0.0) / epoch_times.get("batch_time")
-                zero_grad_frac = epoch_times.get("zero_grad_time", 0.0) / epoch_times.get("batch_time")
-                forward_pass_frac = epoch_times.get("forward_pass_time", 0.0) / epoch_times.get("batch_time")
-                loss_frac = epoch_times.get("loss_time", 0.0) / epoch_times.get("batch_time")
-                midmatch_frac = epoch_times.get("midmatch_time", 0.0) / epoch_times.get("batch_time")
-                backward_pass_frac = epoch_times.get("backward_pass_time", 0.0) / epoch_times.get("batch_time")
-                optimize_frac = epoch_times.get("optimize_time", 0.0) / epoch_times.get("batch_time")
-            else:
-                load_time_frac = 0.0
-                decompress_time_frac = 0.0
-                train_time_frac = 0.0
-                zero_grad_frac = 0.0
-                forward_pass_frac = 0.0
-                loss_frac = 0.0
-                midmatch_frac = 0.0
-                backward_pass_frac = 0.0
-                optimize_frac = 0.0
 
             if ENABLE_WANDB:
                 wandb.log({
@@ -529,16 +544,6 @@ def train_epochs(epochs,
                     "accuracy/ppv snv": ppv_snv,
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epochtime": elapsed.total_seconds(),
-                    "batch_time_mean": mean_batch_time,
-                    "performance/decompress_frac": decompress_time_frac,
-                    "performance/train_frac": train_time_frac,
-                    "performance/io_frac": load_time_frac,
-                    "performance/zero_grad_frac": zero_grad_frac,
-                    "performance/forward_pass_frac": forward_pass_frac,
-                    "performance/loss_frac": loss_frac,
-                    "performance/midmatch_frac": midmatch_frac,
-                    "performance/backward_pass_frac": backward_pass_frac,
-                    "performance/optimize_frac": optimize_frac,
                 })
 
             scheduler.step()
@@ -555,16 +560,6 @@ def train_epochs(epochs,
                 "ppv_snv": ppv_snv,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
-                "batch_time_mean": mean_batch_time,
-                "decompress_frac": decompress_time_frac,
-                "train_frac": train_time_frac,
-                "io_frac": load_time_frac,
-                "zero_grad_frac": zero_grad_frac,
-                "forward_pass_frac": forward_pass_frac,
-                "loss_frac": loss_frac,
-                "midmatch_frac": midmatch_frac,
-                "backward_pass_frac": backward_pass_frac,
-                "optimize_frac": optimize_frac,
             })
 
 
@@ -603,7 +598,7 @@ def init_count_dict():
 
 
 
-def train(config, output_model, input_model, epochs, **kwargs):
+def train(output_model, input_model, epochs, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
     :param config: Path to config yaml
