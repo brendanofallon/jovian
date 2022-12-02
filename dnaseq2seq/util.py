@@ -323,7 +323,7 @@ def predict_sequence(src, model, n_output_toks, device):
         model = model.module
 
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
-    probs = torch.zeros(src.shape[0], 2, 1).float()
+    probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
     mem = model.encode(src)
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
