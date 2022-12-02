@@ -43,15 +43,15 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all_plus_susregions
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_smallsus
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
-#PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
+PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
 
 LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="testmultgpu4"
-RUN_NOTES="Testing multigpu training"
+RUN_NAME="decoder_huge_lcbig"
+RUN_NOTES="100M model, lcbig training set"
 
 set -x
 
@@ -74,7 +74,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -c $CONF \
