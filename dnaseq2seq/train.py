@@ -357,7 +357,7 @@ def train_epochs(epochs,
     dim_feedforward = 512
     encoder_layers = 10
     decoder_layers = 8 # was 2
-    embed_dim_factor = 120 # was 100
+    embed_dim_factor = 160 # was 100
 
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
