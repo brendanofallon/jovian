@@ -410,15 +410,17 @@ def train_epochs(epochs,
                             decoder_attention_heads=decoder_attention_heads,
                             d_ff=dim_feedforward,
                             device=DEVICE)
+    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    if statedict is not None:
+        logger.info(f"Initializing model with state dict {statedict}")
+        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
+    
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
 
-    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Creating model with {model_tot_params} trainable params")
-    if statedict is not None:
-        logger.info(f"Initializing model with state dict {statedict}")
-        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
