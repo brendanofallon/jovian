@@ -452,9 +452,6 @@ def train_epochs(epochs,
             "epoch", "trainingloss", "val_accuracy",
             "mean_var_count", "ppa_dels", "ppa_ins", "ppa_snv",
             "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
-            "batch_time_mean", "decompress_frac", "train_frac", "io_frac",
-            "zero_grad_frac", "forward_pass_frac", "loss_frac", "midmatch_frac",
-            "backward_pass_frac", "optimize_frac",
     ])
 
     if ENABLE_WANDB:
@@ -513,11 +510,14 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss = train_n_samples(model,
+            if samples_per_epoch > 0:
+               loss = train_n_samples(model,
                                   optimizer,
                                   criterion,
                                   iter_indefinitely(dataloader, batch_size),
                                   samples_per_epoch)
+            else:
+                loss, _ = train_epoch(model, optimizer, criterion, loader, batch_size)
 
             elapsed = datetime.now() - starttime
 
