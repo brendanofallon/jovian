@@ -517,7 +517,7 @@ def train_epochs(epochs,
                                   iter_indefinitely(dataloader, batch_size),
                                   samples_per_epoch)
             else:
-                loss, _ = train_epoch(model, optimizer, criterion, loader, batch_size)
+                loss, _ = train_epoch(model, optimizer, criterion, dataloader, batch_size)
 
             elapsed = datetime.now() - starttime
 
