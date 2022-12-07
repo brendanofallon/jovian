@@ -50,8 +50,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_huge_lcbig"
-RUN_NOTES="100M model, lcbig training set"
+RUN_NAME="decoder_huge_lcbig_cont"
+RUN_NOTES="100M model, lcbig training set, continued"
 
 set -x
 
@@ -77,7 +77,6 @@ echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
-    -c $CONF \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
@@ -86,6 +85,7 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 16 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_huge_lcbig/decoder_huge_lcbig_epoch4.model \
     --max-decomp-batches 8 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"

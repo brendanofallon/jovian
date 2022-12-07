@@ -324,7 +324,7 @@ def calc_val_accuracy(loader, model, criterion):
             j = tgt_kmer_idx.shape[-1]
             seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
             if type(criterion) == nn.NLLLoss:
-                loss_tot = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
+                loss_tot += compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             else:
                 raise ValueError("Only cross entropy supported now")
 
@@ -393,12 +393,12 @@ def train_epochs(epochs,
     embed_dim_factor = 160 # was 100
 
     # Small, for testing params
-    encoder_attention_heads = 2  # was 4
-    decoder_attention_heads = 2  # was 4
-    dim_feedforward = 512
-    encoder_layers = 2
-    decoder_layers = 2  # was 2
-    embed_dim_factor = 160  # was 100
+    #encoder_attention_heads = 2  # was 4
+    #decoder_attention_heads = 2  # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 2
+    #decoder_layers = 2  # was 2
+    #embed_dim_factor = 160  # was 100
 
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
@@ -553,9 +553,6 @@ def train_epochs(epochs,
                 "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
                 "mean_var_count": var_count0,
                 "ppa_dels": ppa_dels,
-                "ppa_ins": ppa_ins,
-                "ppa_snv": ppa_snv,
-                "ppv_dels": ppv_dels,
                 "ppv_ins": ppv_ins,
                 "ppv_snv": ppv_snv,
                 "learning_rate": scheduler.get_last_lr()[0],
@@ -640,5 +637,6 @@ def train(output_model, input_model, epochs, **kwargs):
                  wandb_run_name=kwargs.get("wandb_run_name"),
                  wandb_notes=kwargs.get("wandb_notes"),
                  cl_args=kwargs.get("cl_args"),
+                 samples_per_epoch=kwargs.get('samples_per_epoch'),
                  )
 
