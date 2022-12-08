@@ -91,8 +91,8 @@ def load_model(model_path):
     encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
-    encoder_layers = 8
-    decoder_layers = 6 # was 2
+    encoder_layers = 6
+    decoder_layers = 4 # was 2
     embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,
@@ -570,7 +570,8 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
         refseq = reference.fetch(chrom, offset, offset + window_size)
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if v.pos < offset + var_retain_window_size)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if v.pos < offset + var_retain_window_size)
-        calledvars.append((vars_hap0, vars_hap1))
+        splitvars0, splitvars1 = split_overlaps(vars_hap0, vars_hap1)
+        calledvars.append((splitvars0, splitvars1))
     return calledvars
 
 
@@ -680,7 +681,9 @@ def _call_vars_region(
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
         batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
+
         h0, h1 = merge_genotypes(batchvars)
+
         for k, v in h0.items():
             hap0[k].extend(v)
         for k, v in h1.items():
@@ -702,6 +705,102 @@ def vars_dont_overlap(v0, v1):
     True if the two variant do not share any reference bases
     """
     return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
+
+
+def all_overlaps(vars0, vars1):
+    """
+    Just do an n^2 search for all variants that overlap
+    This is meant to be used within a single calling window, which never really
+    more than about 5 total variants, so the n^2 isn't bad
+    """
+    for v0 in vars0:
+        for v1 in vars1:
+            if not vars_dont_overlap(v0, v1):
+                yield v0, v1
+
+
+def splitvar(v, pos):
+    assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt)))
+    a = vcf.Variant(
+        pos=v.pos,
+        ref=v.ref[0:pos - v.pos],
+        alt=v.alt[0:pos - v.pos],
+        qual=v.qual,
+        hap_model=v.hap_model,
+        step=v.step,
+        window_offset=v.window_offset,
+        var_index=v.var_index,
+    )
+    b = vcf.Variant(
+        pos=pos,
+        ref=v.ref[pos - v.pos:],
+        alt=v.alt[pos - v.pos:],
+        qual=v.qual,
+        hap_model=v.hap_model,
+        step=v.step,
+        window_offset=v.window_offset,
+        var_index=v.var_index,
+    )
+    return a, b
+
+
+def splitvars(v0, v1):
+    """
+
+    v0    |---|
+    v1     |---|
+
+    """
+    assert not vars_dont_overlap(v0, v1), f"Variants {v0} and {v1} do not overlap, can't split"
+    interior_start = max(v0.pos, v1.pos)
+    h0vars = []
+    h1vars = []
+    if v0.pos < interior_start:
+        h0a, h0b = splitvar(v0, interior_start)
+        h0vars.extend([h0a, h0b])
+        if v1.end < v0.end:
+            h0vars.remove(h0b)
+            h0c, h0d = splitvar(h0b, v1.end)
+            h0vars.extend([h0c, h0d])
+            h1vars.append(v1)
+        elif v1.end == v0.end:
+            h1vars.append(v1)
+        elif v1.end > v0.end:
+            h1a, h1b = splitvar(v1, v0.end)
+            h1vars.extend([h1a, h1b])
+
+    elif v1.pos < interior_start:
+        h1a, h1b = splitvar(v1, interior_start)
+        h1vars.extend([h1a, h1b])
+        if v0.end < v1.end:
+            h1vars.remove(h1b)
+            h1c, h1d = splitvar(h1b, v0.end)
+            h1vars.extend([h1c, h1d])
+            h0vars.append(v0)
+        elif v1.end == v0.end:
+            h0vars.append(v0)
+        elif v0.end > v1.end:
+            h0a, h0b = splitvar(v0, v1.end)
+            h0vars.extend([h0a, h0b])
+
+    return h0vars, h1vars
+
+
+def split_overlaps(h0vars, h1vars):
+    """
+    Assume h0vars and h1vars are lists of variants on each haplotype
+    Find any variants that overlap, and split any that do into chunks
+    perfectly aligned with the variants from the other hap
+    """
+    unused_h0 = [h for h in h0vars]
+    unused_h1 = [h for h in h1vars]
+    for v0, v1 in all_overlaps(h0vars, h1vars):
+        unused_h0.remove(v0)
+        unused_h1.remove(v1)
+        new_h0, new_h1 = splitvars(v0, v1)
+        unused_h0.extend(new_h0)
+        unused_h1.extend(new_h1)
+    return sorted(unused_h0), sorted(unused_h1)
 
 
 def merge_genotypes(genos):

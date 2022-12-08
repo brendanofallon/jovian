@@ -26,6 +26,10 @@ class Variant:
         return self.pos > other.pos
 
     @property
+    def end(self):
+        return self.pos + len(self.ref)
+
+    @property
     def key(self):
         return self.pos, self.ref, self.alt
 
