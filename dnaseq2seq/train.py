@@ -475,6 +475,7 @@ def train_epochs(epochs,
             model_param_count=model_tot_params,
             git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
             loss_func=str(criterion),
+            samples_per_epoch=samples_per_epoch,
         )
         # log command line too
         wandb_config_params.update(cl_args)
@@ -511,7 +512,7 @@ def train_epochs(epochs,
         for epoch in range(epochs):
             starttime = datetime.now()
             if samples_per_epoch > 0:
-               loss = train_n_samples(model,
+                loss = train_n_samples(model,
                                   optimizer,
                                   criterion,
                                   iter_indefinitely(dataloader, batch_size),
