@@ -109,6 +109,28 @@ def test_split_overlaps():
     assert result
 
 
+def test_altmatch():
+    assert call.any_alt_match(
+        vcf.Variant(pos=5, ref='AG', alt='TC', qual=1),
+        vcf.Variant(pos=6, ref='G', alt='C', qual=1),
+    )
+    assert not call.any_alt_match(
+        vcf.Variant(pos=6, ref='G', alt='T', qual=1),
+        vcf.Variant(pos=6, ref='G', alt='C', qual=1),
+    )
+    assert call.any_alt_match(
+        vcf.Variant(pos=6, ref='G', alt='T', qual=1),
+        vcf.Variant(pos=6, ref='C', alt='T', qual=1),
+    )
+    assert not call.any_alt_match(
+        vcf.Variant(pos=6, ref='G', alt='T', qual=1),
+        vcf.Variant(pos=5, ref='GG', alt='T', qual=1),
+    )
+    assert call.any_alt_match(
+        vcf.Variant(pos=6, ref='G', alt='T', qual=1),
+        vcf.Variant(pos=5, ref='GG', alt='CT', qual=1),
+    )
+
 def test_splitvar():
     v = vcf.Variant(pos=5, ref='AG', alt='TC', qual=1)
     a, b = call.splitvar(v, 6)

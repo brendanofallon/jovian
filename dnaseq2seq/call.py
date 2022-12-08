@@ -709,7 +709,8 @@ def vars_dont_overlap(v0, v1):
 
 def all_overlaps(vars0, vars1):
     """
-    Just do an n^2 search for all variants that overlap
+    Just do an n^2 search for all variants that overlap, aren't exactly equal, have length > 1, and share
+    at least one alt base.
     This is meant to be used within a single calling window, which never really
     more than about 5 total variants, so the n^2 isn't bad
     """
@@ -717,11 +718,30 @@ def all_overlaps(vars0, vars1):
         for v1 in vars1:
             if (not vars_dont_overlap(v0, v1)
                     and v1 != v0
-                    and (len(v0.ref) > 1 or len(v1.ref) > 1)):
+                    and (len(v0.ref) > 1 or len(v1.ref) > 1)
+                    and any_alt_match(v0, v1)):
                 yield v0, v1
 
 
+def any_alt_match(v0, v1):
+    """
+    Returns true if any bases in the alt sequence match when aligned
+    """
+    v0_offset = max(v0.pos, v1.pos) - v0.pos
+    v1_offset = max(v0.pos, v1.pos) - v1.pos
+    for a, b in zip(v0.alt[v0_offset:], v1.alt[v1_offset:]):
+        if a == b:
+            return True
+    return False
+
+
+
+
 def splitvar(v, pos):
+    """
+    Split a single vcf.Variant object into two Variants at the given position
+    Only pos, ref, and alt are adjusted other fields are copied
+    """
     assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt)))
     a = vcf.Variant(
         pos=v.pos,
