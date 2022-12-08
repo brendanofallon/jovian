@@ -16,41 +16,6 @@ def test_split_chunks(n_items, n_chunks):
         prev_end = end
 
 
-def test_gen_combos():
-    for n in range(2, 5):
-        allresults = list(p for p in call.gen_combos(n))
-        assert len(allresults) == len(set(allresults)), "Repeated entries in permutation results"
-        assert len(allresults) == 2**n, "Incorrect number of permutations"
-
-
-def test_gen_idx():
-    for c in call.gen_idx(3):
-        print(c)
-
-def test_score_conf():
-    gconf = [
-        ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-         []),
-        ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-         []),
-        ([],
-         [vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)]),
-    ]
-
-    gconf2 = [
-        ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-         []),
-        ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-         []),
-        ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-         []),
-    ]
-    score = call.score_conf(gconf)
-    score2 = call.score_conf(gconf2)
-
-    assert score2 < score
-
-
 def test_merge_genotypes():
     # gconf = [
     #     ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
@@ -119,6 +84,20 @@ def test_merge_genotypes():
     print(f"\n\nHap0: {haps[0]}\nHap1: {haps[1]}")
 
 
+def test_overlaps():
+    assert call.vars_dont_overlap(
+        vcf.Variant(pos=5, ref='A', alt='T', qual=1),
+        vcf.Variant(pos=6, ref='G', alt='C', qual=1),
+    )
+    assert not call.vars_dont_overlap(
+        vcf.Variant(pos=5, ref='AG', alt='TC', qual=1),
+        vcf.Variant(pos=6, ref='G', alt='C', qual=1),
+    )
+    assert call.vars_dont_overlap(
+        vcf.Variant(pos=5, ref='AG', alt='TC', qual=1),
+        vcf.Variant(pos=7, ref='G', alt='C', qual=1),
+    )
+
 def test_split_overlaps():
     v0 = [
         vcf.Variant(pos=5, ref='AGC', alt='T', qual=1)
@@ -159,8 +138,8 @@ def test_splitvar3():
     assert a.ref == ''
     assert a.alt == 'AC'
     assert b.pos == 7
-    assert b.ref == 'TG'
-    assert b.alt == ''
+    assert b.ref == ''
+    assert b.alt == 'TG'
 
 
 def test_splitallvars():

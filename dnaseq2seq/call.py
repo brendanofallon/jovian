@@ -704,7 +704,7 @@ def vars_dont_overlap(v0, v1):
     """
     True if the two variant do not share any reference bases
     """
-    return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
+    return v0.pos + len(v0.ref) <= v1.pos or v1.pos + len(v1.ref) <= v0.pos
 
 
 def all_overlaps(vars0, vars1):
@@ -715,7 +715,9 @@ def all_overlaps(vars0, vars1):
     """
     for v0 in vars0:
         for v1 in vars1:
-            if not vars_dont_overlap(v0, v1):
+            if (not vars_dont_overlap(v0, v1)
+                    and v1 != v0
+                    and (len(v0.ref) > 1 or len(v1.ref) > 1)):
                 yield v0, v1
 
 
@@ -795,8 +797,10 @@ def split_overlaps(h0vars, h1vars):
     unused_h0 = [h for h in h0vars]
     unused_h1 = [h for h in h1vars]
     for v0, v1 in all_overlaps(h0vars, h1vars):
-        unused_h0.remove(v0)
-        unused_h1.remove(v1)
+        if v0 in unused_h0:
+            unused_h0.remove(v0)
+        if v1 in unused_h1:
+            unused_h1.remove(v1)
         new_h0, new_h1 = splitvars(v0, v1)
         unused_h0.extend(new_h0)
         unused_h1.extend(new_h1)
