@@ -51,8 +51,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_hugetest"
-RUN_NOTES="100M model, lcbig training set, continued"
+RUN_NAME="decoder_96M_report10m"
+RUN_NOTES="96M model, lcsus training set, report every 10M training steps"
 
 set -x
 
@@ -75,7 +75,7 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=
+export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
     -d $PREGEN_DIR \
@@ -87,7 +87,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
-    --samples-per-epoch -1 \
+    --samples-per-epoch 10000000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
