@@ -202,7 +202,6 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
     loss_sum = 0
     model.train()
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
-        # tgt_kmers = util.tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
@@ -215,7 +214,9 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         loss_sum += loss.item()
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         optimizer.step()
-        samples_seen += src.shape[0]
+        if batch % 10 == 0:
+            logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
+         samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
 
