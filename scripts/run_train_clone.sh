@@ -86,7 +86,6 @@ $PYTHON $ds2s train \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
     --threads 16 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_huge_lcbig/decoder_huge_lcbig_epoch4.model \
     --max-decomp-batches 8 \
     --samples-per-epoch -1 \
     --wandb-run-name $RUN_NAME \

@@ -419,6 +419,7 @@ def train_epochs(epochs,
                             d_ff=dim_feedforward,
                             device=DEVICE)
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Creating model with {model_tot_params} trainable params")
     
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
@@ -428,7 +429,6 @@ def train_epochs(epochs,
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
 
-    logger.info(f"Creating model with {model_tot_params} trainable params")
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
