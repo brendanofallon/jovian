@@ -718,6 +718,8 @@ def all_overlaps(vars0, vars1):
         for v1 in vars1:
             if (not vars_dont_overlap(v0, v1)
                     and v1 != v0
+                    and (len(v0.ref) > 0)
+                    and (len(v1.ref) > 0)
                     and (len(v0.ref) > 1 or len(v1.ref) > 1)
                     and any_alt_match(v0, v1)):
                 yield v0, v1
