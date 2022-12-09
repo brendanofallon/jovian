@@ -742,7 +742,7 @@ def splitvar(v, pos):
     Split a single vcf.Variant object into two Variants at the given position
     Only pos, ref, and alt are adjusted other fields are copied
     """
-    assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt)))
+    assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt))), f"Cant split {v} at position {pos}"
     a = vcf.Variant(
         pos=v.pos,
         ref=v.ref[0:pos - v.pos],

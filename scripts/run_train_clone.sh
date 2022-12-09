@@ -7,7 +7,7 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=3-0
+#SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 #SBATCH --gres=gpu:2 --constraint="a6000|a100"
@@ -51,7 +51,7 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10m"
+RUN_NAME="decoder_96M_report10M"
 RUN_NOTES="96M model, lcsus training set, report every 10M training steps"
 
 set -x
