@@ -393,11 +393,11 @@ def train_epochs(epochs,
 
 
     # 100M params
-    encoder_attention_heads = 10 # was 4
+    encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 10 # was 4
     dim_feedforward = 512
     encoder_layers = 10
-    decoder_layers = 8 # was 2
+    decoder_layers = 10 # was 2
     embed_dim_factor = 160 # was 100
 
     # Small, for testing params
