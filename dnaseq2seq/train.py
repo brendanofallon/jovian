@@ -216,7 +216,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         optimizer.step()
         if batch % 10 == 0:
             logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
-         samples_seen += src.shape[0]
+        samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
 
