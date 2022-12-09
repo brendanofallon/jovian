@@ -563,9 +563,12 @@ def train_epochs(epochs,
                 "trainingloss": loss,
                 "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
                 "mean_var_count": var_count0,
+                "ppa_snv": ppa_snv
+                "ppa_ins": ppa_ins,
                 "ppa_dels": ppa_dels,
                 "ppv_ins": ppv_ins,
                 "ppv_snv": ppv_snv,
+                "ppv_dels": ppv_dels,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
