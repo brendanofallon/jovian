@@ -570,8 +570,8 @@ def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window
         refseq = reference.fetch(chrom, offset, offset + window_size)
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if v.pos < offset + var_retain_window_size)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if v.pos < offset + var_retain_window_size)
-        splitvars0, splitvars1 = split_overlaps(vars_hap0, vars_hap1)
-        calledvars.append((splitvars0, splitvars1))
+        #splitvars0, splitvars1 = split_overlaps(vars_hap0, vars_hap1)
+        calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
 
