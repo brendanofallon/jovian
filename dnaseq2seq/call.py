@@ -319,8 +319,7 @@ def call_variants_on_chrom(
     :return: a VCF file with called variants for the given chromosome.
     """
     max_read_depth = 100
-    window_step = 25
-    logger.info(f"Max read depth: {max_read_depth} window step: {window_step}") 
+    logger.info(f"Max read depth: {max_read_depth} window step: dynamic!")
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
 
@@ -361,7 +360,6 @@ def call_variants_on_chrom(
         tmpdir=tmpdir,
         max_read_depth=max_read_depth,
         window_size=150,
-        window_step=window_step,
         var_freq_file=var_freq_file
     )
 
@@ -430,7 +428,6 @@ def process_chunk_regions(
     var_freq_file,
     window_size=300,
     min_reads=5,
-    window_step=50,
 ):
     """
     Call variants on the given region and write variants to a temporary VCF file.
@@ -444,7 +441,6 @@ def process_chunk_regions(
     logger.debug(
         f"{cpname}: Writing variants to tmp VCF {chunk_vcf}"
     )
-
 
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
@@ -477,7 +473,6 @@ def process_chunk_regions(
                     max_read_depth=max_read_depth,
                     window_size=window_size,
                     min_reads=min_reads,
-                    window_step=window_step
                 )
             except Exception as ex:
                 print(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
@@ -548,28 +543,27 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size, var_retain_window_size):
+def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
     mismatching parts
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
-    n_output_toks = 37 # OK, this should be made a little more general...
+    assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     seq_preds, probs = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
     probs = probs.detach().cpu().numpy()
     calledvars = []
-    for b in range(seq_preds.shape[0]):
+    for (start, end), b in zip(regions, range(seq_preds.shape[0])):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
-        offset = batch_pos_offsets[b]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
         probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
-        refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if v.pos < offset + var_retain_window_size)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if v.pos < offset + var_retain_window_size)
+        refseq = reference.fetch(chrom, start, end)
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, start, probs=probs0) if v.pos <= end)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, start, probs=probs1) if v.pos <= end)
         splitvars0, splitvars1 = split_overlaps(vars_hap0, vars_hap1)
         calledvars.append((splitvars0, splitvars1))
     return calledvars
@@ -584,7 +578,32 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
+def _generate_window_starts(start, end, max_window_size):
+    """
+    When calling variants in a region we want to tile windows over the region. Multiple factors affect
+    how we pick windows to tile over a region:
+     1. Regions vary greatly in size
+     2. Calling variants is expensive computationally, and we'd like to minimize the number of tokens (kmers) predicted
+     3. Each base pair should be covered by a roughly uniform number of windows (more probably leads to more precise
+            calling but grealy impacts performance)
+     4. Most regions are pretty small
+
+    For smallish regions (most regions are < 25bp), we want a small step size and a start thats not too far from the
+    window start
+    For larger regions, step size should be larger
+    """
+    min_window_step = 5
+    max_window_step = 20
+    if end - start < 20:
+        step = min_window_step
+    else:
+        step = int(min(100, end - start) / 100 * (max_window_step - min_window_step) + min_window_step)
+    window_start_offset = 3 * step - 3
+    max_window_start = max(start, end - (max_window_size - 2 * step))
+    return sorted(list(range(start - window_start_offset, max_window_start, step)), reverse=False)
+
+
+def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -611,7 +630,8 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    while window_start <= (end - 0.1 * window_size):
+    # while window_start <= (end - 0.1 * window_size):
+    for window_start in _generate_window_starts(start, end, max_window_size=150):
         logger.debug(f"Window start: {window_start}")
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
@@ -624,8 +644,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-
-        window_start += window_step
 
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
@@ -640,7 +658,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
 
 
 def _call_vars_region(
-    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5, window_step=50
+    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5,
 ):
     """
     For the given region, identify variants by repeatedly calling the model over a sliding window,
@@ -663,7 +681,7 @@ def _call_vars_region(
     )
 
     step_count = 0  # initialize
-    var_retain_window_size = 145
+    # var_retain_window_size = 145
     batch_size = 128
 
     enctime_total = datetime.timedelta(0)
@@ -675,12 +693,14 @@ def _call_vars_region(
                                                max_read_depth,
                                                window_size=window_size,
                                                min_reads=min_reads,
-                                               window_step=window_step,
                                                batch_size=batch_size):
         logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+        logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
+        n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE)
+        logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
+        batchvars = call_batch(batch, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
 
         h0, h1 = merge_genotypes(batchvars)
 
@@ -698,6 +718,30 @@ def _call_vars_region(
 
     logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
+
+
+def _call_vars_multi_regions(regions, aln, model, reference, max_read_depth, window_size=300, min_reads=5):
+    max_batch_size = 32
+    all_reads = None
+    all_offsets = []
+    n_toks_required = []
+    for i, (chrom, start, end) in enumerate(regions):
+        for encoded_reads, batch_offsets in _encode_region(aln, reference, chrom, start, end,
+                                                   max_read_depth,
+                                                   window_size=window_size,
+                                                   min_reads=min_reads,
+                                                   batch_size=batch_size):
+            if all_reads is None:
+                all_reads = encoded_reads
+            else:
+                all_reads = torch.stack((all_reads, encoded_reads), dim=0)
+            all_offsets.extend(batch_offsets)
+            for offset in batch_offsets:
+                n_toks_required.append( min(150 // util.TGT_KMER_SIZE, (end - offset) // util.TGT_KMER_SIZE) )
+            if len(all_offsets) > max_batch_size:
+                ntoks = max(n_toks_required[0:max_batch_size])
+                batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, window_end=end)
+
 
 
 def vars_dont_overlap(v0, v1):
@@ -895,3 +939,22 @@ def merge_genotypes(genos):
     return allvars0, allvars1
 
 
+
+if __name__=="__main__":
+    import sys
+    from datetime import datetime as dt
+    print(f"Loading model from {sys.argv[1]}")
+    m = load_model(sys.argv[1])
+    m.eval()
+    samples = 50
+    batch_size = 1
+    i = 0
+    start = dt.now()
+    while i < samples:
+        print(f"Batch {i}")
+        t = torch.rand(batch_size, 150, 100, 10)
+        preds = util.predict_sequence(t, m, n_output_toks=37, device='cpu')
+        i += batch_size
+    end = dt.now()
+    elapsed = end - start
+    print(f"Time: {elapsed.total_seconds() :.4f}")
