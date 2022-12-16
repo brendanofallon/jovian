@@ -87,13 +87,21 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
 def load_model(model_path):
     
-    # 35M params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 4 # was 4
+    #96M params
+    encoder_attention_heads = 8
+    decoder_attention_heads = 10 
     dim_feedforward = 512
-    encoder_layers = 8
-    decoder_layers = 6 # was 2
-    embed_dim_factor = 120 # was 100
+    encoder_layers = 10
+    decoder_layers = 10 
+    embed_dim_factor = 160 
+
+    # 35M params
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 8
+    #decoder_layers = 6 # was 2
+    #embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
@@ -895,3 +903,21 @@ def merge_genotypes(genos):
     return allvars0, allvars1
 
 
+if __name__=="__main__":
+    import sys
+    from datetime import datetime as dt
+    print(f"Loading model from {sys.argv[1]}")
+    m = load_model(sys.argv[1])
+    m.eval()
+    samples = 50
+    batch_size = 25
+    i = 0
+    start = dt.now()
+    while i < samples:
+        print(f"Batch {i}")
+        t = torch.rand(batch_size, 150, 100, 10)
+        preds = util.predict_sequence(t, m, n_output_toks=37, device='cpu')
+        i += batch_size
+    end = dt.now()
+    elapsed = end - start
+    print(f"Time: {elapsed.total_seconds() :.4f}")
