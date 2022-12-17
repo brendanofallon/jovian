@@ -295,6 +295,7 @@ def split_even_chunks(n_item, n_chunk):
     :return chunks: the start index and end index of each chunk.
     """
     chunks = []
+    n_chunk = min(n_item, n_chunk)
     chunk_size = n_item // n_chunk
     num_left = n_item - chunk_size * n_chunk
     for i in range(n_chunk):
@@ -357,7 +358,8 @@ def call_variants_on_chrom(
     logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
 
     chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
-
+    logger.debug(f"Created {chunks} chunks for {threads} threads")
+    logger.debug('\n'.join(f"Chunk {i} : {c}" for i, c in enumerate(chunks)))
     process_chunk_func = partial(
         process_chunk_regions,
         region_file=region_file,
@@ -599,15 +601,13 @@ def _generate_window_starts(start, end, max_window_size):
     window start
     For larger regions, step size should be larger
     """
-    min_window_step = 5
-    max_window_step = 20
-    if end - start < 20:
-        step = min_window_step
-    else:
-        step = int(min(100, end - start) / 100 * (max_window_step - min_window_step) + min_window_step)
-    window_start_offset = 3 * step - 3
-    max_window_start = max(start, end - (max_window_size - 2 * step))
-    return sorted(list(range(start - window_start_offset, max_window_start, step)), reverse=False)
+    offsets = [-51, -43, -35]
+    max_window_start = max(start, end - (max_window_size //2))
+    i = 0
+    while (offsets[-1] + start) < max_window_start:
+        offsets.append(offsets[i - 3] + max_window_size)
+    
+    return [o + start for o in offsets[0:-1]]
 
 
 def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64):
@@ -632,12 +632,13 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    #window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    #window_step = 25
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
+    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    # while window_start <= (end - 0.1 * window_size):
+    #while window_start <= (end - 0.1 * window_size):
     for window_start in _generate_window_starts(start, end, max_window_size=150):
         logger.debug(f"Window start: {window_start}")
         try:
@@ -651,7 +652,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-
+        #window_start += window_step
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
             yield encodedreads, batch_offsets
@@ -705,7 +706,7 @@ def _call_vars_region(
         logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE)
+        n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
         batchvars = call_batch(batch, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
 
