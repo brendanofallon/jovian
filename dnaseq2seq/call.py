@@ -87,13 +87,21 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
 def load_model(model_path):
     
-    # 35M params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 4 # was 4
+    #96M params
+    encoder_attention_heads = 8
+    decoder_attention_heads = 10 
     dim_feedforward = 512
-    encoder_layers = 6
-    decoder_layers = 4 # was 2
-    embed_dim_factor = 120 # was 100
+    encoder_layers = 10
+    decoder_layers = 10 
+    embed_dim_factor = 160 
+
+    # 35M params
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 8
+    #decoder_layers = 6 # was 2
+    #embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
@@ -287,6 +295,7 @@ def split_even_chunks(n_item, n_chunk):
     :return chunks: the start index and end index of each chunk.
     """
     chunks = []
+    n_chunk = min(n_item, n_chunk)
     chunk_size = n_item // n_chunk
     num_left = n_item - chunk_size * n_chunk
     for i in range(n_chunk):
@@ -349,7 +358,8 @@ def call_variants_on_chrom(
     logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
 
     chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
-
+    logger.debug(f"Created {chunks} chunks for {threads} threads")
+    logger.debug('\n'.join(f"Chunk {i} : {c}" for i, c in enumerate(chunks)))
     process_chunk_func = partial(
         process_chunk_regions,
         region_file=region_file,
@@ -564,8 +574,7 @@ def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
         refseq = reference.fetch(chrom, start, end)
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, start, probs=probs0) if v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, start, probs=probs1) if v.pos <= end)
-        splitvars0, splitvars1 = split_overlaps(vars_hap0, vars_hap1)
-        calledvars.append((splitvars0, splitvars1))
+        calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
 
@@ -592,15 +601,13 @@ def _generate_window_starts(start, end, max_window_size):
     window start
     For larger regions, step size should be larger
     """
-    min_window_step = 5
-    max_window_step = 20
-    if end - start < 20:
-        step = min_window_step
-    else:
-        step = int(min(100, end - start) / 100 * (max_window_step - min_window_step) + min_window_step)
-    window_start_offset = 3 * step - 3
-    max_window_start = max(start, end - (max_window_size - 2 * step))
-    return sorted(list(range(start - window_start_offset, max_window_start, step)), reverse=False)
+    offsets = [-51, -43, -35]
+    max_window_start = max(start, end - (max_window_size //2))
+    i = 0
+    while (offsets[-1] + start) < max_window_start:
+        offsets.append(offsets[i - 3] + max_window_size)
+    
+    return [o + start for o in offsets[0:-1]]
 
 
 def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64):
@@ -625,12 +632,13 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    #window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    #window_step = 25
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
+    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    # while window_start <= (end - 0.1 * window_size):
+    #while window_start <= (end - 0.1 * window_size):
     for window_start in _generate_window_starts(start, end, max_window_size=150):
         logger.debug(f"Window start: {window_start}")
         try:
@@ -644,7 +652,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-
+        #window_start += window_step
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
             yield encodedreads, batch_offsets
@@ -788,7 +796,7 @@ def splitvar(v, pos):
     Split a single vcf.Variant object into two Variants at the given position
     Only pos, ref, and alt are adjusted other fields are copied
     """
-    assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt)))
+    assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt))), f"Cant split {v} at position {pos}"
     a = vcf.Variant(
         pos=v.pos,
         ref=v.ref[0:pos - v.pos],
@@ -939,15 +947,13 @@ def merge_genotypes(genos):
     return allvars0, allvars1
 
 
-
 if __name__=="__main__":
     import sys
     from datetime import datetime as dt
     print(f"Loading model from {sys.argv[1]}")
     m = load_model(sys.argv[1])
     m.eval()
-    samples = 50
-    batch_size = 1
+    batch_size = 25
     i = 0
     start = dt.now()
     while i < samples:
@@ -958,3 +964,4 @@ if __name__=="__main__":
     end = dt.now()
     elapsed = end - start
     print(f"Time: {elapsed.total_seconds() :.4f}")
+

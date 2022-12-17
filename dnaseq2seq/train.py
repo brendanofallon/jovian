@@ -202,7 +202,6 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
     loss_sum = 0
     model.train()
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
-        # tgt_kmers = util.tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
@@ -215,6 +214,8 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         loss_sum += loss.item()
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         optimizer.step()
+        if batch % 10 == 0:
+            logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
         samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
@@ -324,7 +325,7 @@ def calc_val_accuracy(loader, model, criterion):
             j = tgt_kmer_idx.shape[-1]
             seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
             if type(criterion) == nn.NLLLoss:
-                loss_tot = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
+                loss_tot += compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             else:
                 raise ValueError("Only cross entropy supported now")
 
@@ -376,12 +377,12 @@ def train_epochs(epochs,
                  samples_per_epoch=10000,
 ):
     # 35M model params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 4 # was 4
-    dim_feedforward = 512
-    encoder_layers = 6
-    decoder_layers = 4 # was 2
-    embed_dim_factor = 120 # was 100
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 6
+    #decoder_layers = 4 # was 2
+    #embed_dim_factor = 120 # was 100
 
     # 50M model params
     # encoder_attention_heads = 8 # was 4
@@ -393,20 +394,20 @@ def train_epochs(epochs,
 
 
     # 100M params
-    # encoder_attention_heads = 8 # was 4
-    # decoder_attention_heads = 10 # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 10
-    # decoder_layers = 8 # was 2
-    # embed_dim_factor = 160 # was 100
+    encoder_attention_heads = 8 # was 4
+    decoder_attention_heads = 10 # was 4
+    dim_feedforward = 512
+    encoder_layers = 10
+    decoder_layers = 10 # was 2
+    embed_dim_factor = 160 # was 100
 
     # Small, for testing params
-    # encoder_attention_heads = 2  # was 4
-    # decoder_attention_heads = 1  # was 4
-    # dim_feedforward = 128
-    # encoder_layers = 1
-    # decoder_layers = 1  # was 2
-    # embed_dim_factor = 40  # was 100
+    #encoder_attention_heads = 2  # was 4
+    #decoder_attention_heads = 2  # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 2
+    #decoder_layers = 2  # was 2
+    #embed_dim_factor = 160  # was 100
 
     model = VarTransformer(read_depth=max_read_depth,
                             feature_count=feats_per_read, 
@@ -418,15 +419,17 @@ def train_epochs(epochs,
                             decoder_attention_heads=decoder_attention_heads,
                             d_ff=dim_feedforward,
                             device=DEVICE)
+    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Creating model with {model_tot_params} trainable params")
+    
+    if statedict is not None:
+        logger.info(f"Initializing model with state dict {statedict}")
+        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
+    
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
 
-    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info(f"Creating model with {model_tot_params} trainable params")
-    if statedict is not None:
-        logger.info(f"Initializing model with state dict {statedict}")
-        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
@@ -458,9 +461,6 @@ def train_epochs(epochs,
             "epoch", "trainingloss", "val_accuracy",
             "mean_var_count", "ppa_dels", "ppa_ins", "ppa_snv",
             "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
-            "batch_time_mean", "decompress_frac", "train_frac", "io_frac",
-            "zero_grad_frac", "forward_pass_frac", "loss_frac", "midmatch_frac",
-            "backward_pass_frac", "optimize_frac",
     ])
 
     if ENABLE_WANDB:
@@ -484,6 +484,7 @@ def train_epochs(epochs,
             model_param_count=model_tot_params,
             git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
             loss_func=str(criterion),
+            samples_per_epoch=samples_per_epoch,
         )
         # log command line too
         wandb_config_params.update(cl_args)
@@ -519,11 +520,14 @@ def train_epochs(epochs,
     try:
         for epoch in range(epochs):
             starttime = datetime.now()
-            loss = train_n_samples(model,
+            if samples_per_epoch > 0:
+                loss = train_n_samples(model,
                                   optimizer,
                                   criterion,
                                   iter_indefinitely(dataloader, batch_size),
                                   samples_per_epoch)
+            else:
+                loss, _ = train_epoch(model, optimizer, criterion, dataloader, batch_size)
 
             elapsed = datetime.now() - starttime
 
@@ -560,12 +564,12 @@ def train_epochs(epochs,
                 "trainingloss": loss,
                 "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
                 "mean_var_count": var_count0,
-                "ppa_dels": ppa_dels,
-                "ppa_ins": ppa_ins,
                 "ppa_snv": ppa_snv,
-                "ppv_dels": ppv_dels,
+                "ppa_ins": ppa_ins,
+                "ppa_dels": ppa_dels,
                 "ppv_ins": ppv_ins,
                 "ppv_snv": ppv_snv,
+                "ppv_dels": ppv_dels,
                 "learning_rate": scheduler.get_last_lr()[0],
                 "epochtime": elapsed.total_seconds(),
             })
@@ -648,5 +652,6 @@ def train(output_model, input_model, epochs, **kwargs):
                  wandb_run_name=kwargs.get("wandb_run_name"),
                  wandb_notes=kwargs.get("wandb_notes"),
                  cl_args=kwargs.get("cl_args"),
+                 samples_per_epoch=kwargs.get('samples_per_epoch'),
                  )
 

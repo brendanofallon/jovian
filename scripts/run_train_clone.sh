@@ -7,7 +7,7 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=3-0
+#SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 #SBATCH --gres=gpu:2 --constraint="a6000|a100"
@@ -43,15 +43,16 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all_plus_susregions
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_smallsus
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
-PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
+#PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
+PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcsus/
 
 LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_huge_lcbig"
-RUN_NOTES="100M model, lcbig training set"
+RUN_NAME="decoder_96M_report10M"
+RUN_NOTES="96M model, lcsus training set, report every 10M training steps"
 
 set -x
 
@@ -77,7 +78,6 @@ echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 export ENABLE_WANDB=1
 
 $PYTHON $ds2s train \
-    -c $CONF \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
@@ -87,6 +87,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
+    --samples-per-epoch 10000000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
