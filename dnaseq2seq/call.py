@@ -698,7 +698,7 @@ def _call_vars_region(
         logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE)
+        n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
         batchvars = call_batch(batch, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
 
