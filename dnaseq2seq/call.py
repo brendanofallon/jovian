@@ -88,20 +88,20 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 def load_model(model_path):
     
     #96M params
-    encoder_attention_heads = 8
-    decoder_attention_heads = 10 
-    dim_feedforward = 512
-    encoder_layers = 10
-    decoder_layers = 10 
-    embed_dim_factor = 160 
+    #encoder_attention_heads = 8
+    #decoder_attention_heads = 10 
+    #dim_feedforward = 512
+    #encoder_layers = 10
+    #decoder_layers = 10 
+    #embed_dim_factor = 160 
 
     # 35M params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6 # was 2
-    #embed_dim_factor = 120 # was 100
+    encoder_attention_heads = 8 # was 4
+    decoder_attention_heads = 4 # was 4
+    dim_feedforward = 512
+    encoder_layers = 8
+    decoder_layers = 6 # was 2
+    embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
@@ -553,7 +553,7 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
+def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_output_toks):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -561,10 +561,11 @@ def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
+    assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
     seq_preds, probs = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
     probs = probs.detach().cpu().numpy()
     calledvars = []
-    for (start, end), b in zip(regions, range(seq_preds.shape[0])):
+    for offset, (start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
@@ -572,8 +573,8 @@ def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
         refseq = reference.fetch(chrom, start, end)
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, start, probs=probs0) if v.pos <= end)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, start, probs=probs1) if v.pos <= end)
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
@@ -632,14 +633,14 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    #window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
-    #window_step = 25
+    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    window_step = 25
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    #while window_start <= (end - 0.1 * window_size):
-    for window_start in _generate_window_starts(start, end, max_window_size=150):
+    while window_start <= (end - 0.1 * window_size):
+    #for window_start in _generate_window_starts(start, end, max_window_size=150):
         logger.debug(f"Window start: {window_start}")
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
@@ -652,7 +653,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-        #window_start += window_step
+        window_start += window_step
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
             yield encodedreads, batch_offsets
@@ -708,7 +709,7 @@ def _call_vars_region(
         callstart = datetime.datetime.now()
         n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-        batchvars = call_batch(batch, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
+        batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
 
         h0, h1 = merge_genotypes(batchvars)
 
