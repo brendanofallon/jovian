@@ -575,7 +575,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_outpu
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
-        print(f"For window {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
+        print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
 
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
@@ -709,7 +709,7 @@ def _call_vars_region(
         logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
         enctime_total += (datetime.datetime.now() - encstart)
         callstart = datetime.datetime.now()
-        n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
+        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
         batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
 
