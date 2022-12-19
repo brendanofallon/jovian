@@ -20,9 +20,9 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_splits_chrsE.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_bigvars_conf.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbig_sus_chrsE.yaml
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcsus_chr21and22.yaml
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_nosus_groupA.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_lcsus_chr21and22.yaml
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_nosus_groupB.yaml
 
 BATCH_SIZE=512
 

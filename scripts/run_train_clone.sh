@@ -51,8 +51,8 @@ LEARNING_RATE=0.00005
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M"
-RUN_NOTES="96M model, lcsus training set, report every 10M training steps"
+RUN_NAME="decoder_96M_report10M_cont"
+RUN_NOTES="96M model, lcsus training set, report every 10M training steps, continued from epoch23"
 
 set -x
 
@@ -87,6 +87,7 @@ $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_96M_report10M/decoder_96M_report10M_epoch23.model \
     --samples-per-epoch 10000000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
