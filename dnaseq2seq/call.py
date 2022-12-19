@@ -572,7 +572,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_outpu
         probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
-        refseq = reference.fetch(chrom, start, end)
+        refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
         calledvars.append((vars_hap0, vars_hap1))
