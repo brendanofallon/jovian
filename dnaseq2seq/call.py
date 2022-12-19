@@ -21,7 +21,6 @@ from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
 from concurrent.futures import ProcessPoolExecutor
-from xgboost import XGBClassifier
 
 
 import torch
@@ -89,19 +88,19 @@ def load_model(model_path):
     
     #96M params
     encoder_attention_heads = 8
-    decoder_attention_heads = 10 
+    decoder_attention_heads = 10
     dim_feedforward = 512
     encoder_layers = 10
-    decoder_layers = 10 
-    embed_dim_factor = 160 
+    decoder_layers = 10
+    embed_dim_factor = 160
 
     # 35M params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6 # was 2
-    #embed_dim_factor = 120 # was 100
+    # encoder_attention_heads = 8 # was 4
+    # decoder_attention_heads = 4 # was 4
+    # dim_feedforward = 512
+    # encoder_layers = 8
+    # decoder_layers = 6 # was 2
+    # embed_dim_factor = 120 # was 100
     model = VarTransformer(read_depth=100,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
@@ -574,6 +573,8 @@ def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
         refseq = reference.fetch(chrom, start, end)
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, start, probs=probs0) if v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, start, probs=probs1) if v.pos <= end)
+
+        print(f"For window {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
 
@@ -601,7 +602,7 @@ def _generate_window_starts(start, end, max_window_size):
     window start
     For larger regions, step size should be larger
     """
-    offsets = [-51, -43, -35]
+    offsets = list(range(-100, 10, 3))
     max_window_start = max(start, end - (max_window_size //2))
     i = 0
     while (offsets[-1] + start) < max_window_start:
@@ -708,7 +709,8 @@ def _call_vars_region(
         callstart = datetime.datetime.now()
         n_output_toks = min(150 // util.TGT_KMER_SIZE, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-        batchvars = call_batch(batch, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
+        batchvars = call_batch(batch, [(offset, end) for offset in batch_offsets], model, reference, chrom, n_output_toks)
+
 
         h0, h1 = merge_genotypes(batchvars)
 
