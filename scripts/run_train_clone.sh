@@ -47,12 +47,12 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
 PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcsus/
 
-LEARNING_RATE=0.00005
+LEARNING_RATE=0.00003
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_cont"
-RUN_NOTES="96M model, lcsus training set, report every 10M training steps, continued from epoch23"
+RUN_NAME="decoder_96M_report10M_cont_lolr"
+RUN_NOTES="96M model, lcsus training set, learning rate 0.00003 continued from epoch23"
 
 set -x
 

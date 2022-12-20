@@ -602,7 +602,7 @@ def _generate_window_starts(start, end, max_window_size):
     window start
     For larger regions, step size should be larger
     """
-    offsets = [-51, -43, -35]
+    offsets = list(range(-70, -40, 5))
     max_window_start = max(start, end - (max_window_size //2))
     i = 0
     while (offsets[-1] + start) < max_window_start:
@@ -633,14 +633,14 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
-    window_step = 25
+    #window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    window_step = 0
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    while window_start <= (end - 0.1 * window_size):
-    #for window_start in _generate_window_starts(start, end, max_window_size=150):
+    #while window_start <= (end - 0.5 * window_size):
+    for window_start in _generate_window_starts(start, end, max_window_size=150):
         logger.debug(f"Window start: {window_start}")
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
