@@ -543,7 +543,13 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
+def region_to_onehot_kmers(reference, chrom, start, end):
+    assert (end - start) % util.TGT_KMER_SIZE == 0, f"Region size {end - start} not evenly divisible for KMER size {util.TGT_KMER_SIZE}"
+    seq = reference.fetch(chrom, start, end)
+    return util.seq_to_onehot_kmers(seq)
+
+
+def call_batch(encoded_reads, batch_offsets, regions, model, reference, chrom, n_output_toks):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -551,10 +557,18 @@ def call_batch(encoded_reads, regions, model, reference, chrom, n_output_toks):
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
+
+    n_precomputed_toks = 5
+    all_pretoks = []
+    for offset in batch_offsets:
+        ptoks = region_to_onehot_kmers(reference, chrom, offset, n_precomputed_toks * util.TGT_KMER_SIZE)
+        all_pretoks.append(ptoks)
+
+
     seq_preds, probs = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
     probs = probs.detach().cpu().numpy()
     calledvars = []
-    for (start, end), b in zip(regions, range(seq_preds.shape[0])):
+    for offset, (start, end), b in zip(batch_offsets, regions, range(seq_preds.shape[0])):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
@@ -576,6 +590,7 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     refseq = reference.fetch(chrom, start, end)
     ref_encoded = bam.string_to_tensor(refseq)
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
+
 
 
 def _generate_window_starts(start, end, max_window_size):
@@ -735,12 +750,12 @@ def _call_vars_multi_regions(regions, aln, model, reference, max_read_depth, win
                 all_reads = encoded_reads
             else:
                 all_reads = torch.stack((all_reads, encoded_reads), dim=0)
-            all_offsets.extend(batch_offsets)
+            all_offsets.extend([(b, end) for b in batch_offsets])
             for offset in batch_offsets:
                 n_toks_required.append( min(150 // util.TGT_KMER_SIZE, (end - offset) // util.TGT_KMER_SIZE) )
             if len(all_offsets) > max_batch_size:
                 ntoks = max(n_toks_required[0:max_batch_size])
-                batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, window_end=end)
+                batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, n_output_toks=ntoks)
 
 
 
