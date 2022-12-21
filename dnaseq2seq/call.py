@@ -590,30 +590,8 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _generate_window_starts(start, end, max_window_size):
-    """
-    When calling variants in a region we want to tile windows over the region. Multiple factors affect
-    how we pick windows to tile over a region:
-     1. Regions vary greatly in size
-     2. Calling variants is expensive computationally, and we'd like to minimize the number of tokens (kmers) predicted
-     3. Each base pair should be covered by a roughly uniform number of windows (more probably leads to more precise
-            calling but grealy impacts performance)
-     4. Most regions are pretty small
 
-    For smallish regions (most regions are < 25bp), we want a small step size and a start thats not too far from the
-    window start
-    For larger regions, step size should be larger
-    """
-    offsets = list(range(-100, 10, 3))
-    max_window_start = max(start, end - (max_window_size //2))
-    i = 0
-    while (offsets[-1] + start) < max_window_start:
-        offsets.append(offsets[i - 3] + max_window_size)
-    
-    return [o + start for o in offsets[0:-1]]
-
-
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64):
+def _encode_region(readwindow, reference, chrom, start, end, max_read_depth, window_step, window_size=150, min_reads=5, batch_size=64):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -635,14 +613,12 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    #window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
-    window_step = 0
+    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
+    # readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    #while window_start <= (end - 0.1 * window_size):
-    for window_start in _generate_window_starts(start, end, max_window_size=150):
+    while window_start <= (end - 0.1 * window_size):
         logger.debug(f"Window start: {window_start}")
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
@@ -666,6 +642,14 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     if batch:
         encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
         yield encodedreads, batch_offsets
+
+
+def region_looks_tricky(batchvars):
+    for hap0, hap1 in batchvars:
+        for call in hap0 + hap1:
+            if call.qual < 0.85:
+                return True
+    return False
 
 
 def _call_vars_region(
@@ -693,6 +677,7 @@ def _call_vars_region(
 
     step_count = 0  # initialize
     # var_retain_window_size = 145
+    window_step = 25
     batch_size = 128
 
     enctime_total = datetime.timedelta(0)
@@ -700,8 +685,10 @@ def _call_vars_region(
     encstart = datetime.datetime.now()
     hap0 = defaultdict(list)
     hap1 = defaultdict(list)
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
+    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
+    for batch, batch_offsets in _encode_region(readwindow, reference, chrom, start, end,
                                                max_read_depth,
+                                               window_step=window_step,
                                                window_size=window_size,
                                                min_reads=min_reads,
                                                batch_size=batch_size):
@@ -712,6 +699,20 @@ def _call_vars_region(
         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
         batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
+
+        if region_looks_tricky(batchvars):
+            logger.info(f"Triggering additional windows for region {chrom}:{start}-{end}")
+            batch2, offsets2 = next(_encode_region(readwindow, reference, chrom, start - 7, end,
+                                               max_read_depth,
+                                               window_step=window_step,
+                                               window_size=window_size // 2,
+                                               min_reads=min_reads,
+                                               batch_size=batch_size))
+            n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(offsets2)) // util.TGT_KMER_SIZE + 1)
+            more_batchvars = call_batch(batch2, offsets2, [(start, end) for _ in range(batch2.shape[0])], model, reference,
+                                   chrom, n_output_toks)
+            batchvars.extend(more_batchvars)
+            # add more_batchvars to original batchvars
 
         h0, h1 = merge_genotypes(batchvars)
 
@@ -731,27 +732,27 @@ def _call_vars_region(
     return chrom, window_idx, hap0_passing, hap1_passing
 
 
-def _call_vars_multi_regions(regions, aln, model, reference, max_read_depth, window_size=300, min_reads=5):
-    max_batch_size = 32
-    all_reads = None
-    all_offsets = []
-    n_toks_required = []
-    for i, (chrom, start, end) in enumerate(regions):
-        for encoded_reads, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                                   max_read_depth,
-                                                   window_size=window_size,
-                                                   min_reads=min_reads,
-                                                   batch_size=batch_size):
-            if all_reads is None:
-                all_reads = encoded_reads
-            else:
-                all_reads = torch.stack((all_reads, encoded_reads), dim=0)
-            all_offsets.extend(batch_offsets)
-            for offset in batch_offsets:
-                n_toks_required.append( min(150 // util.TGT_KMER_SIZE, (end - offset) // util.TGT_KMER_SIZE) )
-            if len(all_offsets) > max_batch_size:
-                ntoks = max(n_toks_required[0:max_batch_size])
-                batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, window_end=end)
+# def _call_vars_multi_regions(regions, aln, model, reference, max_read_depth, window_size=300, min_reads=5):
+#     max_batch_size = 32
+#     all_reads = None
+#     all_offsets = []
+#     n_toks_required = []
+#     for i, (chrom, start, end) in enumerate(regions):
+#         for encoded_reads, batch_offsets in _encode_region(aln, reference, chrom, start, end,
+#                                                    max_read_depth,
+#                                                    window_size=window_size,
+#                                                    min_reads=min_reads,
+#                                                    batch_size=batch_size):
+#             if all_reads is None:
+#                 all_reads = encoded_reads
+#             else:
+#                 all_reads = torch.stack((all_reads, encoded_reads), dim=0)
+#             all_offsets.extend(batch_offsets)
+#             for offset in batch_offsets:
+#                 n_toks_required.append( min(150 // util.TGT_KMER_SIZE, (end - offset) // util.TGT_KMER_SIZE) )
+#             if len(all_offsets) > max_batch_size:
+#                 ntoks = max(n_toks_required[0:max_batch_size])
+#                 batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, window_end=end)
 
 
 
