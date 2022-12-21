@@ -575,7 +575,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_outpu
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
-        print(f"Offset: {offset - start}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
+        # print(f"Offset: {offset - start}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
 
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
@@ -702,10 +702,10 @@ def _call_vars_region(
 
         if region_looks_tricky(batchvars):
             logger.info(f"Triggering additional windows for region {chrom}:{start}-{end}")
-            batch2, offsets2 = next(_encode_region(readwindow, reference, chrom, start - 7, end,
+            batch2, offsets2 = next(_encode_region(readwindow, reference, chrom, start, end,
                                                max_read_depth,
-                                               window_step=window_step,
-                                               window_size=window_size // 2,
+                                               window_step=window_step // 2,
+                                               window_size=window_size,
                                                min_reads=min_reads,
                                                batch_size=batch_size))
             n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(offsets2)) // util.TGT_KMER_SIZE + 1)
