@@ -93,13 +93,22 @@ def load_model(model_path):
     #decoder_layers = 10 
     #embed_dim_factor = 160 
 
-    # 35M params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 4 # was 4
+    #50M params
+    encoder_attention_heads = 8
+    decoder_attention_heads = 4 
     dim_feedforward = 512
-    encoder_layers = 6
-    decoder_layers = 4 # was 2
-    embed_dim_factor = 120 # was 100
+    encoder_layers = 8
+    decoder_layers = 6
+    embed_dim_factor = 120 
+
+
+    # 35M params
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 6
+    #decoder_layers = 4 # was 2
+    #embed_dim_factor = 120 # was 100
 
     model = VarTransformer(read_depth=100,
                             feature_count=10,
