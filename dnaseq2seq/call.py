@@ -410,7 +410,7 @@ def process_block(region_file, start_idx, end_idx,
         data = torch.load(path, map_location='cpu')
         chrom, start, end = data['region']
         window_idx = int(data['window_idx'])
-        logger.info(f"Calling variants on window {window_idx} path: {path}")
+        logger.debug(f"Calling variants on window {window_idx} path: {path}")
         hap0, hap1 = call_and_merge(data['encoded_pileup'], data['start_positions'], start, end, model, reference, chrom)
         nvars, tmp_vcf_path = vars_hap_to_records(
             chrom, window_idx, hap0, hap1, aln, reference, classifier_model, tmpdir, var_freq_file
@@ -468,7 +468,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
                                                      window_size=window_size, min_reads=min_reads, batch_size=batch_size):
         all_encoded.append(encoded_region)
         all_starts.extend(start_positions)
-
+    logger.debug("Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
     if len(all_encoded) > 1:
         encoded = torch.concat(all_encoded, dim=0)
     else:
@@ -480,6 +480,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
         'window_idx': window_idx,
     }
     dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(4)}.pt"
+    logger.debug(f"Saving data as {dest.absolute()}")
     torch.save(data, dest)
     return dest.absolute()
 
