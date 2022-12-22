@@ -345,7 +345,7 @@ def call_variants_on_chrom(
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
     vcf_file.close()
 
-    regions_per_block = 5
+    regions_per_block = threads
     start_block = 0
     with open(chrom_vcf, "a") as chrom_vfh:
         while start_block < n_regions:
