@@ -8,8 +8,7 @@ warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Gen
 You should have received a copy of the GNU General Public License along with this program.
 If not, see <https://www.gnu.org/licenses/>.
 """
-
-
+import concurrent.futures
 import os
 import time
 
@@ -21,7 +20,7 @@ from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
 from concurrent.futures import ProcessPoolExecutor
-
+from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
@@ -98,8 +97,8 @@ def load_model(model_path):
     encoder_attention_heads = 8 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 512
-    encoder_layers = 8
-    decoder_layers = 6 # was 2
+    encoder_layers = 6
+    decoder_layers = 4 # was 2
     embed_dim_factor = 120 # was 100
 
     model = VarTransformer(read_depth=100,
@@ -287,30 +286,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
 
 
-def split_even_chunks(n_item, n_chunk):
-    """
-    This function splits n_items into n_chunk chunks
-    :param n_item : total number of items that will be splitted.
-    :param n_chunk: the number of chunks
-    :return chunks: the start index and end index of each chunk.
-    """
-    chunks = []
-    n_chunk = min(n_item, n_chunk)
-    chunk_size = n_item // n_chunk
-    num_left = n_item - chunk_size * n_chunk
-    for i in range(n_chunk):
-        chunks.append(chunk_size)
-    for i in range(num_left):
-        chunks[i] += 1
-
-    start_idx = 0
-    end_idx = 0
-    for i in range(n_chunk):
-        start_idx = end_idx
-        end_idx = start_idx + chunks[i]
-        yield (start_idx, end_idx)
-
-
 def call_variants_on_chrom(
     chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file
 ):
@@ -329,9 +304,9 @@ def call_variants_on_chrom(
     """
     max_read_depth = 100
     logger.info(f"Max read depth: {max_read_depth} window step: dynamic!")
+
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
-
     logger.info(f"Creating windows from {bed}")
     windows = [
         (chrom, window_idx, window_start, window_end) 
@@ -340,7 +315,7 @@ def call_variants_on_chrom(
         )
     ]
 
-    func = partial(
+    cluster_positions_func = partial(
         cluster_positions_for_window,
         bamfile=bamfile,
         reference_fasta=reference_fasta,
@@ -351,79 +326,174 @@ def call_variants_on_chrom(
     region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
     n_regions = 0
     with open(region_file, "w") as rfh:
-        for regions in mp.Pool(threads).map(func, windows):
+        for regions in mp.Pool(threads).map(cluster_positions_func, windows):
             for r in regions:
                 print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
                 n_regions += 1
     logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
 
-    chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
-    logger.debug(f"Created {chunks} chunks for {threads} threads")
-    logger.debug('\n'.join(f"Chunk {i} : {c}" for i, c in enumerate(chunks)))
-    process_chunk_func = partial(
-        process_chunk_regions,
-        region_file=region_file,
-        bamfile=bamfile,
-        model_path=model_path,
-        reference_fasta=reference_fasta,
-        classifier_path=classifier_path,
-        tmpdir=tmpdir,
-        max_read_depth=max_read_depth,
-        window_size=150,
-        var_freq_file=var_freq_file
-    )
-
     chrom_vcf = f"{tmpdir}/chrom_{chrom}_raw.vcf"
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
     vcf_file.close()
 
-
-    chrom_nvar = 0
+    regions_per_block = 5
+    start_block = 0
     with open(chrom_vcf, "a") as chrom_vfh:
-        if threads == 1:
-            for chunk in chunks:
-                chunk_nvar, chunk_vcf = process_chunk_func(chunk)
-                for var in pysam.VariantFile(chunk_vcf):
-                    chrom_vfh.write(str(var))
-                os.unlink(chunk_vcf)
-                chrom_nvar += chunk_nvar
-        else:
-            futs = []
-            with ProcessPoolExecutor(max_workers=2) as pool:
-                for chunk in chunks:
-                    fut = pool.submit(process_chunk_func, chunk)
-                    futs.append(fut)
-                logger.info(f"Submitted {len(futs)} jobs for variant calling")
-                for i, fut in enumerate(futs):
-                    try:
-                        nvars, chunk_vcf = fut.result(timeout= 10 * 60 * 60)
-                        logger.debug(f"Got result {i} of {len(futs)} results for chunked variant calling with {nvars} vars")
-                        chrom_nvar += nvars
-                        for var in pysam.VariantFile(chunk_vcf):
-                            chrom_vfh.write(str(var))
-                            chrom_vfh.flush()
-                    except Exception as ex:
-                        logger.error(f"Exception processing chunk {i} ({chunk}): {ex}")
-                        raise ex
+        while start_block < n_regions:
+            logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {n_regions}  {start_block / n_regions * 100 :.2f}% done")
+            process_block(region_file, start_block, start_block + regions_per_block,
+                            bamfile=bamfile,
+                            model_path=model_path,
+                            reference_fasta=reference_fasta,
+                            classifier_path=classifier_path,
+                            tmpdir=tmpdir,
+                            threads=threads,
+                            max_read_depth=max_read_depth,
+                            window_size=150,
+                            vcf_out_fh=chrom_vfh,
+                            var_freq_file=var_freq_file)
+            chrom_vfh.flush()
+            start_block += regions_per_block
 
-                os.unlink(chunk_vcf)
-
-    logger.info(f"Done calling variants on {len(chunks)} chunks, now sorting & deduping raw VCF")
+    logger.info(f"Done calling variants on chrom {chrom}, now sorting & deduping raw VCF")
     chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
     util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
     logger.info(f"Done sorting, now deduping..")
     chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
     util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
 
-    logger.info(
-        f"A total of {chrom_nvar} variants called on chromosome {chrom} and saved "
-        f"to {chrom_vcf_dedup}"
-    )
     os.unlink(region_file)
     os.unlink(chrom_vcf)
     os.unlink(chrom_vcf_sorted)
     
     return chrom_vcf_dedup
+
+
+def process_block(region_file, start_idx, end_idx,
+              bamfile,
+              model_path,
+              reference_fasta,
+              classifier_path,
+              tmpdir,
+              threads,
+              max_read_depth,
+              window_size,
+              vcf_out_fh,
+              var_freq_file=None):
+
+    with open(region_file) as fh:
+        regions = [line.split() for idx, line in enumerate(fh) if start_idx <= idx < end_idx]
+
+    encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
+    logger.info(f"Encoded {encoded_paths} regions")
+    model = load_model(model_path)
+    aln = pysam.AlignmentFile(bamfile)
+    reference = pysam.FastaFile(reference_fasta)
+
+    if var_freq_file:
+        var_freq_file = pysam.VariantFile(var_freq_file)
+    classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
+
+    for path in encoded_paths:
+        # Load the data, parsing location + encoded data from file
+        data = torch.load(path, map_location='cpu')
+        chrom, start, end = data['region']
+        window_idx = int(data['window_idx'])
+        logger.info(f"Calling variants on window {window_idx} path: {path}")
+        hap0, hap1 = call_and_merge(data['encoded_pileup'], data['start_positions'], start, end, model, reference, chrom)
+        nvars, tmp_vcf_path = vars_hap_to_records(
+            chrom, window_idx, hap0, hap1, aln, reference, classifier_model, tmpdir, var_freq_file
+        )
+        for var in pysam.VariantFile(tmp_vcf_path):
+            vcf_out_fh.write(str(var))
+        vcf_out_fh.flush()
+        os.unlink(path)
+        os.unlink(tmp_vcf_path)
+
+
+def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size):
+    """
+    Encode and save all the regions in the regions list in parallel, and return the list of files to the saved data
+    """
+    encode_func = partial(
+        encode_and_save_region,
+        bamfile=bamfile,
+        refpath=reference_fasta,
+        tmpdir=tmpdir,
+        max_read_depth=max_read_depth,
+        window_size=window_size,
+        min_reads=5,
+        batch_size=batch_size,
+    )
+
+    futures = []
+    result_paths = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_threads) as pool:
+        for chrom, window_idx, start, end in regions:
+            fut = pool.submit(encode_func, region=(chrom, window_idx, int(start), int(end)))
+            futures.append(fut)
+
+        for fut in futures:
+            result = fut.result(timeout=300) # Timeout in 5 mins
+            result_paths.append(result)
+            logger.debug(f"Got result path: {result}")
+
+    return result_paths
+
+
+def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, window_size, min_reads, batch_size):
+    """
+    Encode the reads in the given region and save the data along with the region and start offsets to a file
+    and return the absolute path of the file
+
+    Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
+    """
+    chrom, window_idx, start, end = region
+    aln = pysam.AlignmentFile(bamfile, reference_filename=refpath)
+    reference = pysam.FastaFile(refpath)
+    all_encoded = []
+    all_starts = []
+    logger.debug(f"Encoding region {chrom}:{start}-{end} idx: {window_idx}")
+    for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
+                                                     window_size=window_size, min_reads=min_reads, batch_size=batch_size):
+        all_encoded.append(encoded_region)
+        all_starts.extend(start_positions)
+
+    if len(all_encoded) > 1:
+        encoded = torch.concat(all_encoded, dim=0)
+    else:
+        encoded = all_encoded[0]
+    data = {
+        'encoded_pileup': encoded,
+        'region': (chrom, start, end),
+        'start_positions': all_starts,
+        'window_idx': window_idx,
+    }
+    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(4)}.pt"
+    torch.save(data, dest)
+    return dest.absolute()
+
+
+def call_and_merge(batch, batch_offsets, start, end, model, reference, chrom):
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
+    n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
+    logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
+    regions = [(start, end) for _ in range(batch.shape[0])]
+    batchvars = call_batch(batch, batch_offsets, regions, model, reference, chrom, n_output_toks)
+
+    h0, h1 = merge_genotypes(batchvars)
+
+    for k, v in h0.items():
+        hap0[k].extend(v)
+    for k, v in h1.items():
+        hap1[k].extend(v)
+
+    # Only return variants that are actually in the window
+    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
+    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
+
+    return hap0_passing, hap1_passing
 
 
 def process_chunk_regions(
@@ -642,7 +712,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     while window_start <= (end - 0.1 * window_size):
-    #for window_start in _generate_window_starts(start, end, max_window_size=150):
         logger.debug(f"Window start: {window_start}")
         try:
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
@@ -731,157 +800,11 @@ def _call_vars_region(
     return chrom, window_idx, hap0_passing, hap1_passing
 
 
-def _call_vars_multi_regions(regions, aln, model, reference, max_read_depth, window_size=300, min_reads=5):
-    max_batch_size = 32
-    all_reads = None
-    all_offsets = []
-    n_toks_required = []
-    for i, (chrom, start, end) in enumerate(regions):
-        for encoded_reads, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                                   max_read_depth,
-                                                   window_size=window_size,
-                                                   min_reads=min_reads,
-                                                   batch_size=batch_size):
-            if all_reads is None:
-                all_reads = encoded_reads
-            else:
-                all_reads = torch.stack((all_reads, encoded_reads), dim=0)
-            all_offsets.extend(batch_offsets)
-            for offset in batch_offsets:
-                n_toks_required.append( min(150 // util.TGT_KMER_SIZE, (end - offset) // util.TGT_KMER_SIZE) )
-            if len(all_offsets) > max_batch_size:
-                ntoks = max(n_toks_required[0:max_batch_size])
-                batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, window_end=end)
-
-
-
 def vars_dont_overlap(v0, v1):
     """
     True if the two variant do not share any reference bases
     """
     return v0.pos + len(v0.ref) <= v1.pos or v1.pos + len(v1.ref) <= v0.pos
-
-
-def all_overlaps(vars0, vars1):
-    """
-    Just do an n^2 search for all variants that overlap, aren't exactly equal, have length > 1, and share
-    at least one alt base.
-    This is meant to be used within a single calling window, which never really
-    more than about 5 total variants, so the n^2 isn't bad
-    """
-    for v0 in vars0:
-        for v1 in vars1:
-            if (not vars_dont_overlap(v0, v1)
-                    and v1 != v0
-                    and (len(v0.ref) > 0)
-                    and (len(v1.ref) > 0)
-                    and (len(v0.ref) > 1 or len(v1.ref) > 1)
-                    and any_alt_match(v0, v1)):
-                yield v0, v1
-
-
-def any_alt_match(v0, v1):
-    """
-    Returns true if any bases in the alt sequence match when aligned
-    """
-    v0_offset = max(v0.pos, v1.pos) - v0.pos
-    v1_offset = max(v0.pos, v1.pos) - v1.pos
-    for a, b in zip(v0.alt[v0_offset:], v1.alt[v1_offset:]):
-        if a == b:
-            return True
-    return False
-
-
-
-
-def splitvar(v, pos):
-    """
-    Split a single vcf.Variant object into two Variants at the given position
-    Only pos, ref, and alt are adjusted other fields are copied
-    """
-    assert v.pos < pos < (v.pos + max(len(v.ref), len(v.alt))), f"Cant split {v} at position {pos}"
-    a = vcf.Variant(
-        pos=v.pos,
-        ref=v.ref[0:pos - v.pos],
-        alt=v.alt[0:pos - v.pos],
-        qual=v.qual,
-        hap_model=v.hap_model,
-        step=v.step,
-        window_offset=v.window_offset,
-        var_index=v.var_index,
-    )
-    b = vcf.Variant(
-        pos=pos,
-        ref=v.ref[pos - v.pos:],
-        alt=v.alt[pos - v.pos:],
-        qual=v.qual,
-        hap_model=v.hap_model,
-        step=v.step,
-        window_offset=v.window_offset,
-        var_index=v.var_index,
-    )
-    return a, b
-
-
-def splitvars(v0, v1):
-    """
-
-    v0    |---|
-    v1     |---|
-
-    """
-    assert not vars_dont_overlap(v0, v1), f"Variants {v0} and {v1} do not overlap, can't split"
-    interior_start = max(v0.pos, v1.pos)
-    h0vars = []
-    h1vars = []
-    if v0.pos < interior_start:
-        h0a, h0b = splitvar(v0, interior_start)
-        h0vars.extend([h0a, h0b])
-        if v1.end < v0.end:
-            h0vars.remove(h0b)
-            h0c, h0d = splitvar(h0b, v1.end)
-            h0vars.extend([h0c, h0d])
-            h1vars.append(v1)
-        elif v1.end == v0.end:
-            h1vars.append(v1)
-        elif v1.end > v0.end:
-            h1a, h1b = splitvar(v1, v0.end)
-            h1vars.extend([h1a, h1b])
-
-    elif v1.pos < interior_start:
-        h1a, h1b = splitvar(v1, interior_start)
-        h1vars.extend([h1a, h1b])
-        if v0.end < v1.end:
-            h1vars.remove(h1b)
-            h1c, h1d = splitvar(h1b, v0.end)
-            h1vars.extend([h1c, h1d])
-            h0vars.append(v0)
-        elif v1.end == v0.end:
-            h0vars.append(v0)
-        elif v0.end > v1.end:
-            h0a, h0b = splitvar(v0, v1.end)
-            h0vars.extend([h0a, h0b])
-
-    return h0vars, h1vars
-
-
-def split_overlaps(h0vars, h1vars):
-    """
-    Assume h0vars and h1vars are lists of variants on each haplotype
-    Find any variants that overlap, and split any that do into chunks
-    perfectly aligned with the variants from the other hap
-    """
-    unused_h0 = [h for h in h0vars]
-    unused_h1 = [h for h in h1vars]
-    for v0, v1 in all_overlaps(h0vars, h1vars):
-        if v0 in unused_h0:
-            unused_h0.remove(v0)
-        if v1 in unused_h1:
-            unused_h1.remove(v1)
-        new_h0, new_h1 = splitvars(v0, v1)
-        unused_h0.extend(new_h0)
-        unused_h1.extend(new_h1)
-    return sorted(unused_h0), sorted(unused_h1)
 
 
 def merge_genotypes(genos):
