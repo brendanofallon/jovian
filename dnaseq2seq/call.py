@@ -393,8 +393,10 @@ def process_block(region_file, start_idx, end_idx,
     with open(region_file) as fh:
         regions = [line.split() for idx, line in enumerate(fh) if start_idx <= idx < end_idx]
 
+    enc_start = dt.now()
     encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
-    logger.info(f"Encoded {encoded_paths} regions")
+    enc_elapsed = dt.now() - enc_start
+    logger.debug(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
     model = load_model(model_path)
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
@@ -445,7 +447,6 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
         for fut in futures:
             result = fut.result(timeout=300) # Timeout in 5 mins
             result_paths.append(result)
-            logger.debug(f"Got result path: {result}")
 
     return result_paths
 
@@ -654,7 +655,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_outpu
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
-        print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
+        #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
 
         calledvars.append((vars_hap0, vars_hap1))
     return calledvars
