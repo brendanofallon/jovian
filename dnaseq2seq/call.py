@@ -393,9 +393,9 @@ def process_block(region_file, start_idx, end_idx,
     with open(region_file) as fh:
         regions = [line.split() for idx, line in enumerate(fh) if start_idx <= idx < end_idx]
 
-    enc_start = dt.now()
+    enc_start = datetime.datetime.now()
     encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
-    enc_elapsed = dt.now() - enc_start
+    enc_elapsed = datetime.datetime.now() - enc_start
     logger.debug(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
     model = load_model(model_path)
     aln = pysam.AlignmentFile(bamfile)
