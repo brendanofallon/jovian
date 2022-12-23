@@ -16,6 +16,7 @@ import datetime
 import logging
 import string
 import random
+import itertools
 from collections import defaultdict
 from functools import partial
 from tempfile import NamedTemporaryFile as NTFile
@@ -332,14 +333,9 @@ def call_variants_on_chrom(
     )
 
     logger.info(f"Generating regions from windows on chromosome {chrom}...")
-    region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
-    n_regions = 0
-    with open(region_file, "w") as rfh:
-        for regions in mp.Pool(threads).map(cluster_positions_func, windows):
-            for r in regions:
-                print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
-                n_regions += 1
-    logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
+    raw_regions = mp.Pool(threads).map(cluster_positions_func, windows)
+    regions = list( itertools.chain(*raw_regions))
+    logger.info(f"Generated a total of {len(regions)} regions on chromosome {chrom}")
 
     chrom_vcf = f"{tmpdir}/chrom_{chrom}_raw.vcf"
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
@@ -348,9 +344,9 @@ def call_variants_on_chrom(
     regions_per_block = threads
     start_block = 0
     with open(chrom_vcf, "a") as chrom_vfh:
-        while start_block < n_regions:
-            logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {n_regions}  {start_block / n_regions * 100 :.2f}% done")
-            process_block(region_file, start_block, start_block + regions_per_block,
+        while start_block < len(regions):
+            logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(regions)}  {start_block / len(regions) * 100 :.2f}% done")
+            process_block(regions[start_block:start_block + regions_per_block],
                             bamfile=bamfile,
                             model_path=model_path,
                             reference_fasta=reference_fasta,
@@ -378,7 +374,7 @@ def call_variants_on_chrom(
     return chrom_vcf_dedup
 
 
-def process_block(region_file, start_idx, end_idx,
+def process_block(regions,
               bamfile,
               model_path,
               reference_fasta,
@@ -389,10 +385,12 @@ def process_block(region_file, start_idx, end_idx,
               window_size,
               vcf_out_fh,
               var_freq_file=None):
+    """
+    For each region in the given list of regions, generate input tensors and then call variants on that data
+    Input tensor generation is done in parallel and the result tensors are saved to disk in 'tmpdir'
+    Calling is done on the main thread and loads the tensors one at a time from disk
 
-    with open(region_file) as fh:
-        regions = [line.split() for idx, line in enumerate(fh) if start_idx <= idx < end_idx]
-
+    """
     enc_start = datetime.datetime.now()
     encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
     enc_elapsed = datetime.datetime.now() - enc_start
@@ -509,94 +507,6 @@ def call_and_merge(batch, batch_offsets, start, end, model, reference, chrom):
     return hap0_passing, hap1_passing
 
 
-def process_chunk_regions(
-    chunk,
-    region_file,
-    bamfile,
-    model_path,
-    reference_fasta,
-    classifier_path,
-    max_read_depth,
-    tmpdir,
-    var_freq_file,
-    window_size=300,
-    min_reads=5,
-):
-    """
-    Call variants on the given region and write variants to a temporary VCF file.
-    """
-    chrom, start_idx, end_idx = chunk
-    chunk_vcf =f"{tmpdir}/chrom_{chrom}.chunk_{start_idx}-{end_idx}.vcf"
-    chunk_vfh = vcf.init_vcf(chunk_vcf, sample_name="sample", lowcov=20)
-    chunk_vfh.close()
-    
-    cpname = mp.current_process().name
-    logger.debug(
-        f"{cpname}: Writing variants to tmp VCF {chunk_vcf}"
-    )
-
-    aln = pysam.AlignmentFile(bamfile)
-    reference = pysam.FastaFile(reference_fasta)
-    model = load_model(model_path)
-
-    if var_freq_file:
-        var_freq_file = pysam.VariantFile(var_freq_file)
-
-    # if classifier model available then use classifier quality
-    classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
-
-    chunk_nvar = 0
-    with open(region_file) as fh, open(chunk_vcf, "a") as chunk_vfh:
-        for idx, line in enumerate(fh):
-            if idx < start_idx or idx >= end_idx:
-                continue
-            chrom, window_idx, start, end = line.strip().split("\t")[0:4]
-            window_idx, start, end = int(window_idx), int(start), int(end)
-            
-            logger.debug(f"{cpname}: calling variants in region {chrom}:{start}-{end} (window {window_idx})")
-            try:
-                chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
-                    chrom,
-                    window_idx,
-                    start,
-                    end,
-                    aln=aln,
-                    model=model,
-                    reference=reference,
-                    max_read_depth=max_read_depth,
-                    window_size=window_size,
-                    min_reads=min_reads,
-                )
-            except Exception as ex:
-                print(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
-                raise ex
-
-            try:
-                logger.debug(f"{cpname}: Creating variant records for region {chrom}:{start}-{end} (window {window_idx})")
-                nvar, vcfname = vars_hap_to_records(
-                    chrom,
-                    window_idx=window_idx,
-                    vars_hap0=vars_hap0,
-                    vars_hap1=vars_hap1,
-                    aln=aln,
-                    reference=reference,
-                    classifier_model=classifier_model,
-                    tmpdir=tmpdir,
-                    var_freq_file=var_freq_file
-                )
-            except Exception as ex:
-                logger.error(f"Error converting variants to VCF records in window {window_idx}: {ex}")
-                raise ex
-
-            logger.debug(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
-            for var in pysam.VariantFile(vcfname):
-                chunk_vfh.write(str(var))
-            os.unlink(vcfname)
-            chunk_nvar += nvar
-
-    return chunk_nvar, chunk_vcf
-
-
 def vars_hap_to_records(
     chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir, var_freq_file
 ):
@@ -671,29 +581,6 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     refseq = reference.fetch(chrom, start, end)
     ref_encoded = bam.string_to_tensor(refseq)
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
-
-
-def _generate_window_starts(start, end, max_window_size):
-    """
-    When calling variants in a region we want to tile windows over the region. Multiple factors affect
-    how we pick windows to tile over a region:
-     1. Regions vary greatly in size
-     2. Calling variants is expensive computationally, and we'd like to minimize the number of tokens (kmers) predicted
-     3. Each base pair should be covered by a roughly uniform number of windows (more probably leads to more precise
-            calling but grealy impacts performance)
-     4. Most regions are pretty small
-
-    For smallish regions (most regions are < 25bp), we want a small step size and a start thats not too far from the
-    window start
-    For larger regions, step size should be larger
-    """
-    offsets = list(range(-100, 10, 3))
-    max_window_start = max(start, end - (max_window_size //2))
-    i = 0
-    while (offsets[-1] + start) < max_window_start:
-        offsets.append(offsets[i - 3] + max_window_size)
-    
-    return [o + start for o in offsets[0:-1]]
 
 
 def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64):
@@ -886,22 +773,4 @@ def merge_genotypes(genos):
         allvars1[v.key] = [t for t in allvars if t.key == v.key]
     return allvars0, allvars1
 
-
-if __name__=="__main__":
-    import sys
-    from datetime import datetime as dt
-    print(f"Loading model from {sys.argv[1]}")
-    m = load_model(sys.argv[1])
-    m.eval()
-    batch_size = 25
-    i = 0
-    start = dt.now()
-    while i < samples:
-        print(f"Batch {i}")
-        t = torch.rand(batch_size, 150, 100, 10)
-        preds = util.predict_sequence(t, m, n_output_toks=37, device='cpu')
-        i += batch_size
-    end = dt.now()
-    elapsed = end - start
-    print(f"Time: {elapsed.total_seconds() :.4f}")
 
