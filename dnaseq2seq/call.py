@@ -426,6 +426,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
     """
     Encode and save all the regions in the regions list in parallel, and return the list of files to the saved data
     """
+    torch.set_num_threads(1) # Required to avoid deadlocks when creating tensors
     encode_func = partial(
         encode_and_save_region,
         bamfile=bamfile,
@@ -448,6 +449,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
             result = fut.result(timeout=300) # Timeout in 5 mins
             result_paths.append(result)
 
+    torch.set_num_threads(n_threads)
     return result_paths
 
 
@@ -468,7 +470,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
                                                      window_size=window_size, min_reads=min_reads, batch_size=batch_size):
         all_encoded.append(encoded_region)
         all_starts.extend(start_positions)
-    logger.debug("Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
+    logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
     if len(all_encoded) > 1:
         encoded = torch.concat(all_encoded, dim=0)
     else:
@@ -723,13 +725,14 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     while window_start <= (end - 0.1 * window_size):
-        logger.debug(f"Window start: {window_start}")
         try:
+            logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
                                              max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
+            logger.debug(f"Added item to batch from window_start {window_start}")
         except bam.LowReadCountException:
             logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
