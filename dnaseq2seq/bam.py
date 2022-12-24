@@ -103,9 +103,7 @@ class ReadWindow:
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
-        logger.debug("Downsampled reads, creating zeros tensor...")
         t = torch.zeros(window_size, max_reads, 10, device='cpu')
-        logger.debug("Done creating zeros...")
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
             enc_start_offset = max(0,  start - readstart)

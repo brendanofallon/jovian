@@ -341,7 +341,7 @@ def call_variants_on_chrom(
     vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
     vcf_file.close()
 
-    regions_per_block = threads
+    regions_per_block = max(4, threads)
     start_block = 0
     with open(chrom_vcf, "a") as chrom_vfh:
         while start_block < len(regions):
@@ -367,7 +367,6 @@ def call_variants_on_chrom(
     chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
     util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
 
-    os.unlink(region_file)
     os.unlink(chrom_vcf)
     os.unlink(chrom_vcf_sorted)
     
@@ -403,20 +402,52 @@ def process_block(regions,
         var_freq_file = pysam.VariantFile(var_freq_file)
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
 
+    min_samples_callbatch = 16 # Accumulate regions until we have at least this many
+    batch_encoded = []
+    batch_start_pos = []
+    batch_regions = []
     for path in encoded_paths:
         # Load the data, parsing location + encoded data from file
         data = torch.load(path, map_location='cpu')
         chrom, start, end = data['region']
         window_idx = int(data['window_idx'])
-        logger.debug(f"Calling variants on window {window_idx} path: {path}")
-        hap0, hap1 = call_and_merge(data['encoded_pileup'], data['start_positions'], start, end, model, reference, chrom)
+        batch_encoded.append(data['encoded_pileup'])
+        batch_start_pos.extend(data['start_positions'])
+        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+        os.unlink(path)
+        if len(batch_start_pos) > min_samples_callbatch:
+            logger.debug(f"Calling variants on window {window_idx} path: {path}")
+            if len(batch_encoded) > 1:
+                allencoded = torch.concat(batch_encoded, dim=0)
+            else:
+                allencoded = batch_encoded[0]
+            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
+            nvars, tmp_vcf_path = vars_hap_to_records(
+                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, tmpdir, var_freq_file
+            )
+            for var in pysam.VariantFile(tmp_vcf_path):
+                vcf_out_fh.write(str(var))
+            vcf_out_fh.flush()
+            os.unlink(tmp_vcf_path)
+            batch_encoded = []
+            batch_start_pos = []
+            batch_regions = []
+
+
+    # Write last few
+    logger.debug(f"Calling variants on window {window_idx} path: {path}")
+    if len(batch_start_pos):
+        if len(batch_encoded) > 1:
+            allencoded = torch.concat(batch_encoded, dim=0)
+        else:
+            allencoded = batch_encoded[0]
+        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
         nvars, tmp_vcf_path = vars_hap_to_records(
             chrom, window_idx, hap0, hap1, aln, reference, classifier_model, tmpdir, var_freq_file
         )
         for var in pysam.VariantFile(tmp_vcf_path):
             vcf_out_fh.write(str(var))
         vcf_out_fh.flush()
-        os.unlink(path)
         os.unlink(tmp_vcf_path)
 
 
@@ -444,7 +475,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
             futures.append(fut)
 
         for fut in futures:
-            result = fut.result(timeout=300) # Timeout in 5 mins
+            result = fut.result(timeout=300) # Timeout in 5 mins - typical time for encoding is 1-3 seconds
             result_paths.append(result)
 
     torch.set_num_threads(n_threads)
@@ -485,26 +516,32 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
     return dest.absolute()
 
 
-def call_and_merge(batch, batch_offsets, start, end, model, reference, chrom):
+def call_and_merge(batch, batch_offsets, regions, model, reference):
+    max_dist = max(r[2] - bo for r, bo in zip(regions, batch_offsets))
+    n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (max_dist) // util.TGT_KMER_SIZE + 1)
+    logger.debug(f"window max dist: {max_dist}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
+
+    batchvars = call_batch(batch, batch_offsets, regions, model, reference, n_output_toks)
+
+    byregion = defaultdict(list)
+    for region, bvars in zip(regions, batchvars):
+        byregion[region].append(bvars)
+
     hap0 = defaultdict(list)
     hap1 = defaultdict(list)
-    n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
-    logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-    regions = [(start, end) for _ in range(batch.shape[0])]
-    batchvars = call_batch(batch, batch_offsets, regions, model, reference, chrom, n_output_toks)
+    for region, rvars in byregion.items():
+        chrom, start, end = region
+        h0, h1 = merge_genotypes(rvars)
+        for k, v in h0.items():
+            hap0[k].extend(x for x in v if start <= x.pos < end)
+        for k, v in h1.items():
+            hap1[k].extend(x for x in v if start <= x.pos < end)
 
-    h0, h1 = merge_genotypes(batchvars)
+        # Only return variants that are actually in the window
+        # hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
+        # hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
 
-    for k, v in h0.items():
-        hap0[k].extend(v)
-    for k, v in h1.items():
-        hap1[k].extend(v)
-
-    # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
-
-    return hap0_passing, hap1_passing
+    return hap0, hap1
 
 
 def vars_hap_to_records(
@@ -546,7 +583,7 @@ def vars_hap_to_records(
     return len(vcf_records), vcfh.name
 
 
-def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_output_toks):
+def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -558,7 +595,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_outpu
     seq_preds, probs = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
     probs = probs.detach().cpu().numpy()
     calledvars = []
-    for offset, (start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
+    for offset, (chrom, start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
@@ -569,8 +606,8 @@ def call_batch(encoded_reads, offsets, regions, model, reference, chrom, n_outpu
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
-
         calledvars.append((vars_hap0, vars_hap1))
+
     return calledvars
 
 
@@ -636,69 +673,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     if batch:
         encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
         yield encodedreads, batch_offsets
-
-
-def _call_vars_region(
-    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5,
-):
-    """
-    For the given region, identify variants by repeatedly calling the model over a sliding window,
-    tallying all of the variants called, and passing back all call and repeat count info
-    for further exploration
-    Currently:
-    - exclude all variants in the downstream half of the window
-    - retain all remaining var calls noting how many time each one was called, qualities, etc.
-    - call with no repeats are mostly false positives but they are retained
-    - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
-
-    TODO:
-      - add prob info from alt sequence to vars?
-      - add depth derived from tensor to vars?
-      - create new prob from all duplicate calls?
-    """
-    cpname = mp.current_process().name
-    logger.debug(
-        f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
-    )
-
-    step_count = 0  # initialize
-    # var_retain_window_size = 145
-    batch_size = 128
-
-    enctime_total = datetime.timedelta(0)
-    calltime_total = datetime.timedelta(0)
-    encstart = datetime.datetime.now()
-    hap0 = defaultdict(list)
-    hap1 = defaultdict(list)
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                               max_read_depth,
-                                               window_size=window_size,
-                                               min_reads=min_reads,
-                                               batch_size=batch_size):
-        logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
-        logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
-        enctime_total += (datetime.datetime.now() - encstart)
-        callstart = datetime.datetime.now()
-        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
-        logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-        batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
-
-        h0, h1 = merge_genotypes(batchvars)
-
-        for k, v in h0.items():
-            hap0[k].extend(v)
-        for k, v in h1.items():
-            hap1[k].extend(v)
-        calltime_total += (datetime.datetime.now() - callstart)
-
-        step_count += batch.shape[0]
-
-    # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
-
-    logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
-    return chrom, window_idx, hap0_passing, hap1_passing
 
 
 def vars_dont_overlap(v0, v1):
