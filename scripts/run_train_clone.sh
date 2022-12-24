@@ -51,7 +51,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_finetune_fpfns5"
+RUN_NAME="decoder_96M_report10M_finetune_fpfns6"
 RUN_NOTES="96M model, lcsus training set, try finetuning on small set of FPs/FNs"
 
 set -x
@@ -77,7 +77,7 @@ echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
 export ENABLE_WANDB=1
 
-$PYTHON $ds2s train \
+JV_LOGLEVEL=DEBUG; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \

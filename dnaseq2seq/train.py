@@ -208,11 +208,14 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
 
         optimizer.zero_grad()
+        logger.debug("Forward pass...")
         seq_preds = model(src, tgt_kmers_input, tgt_mask)
+        logger.debug(f"Computing loss...")
         loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
         loss.backward()
         loss_sum += loss.item()
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        logger.debug("Stepping optimizer...")
         optimizer.step()
         if batch % 10 == 0:
             logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
