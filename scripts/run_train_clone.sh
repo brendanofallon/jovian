@@ -45,14 +45,14 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
-PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcsus/
+PREGEN_DIR=/scratch/general/vast/u0379426/pregen_fpfn_chr1
 
-LEARNING_RATE=0.00003
+LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_cont_lolr"
-RUN_NOTES="96M model, lcsus training set, learning rate 0.00003 continued from epoch23"
+RUN_NAME="decoder_96M_report10M_finetune_fpfns"
+RUN_NOTES="96M model, lcsus training set, try finetuning on small set of FPs/FNs"
 
 set -x
 
@@ -88,7 +88,7 @@ $PYTHON $ds2s train \
     --threads 16 \
     --max-decomp-batches 8 \
     -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_96M_report10M/decoder_96M_report10M_epoch23.model \
-    --samples-per-epoch 10000000 \
+    --samples-per-epoch 250000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 

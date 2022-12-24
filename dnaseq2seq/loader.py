@@ -170,6 +170,7 @@ def decompress_multi_map(paths, threads):
     but keep them on the CPU
     :returns : List of Tensors (all on CPU)
     """
+    torch.set_num_threads(1) # Required, avoids deadlock
     start = datetime.now()
     decompressed = []
     with mp.Pool(threads) as pool:
@@ -181,6 +182,7 @@ def decompress_multi_map(paths, threads):
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
     )
+    torch.set_num_threads(threads)
     return result
 
 
