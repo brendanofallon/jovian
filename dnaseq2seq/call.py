@@ -367,7 +367,6 @@ def call_variants_on_chrom(
     chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
     util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
 
-    os.unlink(region_file)
     os.unlink(chrom_vcf)
     os.unlink(chrom_vcf_sorted)
     
