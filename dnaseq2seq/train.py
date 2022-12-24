@@ -202,6 +202,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
     loss_sum = 0
     model.train()
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
+        logger.debug("Got batch from loader...")
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
