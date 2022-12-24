@@ -182,7 +182,7 @@ def decompress_multi_map(paths, threads):
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
     )
-    torch.set_num_threads(threads)
+    #torch.set_num_threads(threads)
     return result
 
 

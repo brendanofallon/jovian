@@ -5,7 +5,7 @@
 
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
@@ -51,7 +51,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_finetune_fpfns"
+RUN_NAME="decoder_96M_report10M_finetune_fpfns2"
 RUN_NOTES="96M model, lcsus training set, try finetuning on small set of FPs/FNs"
 
 set -x
