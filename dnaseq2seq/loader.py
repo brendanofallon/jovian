@@ -175,7 +175,7 @@ def decompress_multi_map(paths, threads):
     with mp.Pool(threads) as pool:
         decompressed = pool.map(decomp_single, paths)
     
-    result = [torch.load(io.BytesIO(d), map_location='cpu') for d in decompressed]
+    result = [torch.load(d, map_location='cpu') for d in decompressed]
            
     elapsed = datetime.now() - start
     logger.info(
