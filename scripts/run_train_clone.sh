@@ -51,7 +51,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_finetune_fpfns3"
+RUN_NAME="decoder_96M_report10M_finetune_fpfns4"
 RUN_NOTES="96M model, lcsus training set, try finetuning on small set of FPs/FNs"
 
 set -x

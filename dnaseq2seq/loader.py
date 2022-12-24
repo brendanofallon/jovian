@@ -173,7 +173,7 @@ def decompress_multi_map(paths, threads):
     start = datetime.now()
     decompressed = []
     with mp.Pool(threads) as pool:
-        result = pool.map(decomp_single, paths)
+        decompressed = pool.map(decomp_single, paths)
     
     result = [torch.load(io.BytesIO(d), map_location='cpu') for d in decompressed]
            
