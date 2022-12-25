@@ -1,11 +1,8 @@
-channels:
-  - pytorch
 dependencies:
-- cudatoolkit
 - numpy
 - pandas
 - pyyaml
-- scipy=1.6.2
+- scipy
 - scikit-bio
 - intervaltree
 

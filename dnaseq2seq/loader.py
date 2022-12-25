@@ -124,7 +124,7 @@ class WeightedLoader:
 
 def decomp_single(path):
     with open(path, 'rb') as fh:
-        return io.BytesIO(lz4.frame.decompress(fh.read()))
+        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
 
 
 def decompress_multi_ppe(paths, threads):
@@ -170,12 +170,13 @@ def decompress_multi_map(paths, threads):
     but keep them on the CPU
     :returns : List of Tensors (all on CPU)
     """
+    torch.set_num_threads(1)
     start = datetime.now()
-    decompressed = []
+    #decompressed = []
     with mp.Pool(threads) as pool:
-        decompressed = pool.map(decomp_single, paths)
+        result = pool.map(decomp_single, paths)
     
-    result = [torch.load(d, map_location='cpu') for d in decompressed]
+    #result = [torch.load(d, map_location='cpu') for d in decompressed]
            
     elapsed = datetime.now() - start
     logger.info(

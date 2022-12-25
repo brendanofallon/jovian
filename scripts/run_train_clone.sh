@@ -14,7 +14,7 @@
 
 
 
-module load cuda/11.3
+module load cuda/11.6.2
 
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/
 
@@ -22,8 +22,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
 GIT_BRANCH="decoder_big"
 
-PYTHON=$HOME/miniconda3/envs/ds2s/bin/python
-
+PYTHON=$HOME/miniconda3/envs/jv/bin/python
 
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
@@ -45,14 +44,15 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
-PREGEN_DIR=/scratch/general/vast/u0379426/pregen_fpfn_chr1
+PREGEN_DIR=/scratch/general/vast/u0379426/pregen_nosus/
+
 
 LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_finetune_fpfns7"
-RUN_NOTES="96M model, lcsus training set, try finetuning on small set of FPs/FNs"
+RUN_NAME="decoder_96M_report10M_trynosus"
+RUN_NOTES="96M model, lcsus training set, seeing what happens with some no-sus data"
 
 set -x
 
@@ -75,9 +75,9 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=
+export ENABLE_WANDB=1
 
-JV_LOGLEVEL=DEBUG; $PYTHON $ds2s train \
+export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
@@ -88,10 +88,9 @@ JV_LOGLEVEL=DEBUG; $PYTHON $ds2s train \
     --threads 16 \
     --max-decomp-batches 8 \
     -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_96M_report10M/decoder_96M_report10M_epoch23.model \
-    --samples-per-epoch 100000 \
+    --samples-per-epoch 5000000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
 
 echo "Script is exiting"
-
 
