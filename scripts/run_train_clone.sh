@@ -51,7 +51,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_trynosus"
+RUN_NAME="decoder_96M_report10M_trynosus2"
 RUN_NOTES="96M model, lcsus training set, seeing what happens with some no-sus data"
 
 set -x
