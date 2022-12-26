@@ -1,9 +1,12 @@
 
 import numpy as np
 from dataclasses import dataclass
+import logging
 import pysam
 
 from skbio.alignment import StripedSmithWaterman
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Variant:
@@ -153,7 +156,6 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     :param offset: This amount will be added to each variant position
     :return: Generator over variants
     """
-
     num_vars = 0
     if probs is not None:
         assert len(probs) == len(altseq), f"Probabilities must contain same number of elements as alt sequence"
@@ -249,6 +251,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     # index vars by (pos, ref, alt) to make dealing with homozygous easier
     vcfvars_hap0 = {}
     for var in vars_hap0:
+        logger.debug(f"Computing {var}")
         depth = var_depth(var, chrom, aln)
         vcfvars_hap0[var] = VcfVar(
             chrom=chrom,
@@ -277,6 +280,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
 
     vcfvars_hap1 = {}
     for var in vars_hap1:
+        logger.debug(f"Computing {var}")
         depth = var_depth(var, chrom, aln)
         vcfvars_hap1[var] = VcfVar(
             chrom=chrom,
@@ -432,6 +436,9 @@ def prob_to_phred(p, max_qual=1000.0):
     """
     Convert a probability in 0..1 to phred scale
     """
+    if np.isnan(p):
+        logger.warning(f"Found NaN probability for variant returning quality 0")
+        return 0.0
     assert 0.0 <= p <= 1.0, f"Probability must be in [0, 1], but found {p}"
     if p == 1.0:
         return max_qual
@@ -448,6 +455,8 @@ def create_vcf_rec(var, vcf_file):
     """
     # Create record
     vcf_filter = var.filter if var.filter else "PASS"
+    if np.isnan(var.qual):
+        logger.error(f"Quality is NaN for variant {var}")
     r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
                        alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values

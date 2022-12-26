@@ -393,7 +393,7 @@ def process_block(regions,
     enc_start = datetime.datetime.now()
     encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
     enc_elapsed = datetime.datetime.now() - enc_start
-    logger.debug(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
+    logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
     model = load_model(model_path)
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
@@ -406,6 +406,9 @@ def process_block(regions,
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
+    call_start = datetime.datetime.now()
+    batch_count = 0
+    window_count = 0
     for path in encoded_paths:
         # Load the data, parsing location + encoded data from file
         data = torch.load(path, map_location='cpu')
@@ -415,8 +418,10 @@ def process_block(regions,
         batch_start_pos.extend(data['start_positions'])
         batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
         os.unlink(path)
+        window_count += len(batch_start_pos)
         if len(batch_start_pos) > min_samples_callbatch:
             logger.debug(f"Calling variants on window {window_idx} path: {path}")
+            batch_count += 1
             if len(batch_encoded) > 1:
                 allencoded = torch.concat(batch_encoded, dim=0)
             else:
@@ -437,6 +442,7 @@ def process_block(regions,
     # Write last few
     logger.debug(f"Calling variants on window {window_idx} path: {path}")
     if len(batch_start_pos):
+        batch_count += 1
         if len(batch_encoded) > 1:
             allencoded = torch.concat(batch_encoded, dim=0)
         else:
@@ -449,6 +455,8 @@ def process_block(regions,
             vcf_out_fh.write(str(var))
         vcf_out_fh.flush()
         os.unlink(tmp_vcf_path)
+    call_elapsed = datetime.datetime.now() - call_start
+    logger.info(f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds")
 
 
 def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size):
@@ -520,7 +528,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
     max_dist = max(r[2] - bo for r, bo in zip(regions, batch_offsets))
     n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (max_dist) // util.TGT_KMER_SIZE + 1)
     logger.debug(f"window max dist: {max_dist}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-
+    logger.debug(f"Calling batch of size {len(batch_offsets)}")
     batchvars = call_batch(batch, batch_offsets, regions, model, reference, n_output_toks)
 
     byregion = defaultdict(list)
@@ -536,10 +544,6 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
             hap0[k].extend(x for x in v if start <= x.pos < end)
         for k, v in h1.items():
             hap1[k].extend(x for x in v if start <= x.pos < end)
-
-        # Only return variants that are actually in the window
-        # hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
-        # hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
 
     return hap0, hap1
 
@@ -601,7 +605,6 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
         probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
-
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
