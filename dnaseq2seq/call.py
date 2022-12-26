@@ -541,9 +541,11 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
         chrom, start, end = region
         h0, h1 = merge_genotypes(rvars)
         for k, v in h0.items():
-            hap0[k].extend(x for x in v if start <= x.pos < end)
+            if start <= v[0].pos < end:
+                hap0[k].extend(v)
         for k, v in h1.items():
-            hap1[k].extend(x for x in v if start <= x.pos < end)
+            if start <= v[0].pos < end:
+                hap1[k].extend(v)
 
     return hap0, hap1
 
