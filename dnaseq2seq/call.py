@@ -19,14 +19,11 @@ import random
 import itertools
 from collections import defaultdict
 from functools import partial
-from tempfile import NamedTemporaryFile as NTFile
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
 import pysam
-import pandas as pd
 import numpy as np
 
 from model import VarTransformer
@@ -214,7 +211,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
 
     threads = kwargs.get('threads', 1)
-    min_qual = kwargs.get('min_qual', 1e-4)
     logger.info(f"Using {threads} threads")
 
     var_freq_file = kwargs.get('freq_file')
@@ -277,27 +273,15 @@ def call_vars_in_blocks(
     windows = [
         (chrom, window_idx, window_start, window_end) 
         for window_idx, (chrom, window_start, window_end) in enumerate(
-            split_large_regions(read_bed_regions(bed), max_region_size=1000)
+            split_large_regions(read_bed_regions(bed), max_region_size=10000)
         )
     ]
 
-    cluster_positions_func = partial(
-        cluster_positions_for_window,
-        bamfile=bamfile,
-        reference_fasta=reference_fasta,
-        maxdist=100,
-    )
-
-    logger.info(f"Generating regions from windows...")
-    raw_regions = mp.Pool(threads).map(cluster_positions_func, windows)
-    regions = list( itertools.chain(*raw_regions))
-    logger.info(f"Generated a total of {len(regions)} regions")
-
     regions_per_block = max(4, threads)
     start_block = 0
-    while start_block < len(regions):
-        logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(regions)}  {start_block / len(regions) * 100 :.2f}% done")
-        process_block(regions[start_block:start_block + regions_per_block],
+    while start_block < len(windows):
+        logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(windows)}  {start_block / len(windows) * 100 :.2f}% done")
+        process_block(windows[start_block:start_block + regions_per_block],
                       bamfile=bamfile,
                       model_path=model_path,
                       reference_fasta=reference_fasta,
@@ -311,7 +295,7 @@ def call_vars_in_blocks(
         start_block += regions_per_block
 
 
-def process_block(regions,
+def process_block(raw_regions,
               bamfile,
               model_path,
               reference_fasta,
@@ -328,8 +312,19 @@ def process_block(regions,
     Calling is done on the main thread and loads the tensors one at a time from disk
 
     """
+    sus_start = datetime.datetime.now()
+    cluster_positions_func = partial(
+        cluster_positions_for_window,
+        bamfile=bamfile,
+        reference_fasta=reference_fasta,
+        maxdist=100,
+    )
+    sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
+    sus_regions = list(itertools.chain(*sus_regions))
+    sus_tot_bp = sum(r[2] - r[1] for r in sus_regions)
     enc_start = datetime.datetime.now()
-    encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
+    logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
+    encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
     enc_elapsed = datetime.datetime.now() - enc_start
     logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
     model = load_model(model_path)
