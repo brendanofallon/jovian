@@ -681,7 +681,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
         yield encodedreads, batch_offsets
 
 
-<<<<<<< HEAD
 def _call_vars_region(
     chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5,
 ):
@@ -743,39 +742,6 @@ def _call_vars_region(
 
     logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
     return chrom, window_idx, hap0_passing, hap1_passing
-
-
-def _call_vars_multi_regions(regions, aln, model, reference, max_read_depth, window_size=300, min_reads=5):
-    max_batch_size = 32
-    all_reads = None
-    all_offsets = []
-    n_toks_required = []
-    for i, (chrom, start, end) in enumerate(regions):
-        for encoded_reads, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                                   max_read_depth,
-                                                   window_size=window_size,
-                                                   min_reads=min_reads,
-                                                   batch_size=batch_size):
-            if all_reads is None:
-                all_reads = encoded_reads
-            else:
-                all_reads = torch.stack((all_reads, encoded_reads), dim=0)
-            all_offsets.extend(batch_offsets)
-            for offset in batch_offsets:
-                n_toks_required.append( min(150 // util.TGT_KMER_SIZE, (end - offset) // util.TGT_KMER_SIZE) )
-            if len(all_offsets) > max_batch_size:
-                ntoks = max(n_toks_required[0:max_batch_size])
-                batchvars = call_batch(all_reads[0:max_batch_size], all_offsets[0:max_batch_size], model, reference, chrom, window_end=end)
-
-
-
-=======
->>>>>>> 048094a5d2f2f34098b3e06b771b2168909aea17
-def vars_dont_overlap(v0, v1):
-    """
-    True if the two variant do not share any reference bases
-    """
-    return v0.pos + len(v0.ref) <= v1.pos or v1.pos + len(v1.ref) <= v0.pos
 
 
 def merge_genotypes(genos):
