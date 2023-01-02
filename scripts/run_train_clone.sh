@@ -51,8 +51,8 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_report10M_trynosus2"
-RUN_NOTES="96M model, lcsus training set, seeing what happens with some no-sus data"
+RUN_NAME="decoder_96M_noDS_cont"
+RUN_NOTES="96M model, no-downsampling data set continued from epoch 3"
 
 set -x
 
@@ -87,7 +87,7 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_96M_report10M/decoder_96M_report10M_epoch23.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_96m_noDS/decoder_96m_noDS_epoch3.model \
     --samples-per-epoch 5000000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"
