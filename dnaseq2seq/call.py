@@ -35,7 +35,7 @@ import bam
 logger = logging.getLogger(__name__)
 
 
-DEVICE = torch.device("cpu")
+DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
@@ -211,7 +211,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
 
     threads = kwargs.get('threads', 1)
-    logger.info(f"Using {threads} threads")
+    logger.info(f"Using {threads} threads for encoding")
+    logger.info(f"Found torch device: {DEVICE}")
+    if 'cuda' in str(DEVICE):
+        for idev in range(torch.cuda.device_count()):
+            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
+
 
     var_freq_file = kwargs.get('freq_file')
     if var_freq_file:
