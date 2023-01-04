@@ -87,20 +87,20 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 def load_model(model_path):
     
     #96M params
-    encoder_attention_heads = 8
-    decoder_attention_heads = 10 
-    dim_feedforward = 512
-    encoder_layers = 10
-    decoder_layers = 10 
-    embed_dim_factor = 160 
+    #encoder_attention_heads = 8
+    #decoder_attention_heads = 10 
+    #dim_feedforward = 512
+    #encoder_layers = 10
+    #decoder_layers = 10 
+    #embed_dim_factor = 160 
 
     #50M params
-    #encoder_attention_heads = 8
-    #decoder_attention_heads = 4 
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6
-    #embed_dim_factor = 120 
+    encoder_attention_heads = 8
+    decoder_attention_heads = 4 
+    dim_feedforward = 512
+    encoder_layers = 8
+    decoder_layers = 6
+    embed_dim_factor = 120 
 
 
     # 35M params
@@ -649,7 +649,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
     window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
-    window_step = 0
+    window_step = 25
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)

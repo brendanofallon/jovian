@@ -404,9 +404,7 @@ class DownsamplingLoader:
             if np.random.rand() < self.fraction_to_augment:
                 num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
                 for idx in range(src.shape[0]):
-                    logger.debug(f"{num_reads_to_drop[idx]} reads to be dropped out of total {src.shape[2]} reads in batch: {idx}")
                     read_index_to_drop = random.sample(list(range(src.shape[2])[1:]), num_reads_to_drop[idx])
-                    logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped, excluding ref read at 0th position.")
                     src[idx, :, read_index_to_drop, :] = 0
                 iter += 1
             yield src, tgt, vaftgt, None, log_info
