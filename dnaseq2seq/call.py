@@ -19,14 +19,11 @@ import random
 import itertools
 from collections import defaultdict
 from functools import partial
-from tempfile import NamedTemporaryFile as NTFile
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
 import pysam
-import pandas as pd
 import numpy as np
 
 from model import VarTransformer
@@ -193,41 +190,6 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     ]
 
 
-def chroms_in_bed(bed):
-    """
-    Extract all unique chromosome names from a BED file.
-    :param bed: the BED file
-    :return: a list of unique chromosome names in the BED file.
-    """
-    df = pd.read_csv(bed, sep="\t", comment="#", usecols=[0], dtype=str, header=None)
-    return list(df[df.columns[0]].unique())
-
-
-def bed_for_chrom(chrom, bed, folder="."):
-    """
-    Extract all the regions defined in the given bed file that are on the
-    given collection of chromosome; these regions are saved in a new BED
-    file that is returned to the caller.
-
-    :param chrom: a chromosome name
-    :param bed: the path to a BED file.
-    :param folder: the directory where the new BED file will be saved.
-
-    :return: a BED file that contains all the regions on the given chromosome.
-    """
-    chrom_bed = NTFile(
-        mode="w+t", delete=False, suffix=".bed", dir=folder, prefix=f"chrom_{chrom}."
-    )
-    with open(bed) as fh:
-        for line in fh:
-            if not line.startswith("#"):
-                contig, start, end = line.split("\t")[:3]
-                if contig == chrom:
-                    chrom_bed.write(line)
-
-    chrom_bed.close()
-    return chrom_bed.name
-
 
 def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
     """
@@ -249,7 +211,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
 
     threads = kwargs.get('threads', 1)
-    min_qual = kwargs.get('min_qual', 1e-4)
     logger.info(f"Using {threads} threads")
 
     var_freq_file = kwargs.get('freq_file')
@@ -261,9 +222,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     tmpdir = f".tmp.varcalls_{randchars()}"
     os.makedirs(tmpdir, exist_ok=False)
 
-    chroms = chroms_in_bed(bed)
-    func = partial(bed_for_chrom, bed=bed, folder=tmpdir)
-    chrom_beds = [b for b in mp.Pool(threads).map(func, chroms)]
 
     logger.info(f"The model will be loaded from path {model_path}")
 
@@ -271,23 +229,17 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline')
     )
 
-    for chrom, chrom_bed in zip(chroms, chrom_beds):
-        chrom_vcf = call_variants_on_chrom(
-            chrom,
-            bamfile=bam,
-            bed=chrom_bed,
-            reference_fasta=reference_fasta,
-            model_path=model_path, 
-            classifier_path=classifier_path,
-            threads=threads,
-            tmpdir=tmpdir,
-            var_freq_file=var_freq_file,
-        )
-        for var in pysam.VariantFile(chrom_vcf):
-            if var.qual > min_qual:
-                vcf_file.write(var)
-        os.unlink(chrom_vcf)
-        os.unlink(chrom_bed)
+    call_vars_in_blocks(
+        bamfile=bam,
+        bed=bed,
+        reference_fasta=reference_fasta,
+        model_path=model_path,
+        classifier_path=classifier_path,
+        threads=threads,
+        tmpdir=tmpdir,
+        var_freq_file=var_freq_file,
+        vcf_out=vcf_file,
+    )
 
     vcf_file.close()
     logger.info(f"All variants are saved to {vcf_out}")
@@ -296,8 +248,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
 
 
-def call_variants_on_chrom(
-    chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file
+def call_vars_in_blocks(
+    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file, vcf_out,
 ):
     """
     Call variants on the given chromsome and write the variants to a temporary VCF.
@@ -321,59 +273,29 @@ def call_variants_on_chrom(
     windows = [
         (chrom, window_idx, window_start, window_end) 
         for window_idx, (chrom, window_start, window_end) in enumerate(
-            split_large_regions(read_bed_regions(bed), max_region_size=1000)
+            split_large_regions(read_bed_regions(bed), max_region_size=10000)
         )
     ]
 
-    cluster_positions_func = partial(
-        cluster_positions_for_window,
-        bamfile=bamfile,
-        reference_fasta=reference_fasta,
-        maxdist=100,
-    )
-
-    logger.info(f"Generating regions from windows on chromosome {chrom}...")
-    raw_regions = mp.Pool(threads).map(cluster_positions_func, windows)
-    regions = list( itertools.chain(*raw_regions))
-    logger.info(f"Generated a total of {len(regions)} regions on chromosome {chrom}")
-
-    chrom_vcf = f"{tmpdir}/chrom_{chrom}_raw.vcf"
-    vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
-    vcf_file.close()
-
     regions_per_block = max(4, threads)
     start_block = 0
-    with open(chrom_vcf, "a") as chrom_vfh:
-        while start_block < len(regions):
-            logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(regions)}  {start_block / len(regions) * 100 :.2f}% done")
-            process_block(regions[start_block:start_block + regions_per_block],
-                            bamfile=bamfile,
-                            model_path=model_path,
-                            reference_fasta=reference_fasta,
-                            classifier_path=classifier_path,
-                            tmpdir=tmpdir,
-                            threads=threads,
-                            max_read_depth=max_read_depth,
-                            window_size=150,
-                            vcf_out_fh=chrom_vfh,
-                            var_freq_file=var_freq_file)
-            chrom_vfh.flush()
-            start_block += regions_per_block
-
-    logger.info(f"Done calling variants on chrom {chrom}, now sorting & deduping raw VCF")
-    chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
-    util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
-    logger.info(f"Done sorting, now deduping..")
-    chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
-    util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
-
-    os.unlink(chrom_vcf)
-    os.unlink(chrom_vcf_sorted)
-    
-    return chrom_vcf_dedup
+    while start_block < len(windows):
+        logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(windows)}  {start_block / len(windows) * 100 :.2f}% done")
+        process_block(windows[start_block:start_block + regions_per_block],
+                      bamfile=bamfile,
+                      model_path=model_path,
+                      reference_fasta=reference_fasta,
+                      classifier_path=classifier_path,
+                      tmpdir=tmpdir,
+                      threads=threads,
+                      max_read_depth=max_read_depth,
+                      window_size=150,
+                      vcf_out=vcf_out,
+                      var_freq_file=var_freq_file)
+        start_block += regions_per_block
 
 
-def process_block(regions,
+def process_block(raw_regions,
               bamfile,
               model_path,
               reference_fasta,
@@ -382,7 +304,7 @@ def process_block(regions,
               threads,
               max_read_depth,
               window_size,
-              vcf_out_fh,
+              vcf_out,
               var_freq_file=None):
     """
     For each region in the given list of regions, generate input tensors and then call variants on that data
@@ -390,8 +312,19 @@ def process_block(regions,
     Calling is done on the main thread and loads the tensors one at a time from disk
 
     """
+    sus_start = datetime.datetime.now()
+    cluster_positions_func = partial(
+        cluster_positions_for_window,
+        bamfile=bamfile,
+        reference_fasta=reference_fasta,
+        maxdist=100,
+    )
+    sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
+    sus_regions = list(itertools.chain(*sus_regions))
+    sus_tot_bp = sum(r[2] - r[1] for r in sus_regions)
     enc_start = datetime.datetime.now()
-    encoded_paths = encode_regions(bamfile, reference_fasta, regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
+    logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
+    encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
     enc_elapsed = datetime.datetime.now() - enc_start
     logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
     model = load_model(model_path)
@@ -427,17 +360,14 @@ def process_block(regions,
             else:
                 allencoded = batch_encoded[0]
             hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
-            nvars, tmp_vcf_path = vars_hap_to_records(
-                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, tmpdir, var_freq_file
-            )
-            for var in pysam.VariantFile(tmp_vcf_path):
-                vcf_out_fh.write(str(var))
-            vcf_out_fh.flush()
-            os.unlink(tmp_vcf_path)
+            for var in vars_hap_to_records(
+                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_out, var_freq_file
+            ):
+                vcf_out.write(var)
+
             batch_encoded = []
             batch_start_pos = []
             batch_regions = []
-
 
     # Write last few
     logger.debug(f"Calling variants on window {window_idx} path: {path}")
@@ -448,13 +378,11 @@ def process_block(regions,
         else:
             allencoded = batch_encoded[0]
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
-        nvars, tmp_vcf_path = vars_hap_to_records(
-            chrom, window_idx, hap0, hap1, aln, reference, classifier_model, tmpdir, var_freq_file
-        )
-        for var in pysam.VariantFile(tmp_vcf_path):
-            vcf_out_fh.write(str(var))
-        vcf_out_fh.flush()
-        os.unlink(tmp_vcf_path)
+        for var in vars_hap_to_records(
+            chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_out, var_freq_file
+        ):
+            vcf_out.write(var)
+
     call_elapsed = datetime.datetime.now() - call_start
     logger.info(f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds")
 
@@ -551,7 +479,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
 
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir, var_freq_file
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_file, var_freq_file
 ):
     """
     Convert variant haplotypes to variant records and write the records to a temporary VCF file.
@@ -565,28 +493,18 @@ def vars_hap_to_records(
         reference=reference
     )
 
-    vcfh = NTFile(
-        mode="w+t", delete=False, suffix=".vcf", dir=tmpdir, prefix=f"chrom_{chrom}_w{window_idx}."
-    )
-    vcfh.close()
-    vcf_file = vcf.init_vcf(vcfh.name, sample_name="sample", lowcov=20)
-
     # covert variants to pysam vcf records
     vcf_records = [
         vcf.create_vcf_rec(var, vcf_file)
         for var in sorted(vcf_vars, key=lambda x: x.pos)
     ]
 
-    # write to a chunk VCF
     for rec in vcf_records:
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
             rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
-        vcf_file.write(rec)
 
-    vcf_file.close()
-
-    return len(vcf_records), vcfh.name
+    return vcf_records
 
 
 def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks):
