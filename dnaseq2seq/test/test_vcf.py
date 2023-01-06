@@ -58,3 +58,13 @@ def test_aln_to_vars_offset_del():
     assert v[0].ref == 'A'
     assert v[0].alt == ''
     assert v[0].pos == 8
+
+
+def test_multi_snv_ins():
+    q = "ACTGACTGA--CTGA---CTGACTGACTG".replace("-", "")
+    t = "ACTGACTGATTCTAAGGGCTGTCTGACTG"
+    v = list(vcf.aln_to_vars(q, t))
+    assert len(v) == 4
+    assert v[0].ref == ''
+    assert v[0].alt == 'TT'
+    assert v[0].pos == 5

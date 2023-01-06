@@ -95,15 +95,15 @@ def _geomean(probs):
     return np.exp(np.log(probs).mean())
 
 
-def align_sequences(query, target):
+def align_sequences(query, target, gap_open_penalty=3, gap_extend_penalty=1, match_score=2, mismatch_score=-1):
     """
     Return Smith-Watterman alignment of both sequences
     """
     ssw = StripedSmithWaterman(query,
-                               gap_open_penalty=3,
-                               gap_extend_penalty=1,
-                               match_score=2,
-                               mismatch_score=-1)
+                               gap_open_penalty=gap_open_penalty,
+                               gap_extend_penalty=gap_extend_penalty,
+                               match_score=match_score,
+                               mismatch_score=mismatch_score)
     return ssw(target)
 
 
