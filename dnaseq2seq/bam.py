@@ -11,7 +11,9 @@ import util
 
 logger = logging.getLogger(__name__)
 
-EMPTY_TENSOR = torch.zeros(10)
+FEATURE_NUM=10
+
+#EMPTY_TENSOR = torch.zeros(10)
 
 
 
@@ -88,7 +90,6 @@ class ReadWindow:
                 if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
                     continue
                 allreads.append((pos, read))
-
         if len(allreads) < 5:
             raise LowReadCountException(f"Only {len(allreads)} reads in window")
             
@@ -96,13 +97,13 @@ class ReadWindow:
             num_reads_to_sample = downsample_read_count
         else:
             num_reads_to_sample = max_reads
+
         if len(allreads) > num_reads_to_sample:
             allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
-        t = torch.zeros(window_size, max_reads, 10)
-
+        t = torch.zeros(window_size, max_reads, 10, device='cpu')
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
             enc_start_offset = max(0,  start - readstart)
@@ -125,7 +126,7 @@ def encode_read(read, prepad=0, tot_length=None):
         assert prepad < tot_length, f"Cant have more padding than total length"
     bases = []
     for i in range(prepad):
-        bases.append(EMPTY_TENSOR)
+        bases.append(torch.zeros(FEATURE_NUM))
 
     try:
         for t in iterate_bases(read):
@@ -138,7 +139,7 @@ def encode_read(read, prepad=0, tot_length=None):
 
     if tot_length is not None:
         while len(bases) < tot_length:
-            bases.append(EMPTY_TENSOR)
+            bases.append(torch.zeros(FEATURE_NUM))
     return torch.stack(tuple(bases)).char()
 
 
@@ -287,7 +288,7 @@ def iterate_bases(rec):
 
 def rec_tensor_it(read, minref):
     for i in range(alnstart(read) - minref):
-        yield EMPTY_TENSOR
+        yield torch.zeros(FEATURE_NUM)
 
     try:
         for t in iterate_bases(read):
@@ -296,7 +297,7 @@ def rec_tensor_it(read, minref):
         pass
 
     while True:
-        yield EMPTY_TENSOR
+        yield torch.zeros(FEATURE_NUM)
 
 
 def emit_tensor_aln(t):
