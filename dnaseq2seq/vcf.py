@@ -95,19 +95,19 @@ def _geomean(probs):
     return np.exp(np.log(probs).mean())
 
 
-def align_sequences(query, target):
+def align_sequences(query, target, gap_open_penalty=3, gap_extend_penalty=1, match_score=2, mismatch_score=-1):
     """
     Return Smith-Watterman alignment of both sequences
     """
     ssw = StripedSmithWaterman(query,
-                               gap_open_penalty=3,
-                               gap_extend_penalty=1,
-                               match_score=2,
-                               mismatch_score=-1)
+                               gap_open_penalty=gap_open_penalty,
+                               gap_extend_penalty=gap_extend_penalty,
+                               match_score=match_score,
+                               mismatch_score=mismatch_score)
     return ssw(target)
 
 
-def _mismatches_to_vars(query, target, offset, probs):
+def _mismatches_to_vars(query, target, cig_offset, window_offset, probs):
     """
     Zip both sequences and look for mismatches, if any are found convert them to Variant objects
     and return them
@@ -124,7 +124,7 @@ def _mismatches_to_vars(query, target, offset, probs):
                               alt="".join(mismatches[1]).replace("-", ""),
                               pos=mismatchstart,
                               qual=_geomean(mismatch_quals),  # Geometric mean?
-                              window_offset=mismatchstart - offset,
+                              window_offset=mismatchstart - cig_offset + window_offset,
                               )
             mismatches = []
             mismatch_quals = []
@@ -136,7 +136,7 @@ def _mismatches_to_vars(query, target, offset, probs):
             else:
                 mismatches = [a, b]
                 mismatch_quals = [probs[i]]
-                mismatchstart = i + offset
+                mismatchstart = i + cig_offset
 
     # Could be mismatches at the end
     if mismatches:
@@ -144,7 +144,36 @@ def _mismatches_to_vars(query, target, offset, probs):
                       alt="".join(mismatches[1]).replace("-", ""),
                       pos=mismatchstart,
                       qual=_geomean(mismatch_quals),
-                      window_offset=mismatchstart - offset)
+                      window_offset=mismatchstart - cig_offset + window_offset)
+
+
+def _display_aln(aln):
+    qit = iter(aln.query_sequence)
+    tit = iter(aln.target_sequence)
+    tbases = 0
+    for cig in _cigtups(aln.cigar):
+        if cig.op == "M":
+            for _ in range(cig.len):
+                q = next(qit)
+                t = next(tit)
+                if q == t:
+                    print(f"{tbases}\tM   {q} = {t}")
+                else:
+                    print(f"{tbases}\tM   {q} ! {t}")
+                tbases += 1
+        elif cig.op == "I":
+            for _ in range(cig.len):
+                q = next(qit)
+                t = "-"
+                print(f"{tbases}\tI  {q}   {t}")
+        elif cig.op == "D":
+            for _ in range(cig.len):
+                q = "-"
+                t = next(tit)
+                print(f"{tbases}   D  {q}   {t}")
+                tbases += 1
+        else:
+            raise ValueError(f"Unknown cigar op {cig.op}")
 
 
 def aln_to_vars(refseq, altseq, offset=0, probs=None):
@@ -179,6 +208,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                     refseq[t_offset:t_offset+cig.len],
                     altseq[q_offset:q_offset+cig.len],
                     offset + t_offset,
+                    t_offset,
                     probs[q_offset:q_offset+cig.len]):
                 v.var_index = num_vars
                 yield v
@@ -196,7 +226,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                           var_index=num_vars)
             num_vars += 1
             q_offset += cig.len
-            variant_pos_offset += cig.len
+            # variant_pos_offset += cig.len
 
         elif cig.op == "D":
             yield Variant(ref=refseq[t_offset:t_offset + cig.len],
