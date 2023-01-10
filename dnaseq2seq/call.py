@@ -326,7 +326,7 @@ def process_block(raw_regions,
     )
     sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
     sus_regions = list(itertools.chain(*sus_regions))
-    sus_tot_bp = sum(r[2] - r[1] for r in sus_regions)
+    sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
     enc_start = datetime.datetime.now()
     logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
     encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
@@ -579,13 +579,13 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     while window_start <= (end - 0.2 * window_size):
         try:
-            logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
+            #logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
                                              max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
-            logger.debug(f"Added item to batch from window_start {window_start}")
+            #logger.debug(f"Added item to batch from window_start {window_start}")
         except bam.LowReadCountException:
             logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
