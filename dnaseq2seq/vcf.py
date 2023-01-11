@@ -244,6 +244,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                 )
             num_vars += 1
             t_offset += cig.len
+            variant_pos_offset += cig.len
 
     for v in variants:
         v.aln_score = aln.optimal_alignment_score
