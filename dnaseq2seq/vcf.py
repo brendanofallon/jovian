@@ -18,6 +18,8 @@ class Variant:
     step: int = None
     window_offset: int = None
     var_index: int = None
+    var_count: int = None
+    aln_score: int = None
 
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
@@ -202,6 +204,7 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
         ref_seq_consumed += aln.target_begin
         t_offset += aln.target_begin
 
+    variants = []
     for cig in _cigtups(aln.cigar):
         if cig.op == "M":
             for v in _mismatches_to_vars(
@@ -211,41 +214,41 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
                     t_offset,
                     probs[q_offset:q_offset+cig.len]):
                 v.var_index = num_vars
-                yield v
+                variants.append(v)
                 num_vars += 1
             q_offset += cig.len
             variant_pos_offset += cig.len
             t_offset += cig.len
 
         elif cig.op == "I":
-            yield Variant(ref='',
-                          alt=altseq[q_offset:q_offset+cig.len],
-                          pos=offset + variant_pos_offset + aln.target_begin,
-                          qual=_geomean(probs[q_offset:q_offset+cig.len]),
-                          window_offset=variant_pos_offset,
-                          var_index=num_vars)
+            variants.append(
+                Variant(ref='',
+                        alt=altseq[q_offset:q_offset+cig.len],
+                        pos=offset + variant_pos_offset + aln.target_begin,
+                        qual=_geomean(probs[q_offset:q_offset+cig.len]),
+                        window_offset=variant_pos_offset,
+                        var_index=num_vars)
+                )
             num_vars += 1
             q_offset += cig.len
             # variant_pos_offset += cig.len
 
         elif cig.op == "D":
-            yield Variant(ref=refseq[t_offset:t_offset + cig.len],
-                          alt='',
-                          pos=offset + t_offset,
-                          qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
-                          window_offset=t_offset,
-                          var_index=num_vars)  # Is this right??
+            variants.append(
+                Variant(ref=refseq[t_offset:t_offset + cig.len],
+                        alt='',
+                        pos=offset + t_offset,
+                        qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
+                        window_offset=t_offset,
+                        var_index=num_vars)
+                )
             num_vars += 1
             t_offset += cig.len
 
-
-
-# import numpy as np
-# ref = "ACTGACTG"
-# alt = "ACTGCTG"
-# probs = np.arange(7) * 0.1
-# for v in aln_to_vars(ref, alt, probs=probs):
-#     print(v)
+    for v in variants:
+        v.aln_score = aln.optimal_alignment_score
+        v.var_count = len(variants)
+    return variants
 
 
 def var_depth(var, chrom, aln):
@@ -281,7 +284,6 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     # index vars by (pos, ref, alt) to make dealing with homozygous easier
     vcfvars_hap0 = {}
     for var in vars_hap0:
-        logger.debug(f"Computing {var}")
         depth = var_depth(var, chrom, aln)
         vcfvars_hap0[var] = VcfVar(
             chrom=chrom,
@@ -297,7 +299,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             haplotype=0,  # defalt vars_hap0 to haplotype 0 for now
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
-            window_cis_vars=len(vars_hap0),
+            window_cis_vars=min(v.var_count for v in vars_hap0[var]),
             window_trans_vars=len(vars_hap1),
             call_count=len(vars_hap0[var]),
             step_count=len(vars_hap0[var]),
@@ -326,7 +328,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             haplotype=1,  # defalt vars_hap1 to haplotype 1 for now
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
-            window_cis_vars=len(vars_hap1),
+            window_cis_vars=min(v.var_count for v in vars_hap1[var]),
             window_trans_vars=len(vars_hap0),
             call_count=len(vars_hap1[var]),
             step_count=len(vars_hap1[var]),
@@ -343,7 +345,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         # modify hap0 var info
         vcfvars_hap0[var].qual = (vcfvars_hap0[var].qual + vcfvars_hap1[var].qual) / 2  # Mean of each call??
         vcfvars_hap0[var].quals = vcfvars_hap0[var].quals + vcfvars_hap1[var].quals  # combine haps
-        vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
+        vcfvars_hap0[var].window_cis_vars = min(vcfvars_hap0[var].window_cis_vars, vcfvars_hap1[var].window_cis_vars)  # cis and trans are now cis
         vcfvars_hap0[var].window_trans_vars = 0  # moved all vars to cis
         vcfvars_hap0[var].call_count += vcfvars_hap1[var].call_count  # combine call counts in both haplotypes
         vcfvars_hap0[var].genotype = (1, 1)
