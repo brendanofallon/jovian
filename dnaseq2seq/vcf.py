@@ -386,7 +386,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     return vcfvars.values()
 
 
-def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
+def create_vcf_header(sample_name="sample", lowcov=30, cmdline=None):
     """
     Initialize pysam VariantFile vcf object and create it's header
     :param path: vcf file path
@@ -462,7 +462,7 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     vcfh.add_meta('INFO', items=[('ID', "RAW_QUAL"), ('Number', 1), ('Type', 'Float'),
                                  ('Description', 'Original quality if classifier used to update QUAL field')])
     # write to new vcf file object
-    return pysam.VariantFile(path, "w", header=vcfh)
+    return vcfh
 
 
 def prob_to_phred(p, max_qual=1000.0):

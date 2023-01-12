@@ -190,7 +190,6 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     ]
 
 
-
 def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
@@ -217,7 +216,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
 
-
     var_freq_file = kwargs.get('freq_file')
     if var_freq_file:
         logger.info(f"Loading variant pop frequency file from {var_freq_file}")
@@ -229,9 +227,10 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
     logger.info(f"The model will be loaded from path {model_path}")
 
-    vcf_file = vcf.init_vcf(
-        vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline')
-    )
+    vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
+    vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
+    vcf_out_fh = open(vcf_out, mode='w')
+    vcf_out_fh.write(str(vcf_header))
 
     call_vars_in_blocks(
         bamfile=bam,
@@ -242,10 +241,11 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         threads=threads,
         tmpdir=tmpdir,
         var_freq_file=var_freq_file,
-        vcf_out=vcf_file,
+        vcf_out=vcf_out_fh,
+        vcf_template=vcf_template,
     )
 
-    vcf_file.close()
+    vcf_out_fh.close()
     logger.info(f"All variants are saved to {vcf_out}")
 
     end_time = time.perf_counter()
@@ -253,7 +253,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
 
 def call_vars_in_blocks(
-    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file, vcf_out,
+    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file, vcf_out, vcf_template,
 ):
     """
     Split the input BED file into chunks and call variants in each chunk sequentially
@@ -295,6 +295,7 @@ def call_vars_in_blocks(
                       max_read_depth=max_read_depth,
                       window_size=150,
                       vcf_out=vcf_out,
+                      vcf_template=vcf_template,
                       var_freq_file=var_freq_file)
         start_block += regions_per_block
 
@@ -309,6 +310,7 @@ def process_block(raw_regions,
               max_read_depth,
               window_size,
               vcf_out,
+              vcf_template,
               var_freq_file=None):
     """
     For each region in the given list of regions, generate input tensors and then call variants on that data
@@ -346,6 +348,7 @@ def process_block(raw_regions,
     call_start = datetime.datetime.now()
     batch_count = 0
     window_count = 0
+    var_records = [] # Stores all variant records so we can sort before writing
     for path in encoded_paths:
         # Load the data, parsing location + encoded data from file
         data = torch.load(path, map_location='cpu')
@@ -364,11 +367,11 @@ def process_block(raw_regions,
             else:
                 allencoded = batch_encoded[0]
             hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
-            for var in vars_hap_to_records(
-                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_out, var_freq_file
-            ):
-                vcf_out.write(var)
-
+            var_records.extend(
+                vars_hap_to_records(
+                    chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+                )
+            )
             batch_encoded = []
             batch_start_pos = []
             batch_regions = []
@@ -382,13 +385,18 @@ def process_block(raw_regions,
         else:
             allencoded = batch_encoded[0]
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
-        for var in vars_hap_to_records(
-            chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_out, var_freq_file
-        ):
-            vcf_out.write(var)
+        var_records.extend(
+            vars_hap_to_records(
+                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+            )
+        )
 
+    for var in sorted(var_records, key=lambda x: x.pos):
+        vcf_out.write(str(var))
+    vcf_out.flush()
     call_elapsed = datetime.datetime.now() - call_start
     logger.info(f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds")
+
 
 
 def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size):
@@ -490,7 +498,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
 
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_file, var_freq_file
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
 ):
     """
     Convert variant haplotypes to variant records and write the records to a temporary VCF file.
@@ -506,7 +514,7 @@ def vars_hap_to_records(
 
     # covert variants to pysam vcf records
     vcf_records = [
-        vcf.create_vcf_rec(var, vcf_file)
+        vcf.create_vcf_rec(var, vcf_template)
         for var in sorted(vcf_vars, key=lambda x: x.pos)
     ]
 
