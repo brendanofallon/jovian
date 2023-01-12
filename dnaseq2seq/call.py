@@ -58,7 +58,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
-    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
+    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter', multiple_iterators=False):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
         if start <= col.reference_pos < stop:
@@ -227,7 +227,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     tmpdir = f".tmp.varcalls_{randchars()}"
     os.makedirs(tmpdir, exist_ok=False)
 
-
     logger.info(f"The model will be loaded from path {model_path}")
 
     vcf_file = vcf.init_vcf(
@@ -257,7 +256,7 @@ def call_vars_in_blocks(
     bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file, vcf_out,
 ):
     """
-    Call variants on the given chromsome and write the variants to a temporary VCF.
+    Split the input BED file into chunks and call variants in each chunk sequentially
     :param chrom: the chromosome name
     :param bamfile: the alignment file
     :param bed: the BED file for the given chromosome
@@ -417,7 +416,10 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
 
         for fut in futures:
             result = fut.result(timeout=300) # Timeout in 5 mins - typical time for encoding is 1-3 seconds
-            result_paths.append(result)
+            if result is not None:
+                result_paths.append(result)
+            else:
+                logger.error("Weird, found an empty result object, ignoring it... but this could mean missed variant calls")
 
     torch.set_num_threads(n_threads)
     return result_paths
@@ -443,8 +445,12 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
     logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
     if len(all_encoded) > 1:
         encoded = torch.concat(all_encoded, dim=0)
-    else:
+    elif len(all_encoded) == 1:
         encoded = all_encoded[0]
+    else:
+        logger.error(f"Uh oh, did not find any encoded paths!, region is {chrom}:{start}-{end}")
+        return None
+
     data = {
         'encoded_pileup': encoded,
         'region': (chrom, start, end),
@@ -535,7 +541,8 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks)
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
-        calledvars.append((vars_hap0, vars_hap1))
+        #calledvars.append((vars_hap0, vars_hap1))
+        calledvars.append((vars_hap0[0:4], vars_hap1[0:4]))
 
     return calledvars
 
@@ -577,6 +584,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
+    returned_count = 0
     while window_start <= (end - 0.2 * window_size):
         try:
             #logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
@@ -587,13 +595,14 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
             batch_offsets.append(window_start)
             #logger.debug(f"Added item to batch from window_start {window_start}")
         except bam.LowReadCountException:
-            logger.debug(
+            logger.info(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
         window_start += window_step
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
+            returned_count += 1
             yield encodedreads, batch_offsets
             batch = []
             batch_offsets = []
@@ -601,7 +610,11 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     # Last few
     if batch:
         encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
+        returned_count += 1
         yield encodedreads, batch_offsets
+
+    if not returned_count:
+        logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
 
 
 def _call_vars_region(
