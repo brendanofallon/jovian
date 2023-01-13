@@ -221,6 +221,8 @@ def main():
     callparser.add_argument("-f", "--freq-file", help="Population frequency file for classifier")
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
+    callparser.add_argument("-td", "--temp-dir", help="Temporary data storage location", default=os.environ.get("JV_TMPDIR", "."))
+
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()

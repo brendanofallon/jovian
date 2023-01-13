@@ -208,10 +208,11 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param clf_model_path:
     """
     start_time = time.perf_counter()
-
+    tmpdir_root = Path(kwargs.get("temp_dir"))
     threads = kwargs.get('threads', 1)
     logger.info(f"Using {threads} threads for encoding")
     logger.info(f"Found torch device: {DEVICE}")
+
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
@@ -222,7 +223,8 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     else:
         logger.info(f"No variant frequency file specified, this might not work depending on the classifier requirements")
 
-    tmpdir = f".tmp.varcalls_{randchars()}"
+    tmpdir = tmpdir_root / f"jv_tmpdata_{randchars()}"
+    logger.info(f"Saving temp data in {tmpdir}")
     os.makedirs(tmpdir, exist_ok=False)
 
     logger.info(f"The model will be loaded from path {model_path}")
@@ -230,6 +232,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
     vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
     vcf_out_fh = open(vcf_out, mode='w')
+    logger.info(f"Writing variants to {Path(vcf_out).absolute()}")
     vcf_out_fh.write(str(vcf_header))
 
     call_vars_in_blocks(
@@ -246,10 +249,16 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     )
 
     vcf_out_fh.close()
-    logger.info(f"All variants are saved to {vcf_out}")
-
+    logger.info(f"All variants saved to {vcf_out}")
+    tmpdir.rmdir()
     end_time = time.perf_counter()
-    logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
+    elapsed_seconds = end_time - start_time
+    if elapsed_seconds > 3600:
+        logger.info(f"Total running time of call subcommand is: {elapsed_seconds / 3600 :.2f} hours")
+    elif elapsed_seconds > 120:
+        logger.info(f"Total running time of call subcommand is: {elapsed_seconds / 60 :.2f} minutes")
+    else:
+        logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
 
 
 def call_vars_in_blocks(
@@ -269,7 +278,6 @@ def call_vars_in_blocks(
     :return: a VCF file with called variants for the given chromosome.
     """
     max_read_depth = 100
-    logger.info(f"Max read depth: {max_read_depth} window step: dynamic!")
 
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
@@ -330,7 +338,7 @@ def process_block(raw_regions,
     sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
     enc_start = datetime.datetime.now()
     logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
-    encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64)
+    encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64, window_step=25)
     enc_elapsed = datetime.datetime.now() - enc_start
     logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
     model = load_model(model_path)
@@ -399,7 +407,7 @@ def process_block(raw_regions,
 
 
 
-def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size):
+def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size, window_step):
     """
     Encode and save all the regions in the regions list in parallel, and return the list of files to the saved data
     """
@@ -413,6 +421,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
         window_size=window_size,
         min_reads=5,
         batch_size=batch_size,
+        window_step=window_step,
     )
 
     futures = []
@@ -433,7 +442,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
     return result_paths
 
 
-def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, window_size, min_reads, batch_size):
+def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, window_size, min_reads, batch_size, window_step):
     """
     Encode the reads in the given region and save the data along with the region and start offsets to a file
     and return the absolute path of the file
@@ -447,7 +456,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
     all_starts = []
     logger.debug(f"Encoding region {chrom}:{start}-{end} idx: {window_idx}")
     for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
-                                                     window_size=window_size, min_reads=min_reads, batch_size=batch_size):
+                                                     window_size=window_size, min_reads=min_reads, batch_size=batch_size, window_step=window_step):
         all_encoded.append(encoded_region)
         all_starts.extend(start_positions)
     logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
@@ -564,7 +573,7 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64):
+def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64, window_step=25):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -587,7 +596,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
     window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
-    window_step = 25
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
@@ -625,67 +633,68 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
         logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
 
 
-def _call_vars_region(
-    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5,
-):
-    """
-    For the given region, identify variants by repeatedly calling the model over a sliding window,
-    tallying all of the variants called, and passing back all call and repeat count info
-    for further exploration
-    Currently:
-    - exclude all variants in the downstream half of the window
-    - retain all remaining var calls noting how many time each one was called, qualities, etc.
-    - call with no repeats are mostly false positives but they are retained
-    - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
-
-    TODO:
-      - add prob info from alt sequence to vars?
-      - add depth derived from tensor to vars?
-      - create new prob from all duplicate calls?
-    """
-    cpname = mp.current_process().name
-    logger.debug(
-        f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
-    )
-
-    step_count = 0  # initialize
-    # var_retain_window_size = 145
-    batch_size = 128
-
-    enctime_total = datetime.timedelta(0)
-    calltime_total = datetime.timedelta(0)
-    encstart = datetime.datetime.now()
-    hap0 = defaultdict(list)
-    hap1 = defaultdict(list)
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                               max_read_depth,
-                                               window_size=window_size,
-                                               min_reads=min_reads,
-                                               batch_size=batch_size):
-        logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
-        logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
-        enctime_total += (datetime.datetime.now() - encstart)
-        callstart = datetime.datetime.now()
-        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
-        logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-        batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
-
-        h0, h1 = merge_genotypes(batchvars)
-
-        for k, v in h0.items():
-            hap0[k].extend(v)
-        for k, v in h1.items():
-            hap1[k].extend(v)
-        calltime_total += (datetime.datetime.now() - callstart)
-
-        step_count += batch.shape[0]
-
-    # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
-
-    logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
-    return chrom, window_idx, hap0_passing, hap1_passing
+# def _call_vars_region(
+#     chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5, window_step=25,
+# ):
+#     """
+#     For the given region, identify variants by repeatedly calling the model over a sliding window,
+#     tallying all of the variants called, and passing back all call and repeat count info
+#     for further exploration
+#     Currently:
+#     - exclude all variants in the downstream half of the window
+#     - retain all remaining var calls noting how many time each one was called, qualities, etc.
+#     - call with no repeats are mostly false positives but they are retained
+#     - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
+#
+#     TODO:
+#       - add prob info from alt sequence to vars?
+#       - add depth derived from tensor to vars?
+#       - create new prob from all duplicate calls?
+#     """
+#     cpname = mp.current_process().name
+#     logger.debug(
+#         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
+#     )
+#
+#     step_count = 0  # initialize
+#     # var_retain_window_size = 145
+#     batch_size = 128
+#
+#     enctime_total = datetime.timedelta(0)
+#     calltime_total = datetime.timedelta(0)
+#     encstart = datetime.datetime.now()
+#     hap0 = defaultdict(list)
+#     hap1 = defaultdict(list)
+#     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
+#                                                max_read_depth,
+#                                                window_size=window_size,
+#                                                min_reads=min_reads,
+#                                                batch_size=batch_size,
+#                                                window_step=window_step):
+#         logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
+#         logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
+#         enctime_total += (datetime.datetime.now() - encstart)
+#         callstart = datetime.datetime.now()
+#         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
+#         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
+#         batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
+#
+#         h0, h1 = merge_genotypes(batchvars)
+#
+#         for k, v in h0.items():
+#             hap0[k].extend(v)
+#         for k, v in h1.items():
+#             hap1[k].extend(v)
+#         calltime_total += (datetime.datetime.now() - callstart)
+#
+#         step_count += batch.shape[0]
+#
+#     # Only return variants that are actually in the window
+#     hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
+#     hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
+#
+#     logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
+#     return chrom, window_idx, hap0_passing, hap1_passing
 
 
 def merge_genotypes(genos):
