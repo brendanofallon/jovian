@@ -1,6 +1,8 @@
 import itertools
 import datetime
 import os
+import time
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -321,10 +323,11 @@ def predict_sequence(src, model, n_output_toks, device):
     """
     if isinstance(model, nn.DataParallel):
         model = model.module
-
+    start = time.perf_counter()
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
     probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
     mem = model.encode(src)
+    encode = time.perf_counter()
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
@@ -332,5 +335,8 @@ def predict_sequence(src, model, n_output_toks, device):
         p = torch.nn.functional.one_hot(tophit, num_classes=260)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
+    encode_elapsed = encode - start
+    decode_elapsed = time.perf_counter() - encode
+    logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]
 

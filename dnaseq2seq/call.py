@@ -349,7 +349,10 @@ def process_block(raw_regions,
         var_freq_file = pysam.VariantFile(var_freq_file)
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
 
-    min_samples_callbatch = 16 # Accumulate regions until we have at least this many
+    # Accumulate regions until we have at least this many
+    # Bigger numbers here use more memory, but allow for more efficiently finding sub-batches
+    # of regions to minimize the number of inference steps (decoder calls)
+    min_samples_callbatch = 32
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
@@ -481,15 +484,29 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
 
 
 def call_and_merge(batch, batch_offsets, regions, model, reference):
-    max_dist = max(r[2] - bo for r, bo in zip(regions, batch_offsets))
-    n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (max_dist) // util.TGT_KMER_SIZE + 1)
-    logger.debug(f"window max dist: {max_dist}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-    logger.debug(f"Calling batch of size {len(batch_offsets)}")
-    batchvars = call_batch(batch, batch_offsets, regions, model, reference, n_output_toks)
+    """
 
+    """
+    dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+    median = np.median(dists)
+    # median = 0
+    subbatch_idx = dists <= median
     byregion = defaultdict(list)
-    for region, bvars in zip(regions, batchvars):
-        byregion[region].append(bvars)
+    # max_dist = max(dists)
+    # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
+    for sbi in range(max(subbatch_idx) + 1):
+        which = np.where(subbatch_idx == sbi)[0]
+        subbatch = batch[torch.tensor(which), :, :, :]
+        subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
+        subbatch_dists = [d for i,d in zip(subbatch_idx, dists) if i == sbi]
+        subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(subbatch_dists) // util.TGT_KMER_SIZE + 1)
+
+        logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
+        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks)
+
+        for region, bvars in zip(subbatch_regions, batchvars):
+            byregion[region].append(bvars)
 
     hap0 = defaultdict(list)
     hap1 = defaultdict(list)
