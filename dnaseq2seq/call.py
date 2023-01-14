@@ -576,7 +576,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         #calledvars.append((vars_hap0, vars_hap1))
-        calledvars.append((vars_hap0[0:4], vars_hap1[0:4]))
+        calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
 
     return calledvars
 
