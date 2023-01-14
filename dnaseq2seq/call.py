@@ -488,9 +488,12 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
 
     """
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
-    median = np.median(dists)
-    # median = 0
-    subbatch_idx = dists <= median
+    subbatch_idx = np.zeros(len(dists), dtype=int)
+    firstthird = np.percentile(dists, 33)
+    secondthird = np.percentile(dists, 66)
+    subbatch_idx[(dists >= firstthird) & (dists < secondthird)] = 1
+    subbatch_idx[(dists >= secondthird)] = 2
+
     byregion = defaultdict(list)
     # max_dist = max(dists)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
@@ -498,7 +501,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
         which = np.where(subbatch_idx == sbi)[0]
         subbatch = batch[torch.tensor(which), :, :, :]
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
-        subbatch_dists = [d for i,d in zip(subbatch_idx, dists) if i == sbi]
+        subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(subbatch_dists) // util.TGT_KMER_SIZE + 1)
 
@@ -527,7 +530,7 @@ def vars_hap_to_records(
     chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
 ):
     """
-    Convert variant haplotypes to variant records and write the records to a temporary VCF file.
+    Convert variant haplotype objects to variant records
     """
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
@@ -648,70 +651,6 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
 
     if not returned_count:
         logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
-
-
-# def _call_vars_region(
-#     chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5, window_step=25,
-# ):
-#     """
-#     For the given region, identify variants by repeatedly calling the model over a sliding window,
-#     tallying all of the variants called, and passing back all call and repeat count info
-#     for further exploration
-#     Currently:
-#     - exclude all variants in the downstream half of the window
-#     - retain all remaining var calls noting how many time each one was called, qualities, etc.
-#     - call with no repeats are mostly false positives but they are retained
-#     - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
-#
-#     TODO:
-#       - add prob info from alt sequence to vars?
-#       - add depth derived from tensor to vars?
-#       - create new prob from all duplicate calls?
-#     """
-#     cpname = mp.current_process().name
-#     logger.debug(
-#         f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
-#     )
-#
-#     step_count = 0  # initialize
-#     # var_retain_window_size = 145
-#     batch_size = 128
-#
-#     enctime_total = datetime.timedelta(0)
-#     calltime_total = datetime.timedelta(0)
-#     encstart = datetime.datetime.now()
-#     hap0 = defaultdict(list)
-#     hap1 = defaultdict(list)
-#     for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-#                                                max_read_depth,
-#                                                window_size=window_size,
-#                                                min_reads=min_reads,
-#                                                batch_size=batch_size,
-#                                                window_step=window_step):
-#         logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
-#         logger.debug(f"Encoded {len(batch)} windows for region {start}-{end} size: {end - start}")
-#         enctime_total += (datetime.datetime.now() - encstart)
-#         callstart = datetime.datetime.now()
-#         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, (end - min(batch_offsets)) // util.TGT_KMER_SIZE + 1)
-#         logger.debug(f"window end: {end}, min batch offset: {min(batch_offsets)}, n_tokens: {n_output_toks}")
-#         batchvars = call_batch(batch, batch_offsets, [(start, end) for _ in range(batch.shape[0])], model, reference, chrom, n_output_toks)
-#
-#         h0, h1 = merge_genotypes(batchvars)
-#
-#         for k, v in h0.items():
-#             hap0[k].extend(v)
-#         for k, v in h1.items():
-#             hap1[k].extend(v)
-#         calltime_total += (datetime.datetime.now() - callstart)
-#
-#         step_count += batch.shape[0]
-#
-#     # Only return variants that are actually in the window
-#     hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
-#     hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
-#
-#     logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
-#     return chrom, window_idx, hap0_passing, hap1_passing
 
 
 def merge_genotypes(genos):
