@@ -10,7 +10,7 @@
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:2 --constraint="a6000|a100"
+#SBATCH --gres=gpu:1 --constraint="a6000|a100"
 
 
 
@@ -22,14 +22,15 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
 GIT_BRANCH="decoder_big"
 
-PYTHON=$HOME/miniconda3/envs/jv/bin/python
+PYTHON=$HOME/storage/miniconda3/envs/jv/bin/python
 
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
-VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
+#VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
+VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_chrD
 
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/test_pregen_mqfeat_kmers
@@ -44,15 +45,15 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs2
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
-PREGEN_DIR=/scratch/general/vast/u0379426/pregen_nosus/
+PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200test
 
 
 LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="decoder_96M_noDS_cont"
-RUN_NOTES="96M model, no-downsampling data set continued from epoch 3"
+RUN_NAME="depth200test"
+RUN_NOTES="test depth 200"
 
 set -x
 
@@ -75,9 +76,9 @@ cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+export ENABLE_WANDB=
 
-export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
+export JV_LOGLEVEL=DEBUG; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
@@ -87,7 +88,6 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/decoder_96m_noDS/decoder_96m_noDS_epoch3.model \
     --samples-per-epoch 5000000 \
     --wandb-run-name $RUN_NAME \
     --wandb-notes "$RUN_NOTES"

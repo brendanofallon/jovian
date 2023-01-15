@@ -149,9 +149,12 @@ class VarTransformer(nn.Module):
         self.elu = torch.nn.ELU()
 
     def encode(self, src):
+        logger.debug(f"src dim: {src.shape}")
         src = self.elu(self.fc1(src))
+        logger.debug(f"output of fc1: {src.shape}")
         src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
+        logger.debug(f"After pos encode + flatten: {src.shape}")
         src = self.elu(self.fc2(src))
         mem = self.encoder(src)
         mem_proj = self.converter(mem)

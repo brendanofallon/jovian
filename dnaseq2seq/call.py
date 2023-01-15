@@ -477,7 +477,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
         'start_positions': all_starts,
         'window_idx': window_idx,
     }
-    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(4)}.pt"
+    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
     logger.debug(f"Saving data as {dest.absolute()}")
     torch.save(data, dest)
     return dest.absolute()
@@ -489,10 +489,10 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
     """
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     subbatch_idx = np.zeros(len(dists), dtype=int)
-    firstthird = np.percentile(dists, 33)
-    secondthird = np.percentile(dists, 66)
-    subbatch_idx[(dists >= firstthird) & (dists < secondthird)] = 1
-    subbatch_idx[(dists >= secondthird)] = 2
+    #firstthird = np.percentile(dists, 33)
+    #secondthird = np.percentile(dists, 66)
+    #subbatch_idx[(dists >= firstthird) & (dists < secondthird)] = 1
+    #subbatch_idx[(dists >= secondthird)] = 2
 
     byregion = defaultdict(list)
     # max_dist = max(dists)
