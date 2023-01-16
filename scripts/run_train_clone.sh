@@ -13,7 +13,7 @@
 #SBATCH --gres=gpu:1 --constraint="a6000|a100"
 
 
-
+module load gcc/11.2.0 # Required for recent version of glibc / libstdc++ (GLIBCXXX errors)
 module load cuda/11.6.2
 
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/
@@ -52,7 +52,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="depth200test"
+RUN_NAME="depth200test_pt2"
 RUN_NOTES="test depth 200"
 
 set -x
@@ -78,7 +78,7 @@ echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
 export ENABLE_WANDB=
 
-export JV_LOGLEVEL=DEBUG; $PYTHON $ds2s train \
+export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \

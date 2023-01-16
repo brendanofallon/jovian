@@ -117,6 +117,23 @@ def compute_twohap_loss(preds, tgt, criterion):
     return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
 
 
+def make_lr_func(learning_rate, warmup_iters, min_lr):
+
+    def get_lr(iter):
+        # 1) linear warmup for warmup_iters steps
+        if iter < warmup_iters:
+            return learning_rate * iter / warmup_iters
+        # 2) if iter > lr_decay_iters, return min learning rate
+        if iter > lr_decay_iters:
+            return min_lr
+        # 3) in between, use cosine decay down to min learning rate
+        decay_ratio = (iter - warmup_iters) / (lr_decay_iters - warmup_iters)
+        assert 0 <= decay_ratio <= 1
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
+        return min_lr + coeff * (learning_rate - min_lr)
+
+    return get_lr
+
 
 def train_epoch(model, optimizer, criterion, loader, batch_size):
     """
@@ -201,6 +218,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
     samples_seen = 0
     loss_sum = 0
     model.train()
+
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
         logger.debug("Got batch from loader...")
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
@@ -374,6 +392,8 @@ def train_epochs(epochs,
                  model_dest=None,
                  val_dir=None,
                  batch_size=64,
+		 warmup_iters=4,
+                 min_lr=0.0002,
                  lossfunc='ce',
                  wandb_run_name=None,
                  wandb_notes="",
@@ -433,10 +453,12 @@ def train_epochs(epochs,
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(DEVICE)
-
+    model = torch.compile(model)
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
+
+    #lr_func = make_lr_func(init_learning_rate, warmup_iters, min_lr)
 
     if lossfunc == 'ce':
         logger.info("Creating N.L.L. Loss loss function")
