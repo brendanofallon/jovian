@@ -30,6 +30,8 @@ import util
 from model import VarTransformer
 from swloss import SmithWatermanLoss
 
+import torch._dynamo as dynamo
+
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
 if ENABLE_WANDB:
@@ -456,9 +458,16 @@ def train_epochs(epochs,
     
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
+
+
     
+    explanation, out_guards, graphs, ops_per_graph = dynamo.explain(model, torch.randn(128, 150, 100, 10))
+    print(explanation)
+    return
+
     model = torch.compile(model)
     
+
     model = model.to(DEVICE)
     model.train()
 
