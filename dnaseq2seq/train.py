@@ -456,8 +456,10 @@ def train_epochs(epochs,
     
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
+    
+    model = torch.compile(model)
+    
     model = model.to(DEVICE)
-    #model = torch.compile(model)
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
