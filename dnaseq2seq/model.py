@@ -32,7 +32,7 @@ class PositionalEncoding2D(nn.Module):
         self.channels = channels
         inv_freq = 1. / (10000 ** (torch.arange(0, channels, 2).float() / channels))
         self.register_buffer('inv_freq', inv_freq)
-        self.emb = self._gen_mat(x, y, device, torch.float)
+        self.emb = self._gen_mat(x, y, device, torch.float).to(device)
 
     def _gen_mat(self, x, y, device, type):
         pos_x = torch.arange(x, device=device).type(self.inv_freq.type())
