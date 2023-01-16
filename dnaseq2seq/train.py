@@ -104,7 +104,7 @@ def compute_twohap_loss(preds, tgt, criterion):
     Finally, re-compute loss with the new configuration for all samples and return it, storing gradients this time
     """
     # Compute losses in both configurations, and use the best
-    new_preds = torch.zeros_like(preds)
+    new_preds = torch.zeros_like(preds, requires_grad=True).to(DEVICE)
     with torch.no_grad():
         for b in range(preds.shape[0]):
             loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
