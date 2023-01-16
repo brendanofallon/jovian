@@ -460,8 +460,8 @@ def train_epochs(epochs,
         model = nn.DataParallel(model)
 
 
-    
-    explanation, out_guards, graphs, ops_per_graph = dynamo.explain(model, torch.randn(128, 150, 100, 10))
+    tgt_mask = nn.Transformer.generate_square_subsequent_mask(17)
+    explanation = dynamo.explain(model, torch.randn(32, 150, 100, 10), torch.rand(32, 2, 17, 260), tgt_mask)
     print(explanation)
     return
 
