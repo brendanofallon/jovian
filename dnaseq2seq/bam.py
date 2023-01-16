@@ -99,6 +99,7 @@ class ReadWindow:
             num_reads_to_sample = max_reads
 
         if len(allreads) > num_reads_to_sample:
+            logger.debug(f"Window has {len(allreads)}, downsampling to {num_reads_to_sample}")
             allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
 
