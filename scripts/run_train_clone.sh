@@ -22,7 +22,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
 
 GIT_BRANCH="decoder_big"
 
-PYTHON=$HOME/storage/miniconda3/envs/jv/bin/python
+PYTHON=$HOME/storage/miniconda3/envs/jv2/bin/python
 
 
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf.yaml

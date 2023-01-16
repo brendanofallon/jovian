@@ -104,6 +104,7 @@ def compute_twohap_loss(preds, tgt, criterion):
     Finally, re-compute loss with the new configuration for all samples and return it, storing gradients this time
     """
     # Compute losses in both configurations, and use the best
+    new_preds = torch.zeros_like(preds)
     with torch.no_grad():
         for b in range(preds.shape[0]):
             loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
@@ -112,9 +113,12 @@ def compute_twohap_loss(preds, tgt, criterion):
                               tgt[b, torch.tensor([1, 0]), :].flatten())
 
             if loss2 < loss1:
-                preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
+                new_preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
+            else:
+                new_preds[b, :, :, :] = preds[b, torch.tensor([0, 1]), :]
 
-    return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
+
+    return criterion(new_preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
 
 
 def make_lr_func(learning_rate, warmup_iters, min_lr):
