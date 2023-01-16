@@ -463,7 +463,7 @@ def train_epochs(epochs,
     tgt_mask = nn.Transformer.generate_square_subsequent_mask(17)
     explanation = dynamo.explain(model, torch.randn(32, 150, 100, 10), torch.rand(32, 2, 17, 260), tgt_mask)
     print(explanation)
-    return
+    #return
 
     model = torch.compile(model)
     

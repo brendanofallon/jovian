@@ -52,7 +52,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="test_pt2_b4device"
+RUN_NAME="test_pt2_fixposencode"
 RUN_NOTES="test torch.compile"
 
 set -x
