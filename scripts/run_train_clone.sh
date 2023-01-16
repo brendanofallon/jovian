@@ -29,8 +29,8 @@ PYTHON=$HOME/storage/miniconda3/envs/jv2/bin/python
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
-#VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
-VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_chrD
+VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
+#VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_chrD
 
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/test_pregen_mqfeat_kmers
@@ -43,17 +43,17 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_c
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_all_plus_susregions
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_smallsus
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
-#PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
+PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
-PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200test
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200test
 
 
 LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="depth200test_pt2"
-RUN_NOTES="test depth 200"
+RUN_NAME="test_pt2"
+RUN_NOTES="test torch.compile"
 
 set -x
 
@@ -82,7 +82,7 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
-    --batch-size 128 \
+    --batch-size 512 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \

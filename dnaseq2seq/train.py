@@ -670,7 +670,7 @@ def train(output_model, input_model, epochs, **kwargs):
     torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=200,
+                 max_read_depth=100,
                  feats_per_read=10,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
