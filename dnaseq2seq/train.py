@@ -104,7 +104,7 @@ def compute_twohap_loss(preds, tgt, criterion):
     Finally, re-compute loss with the new configuration for all samples and return it, storing gradients this time
     """
     # Compute losses in both configurations, and use the best
-    new_preds = torch.zeros_like(preds, requires_grad=True).to(DEVICE)
+    new_targs = torch.zeros_like(tgt, requires_grad=True).to(DEVICE)
     with torch.no_grad():
         for b in range(preds.shape[0]):
             loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
@@ -113,12 +113,12 @@ def compute_twohap_loss(preds, tgt, criterion):
                               tgt[b, torch.tensor([1, 0]), :].flatten())
 
             if loss2 < loss1:
-                new_preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
+                new_targs[b, :, :] = tgt[b, torch.tensor([1, 0])]
             else:
-                new_preds[b, :, :, :] = preds[b, torch.tensor([0, 1]), :]
+                new_targs[b, :, :] = tgt[b, torch.tensor([0, 1])]
 
 
-    return criterion(new_preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
+    return criterion(preds.flatten(start_dim=0, end_dim=2), new_targs.flatten())
 
 
 def make_lr_func(learning_rate, warmup_iters, min_lr):
@@ -241,7 +241,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         logger.debug("Stepping optimizer...")
         optimizer.step()
         if batch % 10 == 0:
-            logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
+            logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f}")
         samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
