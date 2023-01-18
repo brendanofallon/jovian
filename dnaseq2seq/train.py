@@ -464,7 +464,7 @@ def train_epochs(epochs,
     #explanation = dynamo.explain(model, torch.randn(32, 150, 100, 10), torch.rand(32, 2, 17, 260), tgt_mask)
     #print(explanation)
     #return
-
+    logger.info("Compiling model")
     model = torch.compile(model)
     
 
@@ -672,16 +672,11 @@ def train(output_model, input_model, epochs, **kwargs):
                                      tgt_prefix="tgkmers")
 
 
-    # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
-    if kwargs.get("data_augmentation"):
-        #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-        dataloader = loader.ShufflingLoader(dataloader)
-        #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01
 
     torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=100,
+                 max_read_depth=200,
                  feats_per_read=10,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
