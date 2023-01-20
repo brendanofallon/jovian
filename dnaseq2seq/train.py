@@ -30,8 +30,6 @@ import util
 from model import VarTransformer
 from swloss import SmithWatermanLoss
 
-import torch._dynamo as dynamo
-
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
 if ENABLE_WANDB:
@@ -106,7 +104,6 @@ def compute_twohap_loss(preds, tgt, criterion):
     Finally, re-compute loss with the new configuration for all samples and return it, storing gradients this time
     """
     # Compute losses in both configurations, and use the best
-    new_targs = torch.zeros_like(tgt).to(DEVICE)
     with torch.no_grad():
         for b in range(preds.shape[0]):
             loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
@@ -115,30 +112,10 @@ def compute_twohap_loss(preds, tgt, criterion):
                               tgt[b, torch.tensor([1, 0]), :].flatten())
 
             if loss2 < loss1:
-                new_targs[b, :, :] = tgt[b, torch.tensor([1, 0])]
-            else:
-                new_targs[b, :, :] = tgt[b, torch.tensor([0, 1])]
+                preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
 
+    return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
 
-    return criterion(preds.flatten(start_dim=0, end_dim=2), new_targs.flatten())
-
-
-def make_lr_func(learning_rate, warmup_iters, min_lr):
-
-    def get_lr(iter):
-        # 1) linear warmup for warmup_iters steps
-        if iter < warmup_iters:
-            return learning_rate * iter / warmup_iters
-        # 2) if iter > lr_decay_iters, return min learning rate
-        if iter > lr_decay_iters:
-            return min_lr
-        # 3) in between, use cosine decay down to min learning rate
-        decay_ratio = (iter - warmup_iters) / (lr_decay_iters - warmup_iters)
-        assert 0 <= decay_ratio <= 1
-        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
-        return min_lr + coeff * (learning_rate - min_lr)
-
-    return get_lr
 
 
 def train_epoch(model, optimizer, criterion, loader, batch_size):
@@ -224,7 +201,6 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
     samples_seen = 0
     loss_sum = 0
     model.train()
-
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
         logger.debug("Got batch from loader...")
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
@@ -398,8 +374,6 @@ def train_epochs(epochs,
                  model_dest=None,
                  val_dir=None,
                  batch_size=64,
-		 warmup_iters=4,
-                 min_lr=0.0002,
                  lossfunc='ce',
                  wandb_run_name=None,
                  wandb_notes="",
@@ -458,22 +432,11 @@ def train_epochs(epochs,
     
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-
-
-    #tgt_mask = nn.Transformer.generate_square_subsequent_mask(17)
-    #explanation = dynamo.explain(model, torch.randn(32, 150, 100, 10), torch.rand(32, 2, 17, 260), tgt_mask)
-    #print(explanation)
-    #return
-    logger.info("Compiling model")
-    model = torch.compile(model)
-    
-
     model = model.to(DEVICE)
+
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
-
-    #lr_func = make_lr_func(init_learning_rate, warmup_iters, min_lr)
 
     if lossfunc == 'ce':
         logger.info("Creating N.L.L. Loss loss function")
@@ -578,7 +541,7 @@ def train_epochs(epochs,
             ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
             ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
             if ENABLE_WANDB:
                 wandb.log({
