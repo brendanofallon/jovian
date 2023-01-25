@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
+import warnings
+warnings.filterwarnings(action='ignore')
+
+
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
@@ -108,7 +112,7 @@ def load_model(model_path):
     #decoder_layers = 4 # was 2
     #embed_dim_factor = 120 # was 100
 
-    model = VarTransformer(read_depth=100,
+    model = VarTransformer(read_depth=200,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
@@ -277,7 +281,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 100
+    max_read_depth = 200
 
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
@@ -551,6 +555,9 @@ def vars_hap_to_records(
     ]
 
     for rec in vcf_records:
+        if rec.ref == rec.alts[0]:
+            logger.warn(f"Whoa, found a REF == ALT variant: {rec}")
+
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
             rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)

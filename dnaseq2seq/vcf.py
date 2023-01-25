@@ -490,7 +490,7 @@ def create_vcf_rec(var, vcf_file):
     vcf_filter = var.filter if var.filter else "PASS"
     if np.isnan(var.qual):
         logger.error(f"Quality is NaN for variant {var}")
-    r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
+    r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, 
                        alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
