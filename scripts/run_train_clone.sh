@@ -52,8 +52,8 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d200_50m"
-RUN_NOTES="WGS, depth 200, 50M model"
+RUN_NAME="d200_96m"
+RUN_NOTES="WGS, depth 200, 96M model"
 
 set -x
 
