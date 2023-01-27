@@ -29,7 +29,7 @@ PYTHON=$HOME/storage/miniconda3/envs/jv2/bin/python
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
-VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
+#VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_chrD
 VAL_DIR=$HOME/storage/pregen_depth200_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge
@@ -48,12 +48,12 @@ VAL_DIR=$HOME/storage/pregen_depth200_chr21and22
 PREGEN_DIR=/scratch/general/vast/u0379426/pregen_lcbigsus_d200/
 
 
-LEARNING_RATE=0.00004
+LEARNING_RATE=0.00003
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d200_96m"
-RUN_NOTES="WGS, depth 200, 96M model"
+RUN_NAME="rollback_d200_50m_cont"
+RUN_NOTES="WGS, depth 200, 50M model, continued from epoch 15"
 
 set -x
 
@@ -86,6 +86,7 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/rollback_d200_50m/rollback_d200_50m_epoch15.model \
     --threads 16 \
     --max-decomp-batches 8 \
     --samples-per-epoch 10000000 \
