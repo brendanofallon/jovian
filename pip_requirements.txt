@@ -1,3 +1,4 @@
 lz4
 pygit2
 pysam
+xgboost

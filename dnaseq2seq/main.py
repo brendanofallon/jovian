@@ -216,12 +216,13 @@ def main():
     callparser.add_argument("-c", "--classifier-path", help="Stored variant classifier model", default=None, type=str)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
-    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
+    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=True)
     callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
     callparser.add_argument("-f", "--freq-file", help="Population frequency file for classifier")
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     callparser.add_argument("-td", "--temp-dir", help="Temporary data storage location", default=os.environ.get("JV_TMPDIR", "."))
+    callparser.add_argument("-mx", "--max-batch-size", help="Max number of regions to process at once", type=int, default=64)
 
     callparser.set_defaults(func=call)
 

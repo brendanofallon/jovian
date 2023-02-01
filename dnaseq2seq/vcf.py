@@ -470,7 +470,7 @@ def prob_to_phred(p, max_qual=1000.0):
     Convert a probability in 0..1 to phred scale
     """
     if np.isnan(p):
-        logger.warning(f"Found NaN probability for variant returning quality 0")
+        logger.warning(f"Found NaN probability for variant, returning quality 0")
         return 0.0
     assert 0.0 <= p <= 1.0, f"Probability must be in [0, 1], but found {p}"
     if p == 1.0:
@@ -490,7 +490,11 @@ def create_vcf_rec(var, vcf_file):
     vcf_filter = var.filter if var.filter else "PASS"
     if np.isnan(var.qual):
         logger.error(f"Quality is NaN for variant {var}")
+<<<<<<< HEAD
     r = vcf_file.new_record(contig=var.chrom, start=var.pos - 1, stop=var.pos - 1 + len(var.ref), 
+=======
+    r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos + len(var.ref),
+>>>>>>> e4f249613b440d5f3802a38353be9c6dcf44a2b7
                        alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype

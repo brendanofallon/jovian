@@ -214,6 +214,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     start_time = time.perf_counter()
     tmpdir_root = Path(kwargs.get("temp_dir"))
     threads = kwargs.get('threads', 1)
+    max_batch_size = kwargs.get('max_batch_size', 64)
     logger.info(f"Using {threads} threads for encoding")
     logger.info(f"Found torch device: {DEVICE}")
 
@@ -247,6 +248,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         classifier_path=classifier_path,
         threads=threads,
         tmpdir=tmpdir,
+        max_batch_size=max_batch_size,
         var_freq_file=var_freq_file,
         vcf_out=vcf_out_fh,
         vcf_template=vcf_template,
@@ -266,7 +268,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
 
 def call_vars_in_blocks(
-    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file, vcf_out, vcf_template,
+    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, max_batch_size, var_freq_file, vcf_out, vcf_template,
 ):
     """
     Split the input BED file into chunks and call variants in each chunk sequentially
@@ -282,6 +284,8 @@ def call_vars_in_blocks(
     :return: a VCF file with called variants for the given chromosome.
     """
     max_read_depth = 200
+    logger.info(f"Max read depth: {max_read_depth}")
+    logger.info(f"Max batch size: {max_batch_size}")
 
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
@@ -308,6 +312,7 @@ def call_vars_in_blocks(
                       window_size=150,
                       vcf_out=vcf_out,
                       vcf_template=vcf_template,
+                      max_batch_size=max_batch_size,
                       var_freq_file=var_freq_file)
         start_block += regions_per_block
 
@@ -323,6 +328,7 @@ def process_block(raw_regions,
               window_size,
               vcf_out,
               vcf_template,
+              max_batch_size,
               var_freq_file=None):
     """
     For each region in the given list of regions, generate input tensors and then call variants on that data
@@ -381,7 +387,7 @@ def process_block(raw_regions,
                 allencoded = torch.concat(batch_encoded, dim=0)
             else:
                 allencoded = batch_encoded[0]
-            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
+            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
             var_records.extend(
                 vars_hap_to_records(
                     chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
@@ -399,7 +405,7 @@ def process_block(raw_regions,
             allencoded = torch.concat(batch_encoded, dim=0)
         else:
             allencoded = batch_encoded[0]
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference)
+        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
         var_records.extend(
             vars_hap_to_records(
                 chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
@@ -490,19 +496,15 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
     return dest.absolute()
 
 
-def call_and_merge(batch, batch_offsets, regions, model, reference):
+def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
     """
 
     """
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     subbatch_idx = np.zeros(len(dists), dtype=int)
-    #firstthird = np.percentile(dists, 33)
-    #secondthird = np.percentile(dists, 66)
-    #subbatch_idx[(dists >= firstthird) & (dists < secondthird)] = 1
-    #subbatch_idx[(dists >= secondthird)] = 2
 
     byregion = defaultdict(list)
-    # max_dist = max(dists)
+    max_dist = max(dists)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
@@ -510,10 +512,10 @@ def call_and_merge(batch, batch_offsets, regions, model, reference):
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
-        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(subbatch_dists) // util.TGT_KMER_SIZE + 1)
+        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
-        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks)
+        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
 
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
@@ -565,7 +567,30 @@ def vars_hap_to_records(
     return vcf_records
 
 
-def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks):
+def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
+    """
+    Predict the sequence for the encoded reads, but dont submit more than 'max_batch_size' samples
+    at once
+    """
+    seq_preds = None
+    probs = None
+    start = 0
+    while start < encoded_reads.shape[0]:
+        end = start + max_batch_size
+        preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+                                            n_output_toks=n_output_toks, device=DEVICE)
+        if seq_preds is None:
+            seq_preds = preds
+        else:
+            seq_preds = torch.concat((seq_preds, preds), dim=0)
+        if probs is None:
+            probs = prbs.detach().cpu().numpy()
+        else:
+            probs = np.concatenate((probs, prbs.detach().cpu().numpy()), axis=0)
+        start += max_batch_size
+    return seq_preds, probs
+
+def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks, max_batch_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -574,8 +599,8 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks)
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
-    seq_preds, probs = util.predict_sequence(encoded_reads.to(DEVICE), model, n_output_toks=n_output_toks, device=DEVICE)
-    probs = probs.detach().cpu().numpy()
+    seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
+
     calledvars = []
     for offset, (chrom, start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
