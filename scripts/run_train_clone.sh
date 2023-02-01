@@ -10,7 +10,7 @@
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a6000|a100"
+#SBATCH --gres=gpu:2 --constraint="a6000|a100"
 
 
 module load gcc/11.2.0 # Required for recent version of glibc / libstdc++ (GLIBCXXX errors)
@@ -52,7 +52,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d200_96m_cont"
+RUN_NAME="d200_96m_cont2"
 RUN_NOTES="WGS, depth 200, 96M model, continued from epoch 1"
 
 set -x

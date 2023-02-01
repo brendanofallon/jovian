@@ -356,7 +356,7 @@ def process_block(raw_regions,
     # Accumulate regions until we have at least this many
     # Bigger numbers here use more memory, but allow for more efficiently finding sub-batches
     # of regions to minimize the number of inference steps (decoder calls)
-    min_samples_callbatch = 32
+    min_samples_callbatch = 96
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []

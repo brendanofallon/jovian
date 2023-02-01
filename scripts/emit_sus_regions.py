@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq")
 
-from dnaseq2seq import call
+import call
 import pysam
 import random
 
