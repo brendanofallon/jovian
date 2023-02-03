@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-
-
+import random
 from enum import Enum
 import yaml
 import numpy as np
@@ -278,6 +277,39 @@ def feat_names():
 def varstr(var):
     return f"{var.chrom}:{var.pos}-{var.ref}-{var.alts[0]}"
 
+def is_snv(var):
+    return len(var.ref) == 1 and len(var.alts[0]) == 1
+
+def is_del(var):
+    return len(var.ref) > 1 and len(var.alts[0]) == 1
+
+def is_ins(var):
+    return len(var.ref) == 1 and len(var.alts[0]) > 1
+
+def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins=float("inf"), skip=0):
+    snvcount = 0
+    delcount = 0
+    inscount = 0
+    for i, var in enumerate(pysam.VariantFile(vcf, ignore_truncation=True)):
+        if i < skip:
+            continue
+        if is_snv(var):
+            snvcount += 1
+            if snvcount > max_snvs:
+                continue
+        if is_del(var):
+            delcount += 1
+            if delcount > max_dels:
+                continue
+        if is_ins(var):
+            inscount += 1
+            if inscount > max_ins:
+                continue
+        if snvcount > max_snvs and delcount > max_dels and inscount > max_ins:
+            break
+
+        yield var
+
 
 def extract_feats(vcf, aln, var_freq_file):
     allfeats = []
@@ -317,7 +349,8 @@ def _process_sample(args):
     if type(tps) == str:
         tps = [tps]
     for tp in tps:
-        tpf, tpfeatstrs = extract_feats(tp, aln, var_freq_file)
+        vcfiter = vcf_sampling_iter(tp, max_snvs=1000, max_dels=1000, max_ins=1000, skip=random.randint(0, 10000))
+        tpf, tpfeatstrs = extract_feats(vcfiter, aln, var_freq_file)
         tp_feats.extend(tpf)
         featstrs.extend(tpfeatstrs)
         labels.extend([1] * len(tpf))
@@ -327,7 +360,8 @@ def _process_sample(args):
     if type(fps) == str:
         fps = [fps]
     for fp in fps:
-        fpf, fpfeatstrs = extract_feats(fp, aln, var_freq_file)
+        vcfiter = vcf_sampling_iter(fp)
+        fpf, fpfeatstrs = extract_feats(vcfiter, aln, var_freq_file)
         fp_feats.extend(fpf)
         featstrs.extend(fpfeatstrs)
         labels.extend([0] * len(fpf))
@@ -366,7 +400,6 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         if label_fh:
             for l in labs:
                 label_fh.write(str(l) + "\n")
-
 
     if feat_fh:
         feat_fh.close()

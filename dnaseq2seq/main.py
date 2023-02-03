@@ -169,6 +169,7 @@ def alphanumeric_no_spaces(name):
 
 def main():
     logger.debug("Turning on DEBUG log level")
+    logger.debug(f"PyTorch version: {torch.__version__}")
     parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
 
