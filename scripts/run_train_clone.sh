@@ -6,11 +6,11 @@
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
 #SBATCH --mem=128G
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:2 --constraint="a6000|a100"
+#SBATCH --gres=gpu:1 --constraint="a6000|a100"
 
 
 module load gcc/11.2.0 # Required for recent version of glibc / libstdc++ (GLIBCXXX errors)
@@ -52,8 +52,9 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d200_96m_cont2"
-RUN_NOTES="WGS, depth 200, 96M model, continued from epoch 1"
+RUN_NAME="rollback_d200_50m_moresamps"
+RUN_NOTES="WGS, depth 200, 50M continued from epoch 12 but this time with 5 more samples worth of training data"
+
 
 set -x
 
@@ -86,7 +87,7 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/d200_96m/d200_96m_epoch0.model \
+    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/rollback_d200_50m/rollback_d200_50m_epoch12.model \
     --threads 16 \
     --max-decomp-batches 8 \
     --samples-per-epoch 10000000 \
