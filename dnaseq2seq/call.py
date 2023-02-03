@@ -360,9 +360,8 @@ def process_block(raw_regions,
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
 
     # Accumulate regions until we have at least this many
-    # Bigger numbers here use more memory, but allow for more efficiently finding sub-batches
-    # of regions to minimize the number of inference steps (decoder calls)
     min_samples_callbatch = 96
+    
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
@@ -370,18 +369,37 @@ def process_block(raw_regions,
     batch_count = 0
     window_count = 0
     var_records = [] # Stores all variant records so we can sort before writing
-    for path in encoded_paths:
-        # Load the data, parsing location + encoded data from file
-        data = torch.load(path, map_location='cpu')
-        chrom, start, end = data['region']
-        window_idx = int(data['window_idx'])
-        batch_encoded.append(data['encoded_pileup'])
-        batch_start_pos.extend(data['start_positions'])
-        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
-        os.unlink(path)
-        window_count += len(batch_start_pos)
-        if len(batch_start_pos) > min_samples_callbatch:
-            logger.debug(f"Calling variants on window {window_idx} path: {path}")
+    with torch.no_grad():
+        for path in encoded_paths:
+            # Load the data, parsing location + encoded data from file
+            data = torch.load(path, map_location='cpu')
+            chrom, start, end = data['region']
+            window_idx = int(data['window_idx'])
+            batch_encoded.append(data['encoded_pileup'])
+            batch_start_pos.extend(data['start_positions'])
+            batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+            os.unlink(path)
+            window_count += len(batch_start_pos)
+            if len(batch_start_pos) > min_samples_callbatch:
+                logger.debug(f"Calling variants on window {window_idx} path: {path}")
+                batch_count += 1
+                if len(batch_encoded) > 1:
+                    allencoded = torch.concat(batch_encoded, dim=0)
+                else:
+                    allencoded = batch_encoded[0]
+                hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+                var_records.extend(
+                    vars_hap_to_records(
+                        chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+                    )
+                )
+                batch_encoded = []
+                batch_start_pos = []
+                batch_regions = []
+
+        # Write last few
+        logger.debug(f"Calling variants on window {window_idx} path: {path}")
+        if len(batch_start_pos):
             batch_count += 1
             if len(batch_encoded) > 1:
                 allencoded = torch.concat(batch_encoded, dim=0)
@@ -393,24 +411,6 @@ def process_block(raw_regions,
                     chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
                 )
             )
-            batch_encoded = []
-            batch_start_pos = []
-            batch_regions = []
-
-    # Write last few
-    logger.debug(f"Calling variants on window {window_idx} path: {path}")
-    if len(batch_start_pos):
-        batch_count += 1
-        if len(batch_encoded) > 1:
-            allencoded = torch.concat(batch_encoded, dim=0)
-        else:
-            allencoded = batch_encoded[0]
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
-        var_records.extend(
-            vars_hap_to_records(
-                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-            )
-        )
 
     if classifier_model:
         for v in var_records:
@@ -575,6 +575,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
     seq_preds = None
     probs = None
     start = 0
+    
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
