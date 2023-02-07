@@ -344,7 +344,7 @@ def process_block(raw_regions,
         maxdist=100,
     )
     sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
-    sus_regions = list(itertools.chain(*sus_regions))
+    sus_regions = util.merge_overlapping_regions( list(itertools.chain(*sus_regions)))
     sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
     enc_start = datetime.datetime.now()
     logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
