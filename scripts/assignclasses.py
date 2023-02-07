@@ -42,6 +42,13 @@ vcf = pysam.VariantFile(sys.argv[1])
 sys.stderr.write("Loading forest from " + sys.argv[2])
 forest = buildforest(sys.argv[2])
 
+mappability_forest = None
+mappability_count = 0
+if len(sys.argv) > 3:
+    sys.stderr.write(f"Loading additional interval set from {sys.argv[3]}")
+    mappability_forest = buildforest(sys.argv[3])
+
+
 for line in open(sys.argv[3]):
     variants = []
     toks = line.split("\t")
@@ -52,6 +59,11 @@ for line in open(sys.argv[3]):
     variants = list(vcf.fetch(chrom, start, end))
     intervals = list(forest[chrom].search(start, end))
     interval_count = len(intervals)
+
+    if mappability_forest:
+        mappability_count = len(list(mappability_forest[chrom].search(start, end)))
+
+
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
     del_count = len([v for v in variants if len(v.ref) > 1 and len(v.alts[0]) == 1])
     ins_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) > 1])
@@ -86,6 +98,9 @@ for line in open(sys.argv[3]):
 
     if found:
         label = label + "-lc"
+
+    if mappability_count:
+        label = label + "-map"
 
     if label == 'tn' and random.random() < 0.5:
         continue
