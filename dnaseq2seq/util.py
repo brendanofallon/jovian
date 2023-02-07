@@ -268,7 +268,19 @@ def dedup_vcf(input_vcf, dest):
         if clump:
             ofh.write(str(clump[0]))
 
-
+def merge_overlapping_regions(regions):
+    """
+    Merge any overlapping regions in the list into a single region
+    Assumes regions is list / iterable of (chrom, chunk_index, start, end) tuples
+    """
+    regions = sorted(regions, key=lambda x: x[1])
+    merged = [regions[0]]
+    for region in regions[1:]:
+        if region[0] == merged[-1][0] and region[2] <= merged[-1][3]:
+            merged[-1] = (merged[-1][0], merged[-1][1], merged[-1][2], max(region[3], merged[-1][3]))
+        else:
+            merged.append(region)
+    return merged
 
 
 def kmer_preds_to_seq(preds, i2s):

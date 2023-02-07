@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
+import warnings
+warnings.filterwarnings(action='ignore')
+
+
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
@@ -108,7 +112,7 @@ def load_model(model_path):
     #decoder_layers = 4 # was 2
     #embed_dim_factor = 120 # was 100
 
-    model = VarTransformer(read_depth=100,
+    model = VarTransformer(read_depth=200,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
@@ -279,7 +283,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 100
+    max_read_depth = 200
     logger.info(f"Max read depth: {max_read_depth}")
     logger.info(f"Max batch size: {max_batch_size}")
 
@@ -340,7 +344,7 @@ def process_block(raw_regions,
         maxdist=100,
     )
     sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
-    sus_regions = list(itertools.chain(*sus_regions))
+    sus_regions = util.merge_overlapping_regions( list(itertools.chain(*sus_regions)))
     sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
     enc_start = datetime.datetime.now()
     logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
@@ -356,9 +360,8 @@ def process_block(raw_regions,
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
 
     # Accumulate regions until we have at least this many
-    # Bigger numbers here use more memory, but allow for more efficiently finding sub-batches
-    # of regions to minimize the number of inference steps (decoder calls)
-    min_samples_callbatch = 32
+    min_samples_callbatch = 96
+    
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
@@ -366,18 +369,37 @@ def process_block(raw_regions,
     batch_count = 0
     window_count = 0
     var_records = [] # Stores all variant records so we can sort before writing
-    for path in encoded_paths:
-        # Load the data, parsing location + encoded data from file
-        data = torch.load(path, map_location='cpu')
-        chrom, start, end = data['region']
-        window_idx = int(data['window_idx'])
-        batch_encoded.append(data['encoded_pileup'])
-        batch_start_pos.extend(data['start_positions'])
-        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
-        os.unlink(path)
-        window_count += len(batch_start_pos)
-        if len(batch_start_pos) > min_samples_callbatch:
-            logger.debug(f"Calling variants on window {window_idx} path: {path}")
+    with torch.no_grad():
+        for path in encoded_paths:
+            # Load the data, parsing location + encoded data from file
+            data = torch.load(path, map_location='cpu')
+            chrom, start, end = data['region']
+            window_idx = int(data['window_idx'])
+            batch_encoded.append(data['encoded_pileup'])
+            batch_start_pos.extend(data['start_positions'])
+            batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+            os.unlink(path)
+            window_count += len(batch_start_pos)
+            if len(batch_start_pos) > min_samples_callbatch:
+                logger.debug(f"Calling variants on window {window_idx} path: {path}")
+                batch_count += 1
+                if len(batch_encoded) > 1:
+                    allencoded = torch.concat(batch_encoded, dim=0)
+                else:
+                    allencoded = batch_encoded[0]
+                hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+                var_records.extend(
+                    vars_hap_to_records(
+                        chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+                    )
+                )
+                batch_encoded = []
+                batch_start_pos = []
+                batch_regions = []
+
+        # Write last few
+        logger.debug(f"Calling variants on window {window_idx} path: {path}")
+        if len(batch_start_pos):
             batch_count += 1
             if len(batch_encoded) > 1:
                 allencoded = torch.concat(batch_encoded, dim=0)
@@ -389,24 +411,6 @@ def process_block(raw_regions,
                     chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
                 )
             )
-            batch_encoded = []
-            batch_start_pos = []
-            batch_regions = []
-
-    # Write last few
-    logger.debug(f"Calling variants on window {window_idx} path: {path}")
-    if len(batch_start_pos):
-        batch_count += 1
-        if len(batch_encoded) > 1:
-            allencoded = torch.concat(batch_encoded, dim=0)
-        else:
-            allencoded = batch_encoded[0]
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
-        var_records.extend(
-            vars_hap_to_records(
-                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-            )
-        )
 
     if classifier_model:
         for v in var_records:
@@ -486,7 +490,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
         'start_positions': all_starts,
         'window_idx': window_idx,
     }
-    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(4)}.pt"
+    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
     logger.debug(f"Saving data as {dest.absolute()}")
     torch.save(data, dest)
     return dest.absolute()
@@ -498,13 +502,9 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     """
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     subbatch_idx = np.zeros(len(dists), dtype=int)
-    # firstthird = np.percentile(dists, 33)
-    # secondthird = np.percentile(dists, 66)
-    # subbatch_idx[(dists >= firstthird) & (dists < secondthird)] = 1
-    # subbatch_idx[(dists >= secondthird)] = 2
 
     byregion = defaultdict(list)
-    # max_dist = max(dists)
+    max_dist = max(dists)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
@@ -512,7 +512,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
-        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(subbatch_dists) // util.TGT_KMER_SIZE + 1)
+        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
         batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
@@ -557,6 +557,9 @@ def vars_hap_to_records(
     ]
 
     for rec in vcf_records:
+        if rec.ref == rec.alts[0]:
+            logger.warn(f"Whoa, found a REF == ALT variant: {rec}")
+
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
             rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
@@ -572,6 +575,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
     seq_preds = None
     probs = None
     start = 0
+    
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
@@ -611,7 +615,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         #calledvars.append((vars_hap0, vars_hap1))
-        calledvars.append((vars_hap0[0:4], vars_hap1[0:4]))
+        calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
 
     return calledvars
 

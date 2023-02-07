@@ -219,7 +219,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         logger.debug("Stepping optimizer...")
         optimizer.step()
         if batch % 10 == 0:
-            logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
+            logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f}")
         samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
@@ -389,12 +389,12 @@ def train_epochs(epochs,
     #embed_dim_factor = 120 # was 100
 
     # 50M model params
-    # encoder_attention_heads = 8 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 8
-    # decoder_layers = 6 # was 2
-    # embed_dim_factor = 120 # was 100
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 8
+    #decoder_layers = 6 # was 2
+    #embed_dim_factor = 120 # was 100
 
 
     # 100M params
@@ -541,7 +541,7 @@ def train_epochs(epochs,
             ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
             ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.4f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
+            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
             if ENABLE_WANDB:
                 wandb.log({
@@ -635,16 +635,11 @@ def train(output_model, input_model, epochs, **kwargs):
                                      tgt_prefix="tgkmers")
 
 
-    # If you want to use augmenting loaders you need to pass '--data-augmentation" parameter during training, default is no augmentation.
-    if kwargs.get("data_augmentation"):
-        #dataloader = loader.ShorteningLoader(dataloader, seq_len=150)
-        dataloader = loader.ShufflingLoader(dataloader)
-        #dataloader = loader.DownsamplingLoader(dataloader, prob_of_read_being_dropped=0.01
 
     torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
-                 max_read_depth=100,
+                 max_read_depth=200,
                  feats_per_read=10,
                  statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),

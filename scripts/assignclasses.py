@@ -5,7 +5,8 @@ import sys
 import pysam
 from collections import defaultdict
 import gzip
-from quicksect import IntervalTree
+#from quicksect import IntervalTree
+from intervaltree import IntervalTree
 import random
 
 """
@@ -31,7 +32,7 @@ def buildforest(bedpath):
         chrom = toks[0]
         start = int(toks[1])
         end = int(toks[2])
-        forest[chrom].add(start, end)
+        forest[chrom].addi(start, end) # For quicksect, use add() not addi()
     return forest
 
 
@@ -57,7 +58,8 @@ for line in open(sys.argv[3]):
 
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
-    intervals = list(forest[chrom].search(start, end))
+    #intervals = list(forest[chrom].search(start, end))  # quicksect version
+    intervals = list(forest[chrom].overlap(start, end))  # intervaltree version
     interval_count = len(intervals)
 
     if mappability_forest:
@@ -90,7 +92,7 @@ for line in open(sys.argv[3]):
         label = "tn"
     found = False
     for i in intervals:
-        if any(i.start < v.pos < i.end for v in variants):
+        if any(i.begin < v.pos < i.end for v in variants):
             found = True
 
     if var_size > 10:
