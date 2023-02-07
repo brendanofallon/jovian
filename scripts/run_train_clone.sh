@@ -10,7 +10,7 @@
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a6000|a100"
+#SBATCH --gres=gpu:2 --constraint="a6000|a100"
 
 
 module load gcc/11.2.0 # Required for recent version of glibc / libstdc++ (GLIBCXXX errors)
@@ -52,8 +52,8 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="rollback_d200_50m_moresamps"
-RUN_NOTES="WGS, depth 200, 50M continued from epoch 12 but this time with 5 more samples worth of training data"
+RUN_NAME="rollback_d200_50m_bs1024"
+RUN_NOTES="WGS, depth 200, 50M continued from epoch 12 with batch size 1024"
 
 
 set -x
@@ -83,7 +83,7 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
-    --batch-size 512 \
+    --batch-size 1024 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
