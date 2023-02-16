@@ -10,7 +10,7 @@
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:2 --constraint="a6000|a100"
+#SBATCH --gres=gpu:1 --constraint="a6000|a100"
 
 
 module load gcc/11.2.0 # Required for recent version of glibc / libstdc++ (GLIBCXXX errors)
@@ -45,15 +45,15 @@ VAL_DIR=$HOME/storage/pregen_depth200_chr21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mq_lcbig_partial
 #PREGEN_DIR=/scratch/general/vast/u0379426/wgs_pregen_mq_lcsus
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_mq_small
-PREGEN_DIR=/scratch/general/vast/u0379426/pregen_lcbigsus_d200/
+PREGEN_DIR=/scratch/general/vast/u0379426/pregen_lcbigmap_d150/
 
 
 LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="rollback_d200_50m_bs1024"
-RUN_NOTES="WGS, depth 200, 50M continued from epoch 12 with batch size 1024"
+RUN_NAME="d150_50m_lcbigmap"
+RUN_NOTES="WGS, depth 150, lcbigmap"
 
 
 set -x
@@ -83,11 +83,10 @@ export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
-    --batch-size 1024 \
+    --batch-size 512 \
     --learning-rate $LEARNING_RATE \
     --checkpoint-freq $CHECKPOINT_FREQ \
     -o ${RUN_NAME}.model \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/rollback_d200_50m/rollback_d200_50m_epoch12.model \
     --threads 16 \
     --max-decomp-batches 8 \
     --samples-per-epoch 10000000 \

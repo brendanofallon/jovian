@@ -112,7 +112,7 @@ def load_model(model_path):
     #decoder_layers = 4 # was 2
     #embed_dim_factor = 120 # was 100
 
-    model = VarTransformer(read_depth=200,
+    model = VarTransformer(read_depth=100,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
@@ -283,7 +283,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 200
+    max_read_depth = 100
     logger.info(f"Max read depth: {max_read_depth}")
     logger.info(f"Max batch size: {max_batch_size}")
 

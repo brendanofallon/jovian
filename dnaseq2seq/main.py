@@ -101,7 +101,7 @@ def pregen(config, **kwargs):
     """
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 200)
+    reads_per_pileup = kwargs.get('read_depth', 150)
     samples_per_pos = kwargs.get('samples_per_pos', 2)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])

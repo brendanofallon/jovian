@@ -5,8 +5,8 @@ import sys
 import pysam
 from collections import defaultdict
 import gzip
-#from quicksect import IntervalTree
-from intervaltree import IntervalTree
+from quicksect import IntervalTree
+#from intervaltree import IntervalTree
 import random
 
 """
@@ -19,7 +19,7 @@ they contain snvs, indels, etc etc. Anything goes, really
 """
 
 
-def buildforest(bedpath):
+def buildforest(bedpath, minsize=0):
     forest = defaultdict(IntervalTree)
     if bedpath.endswith(".gz"):
         fh = gzip.open(bedpath, mode='rt')
@@ -32,25 +32,30 @@ def buildforest(bedpath):
         chrom = toks[0]
         start = int(toks[1])
         end = int(toks[2])
-        forest[chrom].addi(start, end) # For quicksect, use add() not addi()
+        size = end - start
+        if size >= minsize:
+            forest[chrom].add(start, end) # For quicksect, use add() not addi()
     return forest
 
 
 
-
+sys.stderr.write(f"Loading variants from {sys.argv[1]}\n")
+sys.stderr.flush()
 vcf = pysam.VariantFile(sys.argv[1])
 
-sys.stderr.write("Loading forest from " + sys.argv[2])
+sys.stderr.write("Loading forest from " + sys.argv[2] + "\n")
+sys.stderr.flush()
 forest = buildforest(sys.argv[2])
 
 mappability_forest = None
 mappability_count = 0
 if len(sys.argv) > 3:
-    sys.stderr.write(f"Loading additional interval set from {sys.argv[3]}")
-    mappability_forest = buildforest(sys.argv[3])
+    sys.stderr.write(f"Loading additional interval set from {sys.argv[3]}\n")
+    sys.stderr.flush()
+    mappability_forest = buildforest(sys.argv[3], minsize=100)
 
 
-for line in open(sys.argv[3]):
+for line in open(sys.argv[4]):
     variants = []
     toks = line.split("\t")
     start = int(toks[1])
@@ -58,12 +63,13 @@ for line in open(sys.argv[3]):
 
     chrom = toks[0]
     variants = list(vcf.fetch(chrom, start, end))
-    #intervals = list(forest[chrom].search(start, end))  # quicksect version
-    intervals = list(forest[chrom].overlap(start, end))  # intervaltree version
+    intervals = list(forest[chrom].search(start, end))  # quicksect version
+    #intervals = list(forest[chrom].overlap(start, end))  # intervaltree version
     interval_count = len(intervals)
 
     if mappability_forest:
-        mappability_count = len(list(mappability_forest[chrom].search(start, end)))
+        #mappability_count = len(list(mappability_forest[chrom].overlap(start, end))) # intervaltree
+        mappability_count = len(list(mappability_forest[chrom].search(start, end)))  # quicksect
 
 
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])
@@ -92,7 +98,7 @@ for line in open(sys.argv[3]):
         label = "tn"
     found = False
     for i in intervals:
-        if any(i.begin < v.pos < i.end for v in variants):
+        if any(i.start < v.pos < i.end for v in variants):
             found = True
 
     if var_size > 10:

@@ -233,9 +233,9 @@ def var_feats(var, aln, var_freq_file):
     feats.append(max(len(a) for a in var.alts))
     feats.append(min(var.info['QUALS']))
     feats.append(max(var.info['QUALS']))
-    #feats.append(var.info['WIN_VAR_COUNT'][0])
+    feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
-    #feats.append(var.info['WIN_TRANS_COUNT'][0])
+    feats.append(var.info['WIN_TRANS_COUNT'][0])
     feats.append(var.info['STEP_COUNT'][0])
     feats.append(var.info['CALL_COUNT'][0])
     feats.append(min(var.info['WIN_OFFSETS']))
@@ -257,9 +257,9 @@ def feat_names():
             "alt_len",
             "min_qual",
             "max_qual",
-     #       "var_count",
+            "var_count",
             "cis_count",
-     #       "trans_count",
+            "trans_count",
             "step_count",
             "call_count",
             "min_win_offset",
