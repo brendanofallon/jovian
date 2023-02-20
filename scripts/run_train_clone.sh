@@ -31,7 +31,8 @@ CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/chpc_conf3.yaml
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_wgs_readwindowfix_w150_chr21and22
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/wgs_pregen_mqfeat_chrs21and22_val
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_chrD
-VAL_DIR=$HOME/storage/pregen_depth200_chr21and22
+#VAL_DIR=$HOME/storage/pregen_depth200_chr21and22
+VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_lcbigmap_d150_chrs21and22
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/wgs_pregen_halfhuge
 #PREGEN_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/test_pregen_mqfeat_kmers
 
@@ -52,7 +53,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d150_50m_lcbigmap"
+RUN_NAME="d150_50M_lcbigmap"
 RUN_NOTES="WGS, depth 150, lcbigmap"
 
 
