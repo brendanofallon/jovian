@@ -10,7 +10,7 @@
 #SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
-#SBATCH --gres=gpu:1 --constraint="a6000|a100"
+#SBATCH --gres=gpu:2 --constraint="a6000|a100"
 
 
 module load gcc/11.2.0 # Required for recent version of glibc / libstdc++ (GLIBCXXX errors)
@@ -53,7 +53,7 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d150_50M_lcbigmap"
+RUN_NAME="d150_96m_lcbigmap"
 RUN_NOTES="WGS, depth 150, lcbigmap"
 
 

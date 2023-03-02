@@ -115,13 +115,14 @@ class VarTransformer(nn.Module):
                  p_dropout=0.1,
                  device='cpu'):
         super().__init__()
-        self.device=device
+        self.device = device
+        self.read_depth = read_depth
         self.kmer_dim = kmer_dim
         self.embed_dim = encoder_attention_heads * embed_dim_factor
         self.fc1_hidden = 12
 
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
-        self.fc2 = nn.Linear(read_depth * self.fc1_hidden, self.embed_dim)
+        self.fc2 = nn.Linear(self.read_depth * self.fc1_hidden, self.embed_dim)
 
         self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
