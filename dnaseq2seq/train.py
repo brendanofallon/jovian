@@ -20,15 +20,17 @@ from pygit2 import Repository
 import numpy as np
 import torch
 from torch import nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
-
-logger = logging.getLogger(__name__)
 
 import vcf
 import loader
 import util
 from model import VarTransformer
 from swloss import SmithWatermanLoss
+
+logger = logging.getLogger(__name__)
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -430,9 +432,8 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
     model = model.to(DEVICE)
+    model = DDP(model)
 
     model.train()
 
@@ -626,7 +627,15 @@ def train(output_model, input_model, epochs, **kwargs):
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
-
+    
+    env_dict = {
+        key: os.environ[key]
+        for key in ("MASTER_ADDR", "MASTER_PORT", "RANK", "WORLD_SIZE")
+    }
+    
+    logger.info(f"[{os.getpid()}] Initializing process group with: {env_dict}")  
+    dist.init_process_group(backend="nccl")
+    
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
     dataloader = loader.PregenLoader(DEVICE,
                                      kwargs.get("datadir"),

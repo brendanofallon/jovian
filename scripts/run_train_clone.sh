@@ -53,9 +53,13 @@ LEARNING_RATE=0.00004
 
 CHECKPOINT_FREQ=1
 
-RUN_NAME="d150_96m_lcbigmap"
-RUN_NOTES="WGS, depth 150, lcbigmap"
+RUN_NAME="ddptest_onenode"
+RUN_NOTES="testing DDP on one node"
 
+
+DDP_VARS=$( python /uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/scripts/ddp_slurm_setup.py "$@" )
+echo "DDP Vars: $DDP_VARS"
+eval $DDP_VARS
 
 set -x
 
@@ -73,12 +77,11 @@ git checkout $GIT_BRANCH
 ds2s=$(readlink -f dnaseq2seq/main.py)
 COMMIT=$(git rev-parse HEAD)
 
-
 cd ..
 
 echo "Branch: $GIT_BRANCH \n commit: $COMMIT \n" >> git_info.txt
 
-export ENABLE_WANDB=1
+export ENABLE_WANDB=0
 
 export JV_LOGLEVEL=INFO; $PYTHON $ds2s train \
     -d $PREGEN_DIR \
