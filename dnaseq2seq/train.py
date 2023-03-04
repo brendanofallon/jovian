@@ -623,6 +623,8 @@ def train(output_model, input_model, epochs, **kwargs):
     :param input_model: Start training with params from input_model
     :param epochs: How many passes over training data to conduct
     """
+
+    
     logger.info(f"Found torch device: {DEVICE}")
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
@@ -632,9 +634,9 @@ def train(output_model, input_model, epochs, **kwargs):
         key: os.environ[key]
         for key in ("MASTER_ADDR", "MASTER_PORT", "RANK", "WORLD_SIZE")
     }
-    
+    torch.cuda.set_device(os.envion['RANK'])
     logger.info(f"[{os.getpid()}] Initializing process group with: {env_dict}")  
-    dist.init_process_group(backend="nccl")
+    dist.init_process_group(backend="nccl", rank=os.environ['RANK'])
     
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
     dataloader = loader.PregenLoader(DEVICE,
@@ -645,7 +647,6 @@ def train(output_model, input_model, epochs, **kwargs):
 
 
 
-    torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=150,
