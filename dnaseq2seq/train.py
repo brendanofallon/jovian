@@ -634,8 +634,8 @@ def train(output_model, input_model, epochs, **kwargs):
         key: os.environ[key]
         for key in ("MASTER_ADDR", "MASTER_PORT", "RANK", "WORLD_SIZE")
     }
-    torch.cuda.set_device(os.environ['RANK'])
     logger.info(f"[{os.getpid()}] Initializing process group with: {env_dict}")  
+    torch.cuda.set_device(int(os.environ['RANK']))
     dist.init_process_group(backend="nccl", rank=os.environ['RANK'])
     
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
