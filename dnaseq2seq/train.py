@@ -636,7 +636,7 @@ def train(output_model, input_model, epochs, **kwargs):
     }
     logger.info(f"[{os.getpid()}] Initializing process group with: {env_dict}")  
     torch.cuda.set_device(int(os.environ['RANK']))
-    dist.init_process_group(backend="nccl", rank=os.environ['RANK'])
+    dist.init_process_group(backend="nccl", rank=int(os.environ['RANK']))
     
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
     dataloader = loader.PregenLoader(DEVICE,
