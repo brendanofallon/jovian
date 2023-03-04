@@ -37,7 +37,7 @@ ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 if ENABLE_WANDB:
     import wandb
 
-USE_DDP = int(os.environ.get('RANK', -1)) > 0 and os.environ.get('WORLD_SIZE') is not None
+USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
 MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == 0
 DEVICE = None # This is set in the 'train' method
 
@@ -633,7 +633,7 @@ def train(output_model, input_model, epochs, **kwargs):
             logger.info(f"Master process is {os.getpid()}")
         DEVICE = f"cuda:{os.environ['RANK']}"
         torch.cuda.set_device(DEVICE)
-        logger.info(f"DDP: CUDA device {DEVICE} name: {torch.cuda.get_device_name()}")
+        logger.info(f"DDP [{os.getpid()}] CUDA device {DEVICE} name: {torch.cuda.get_device_name()}")
         dist.init_process_group(backend="nccl")
     else:
         logger.info(f"Configuring for non-DDP: torch device: {DEVICE}")
