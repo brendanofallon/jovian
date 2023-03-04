@@ -34,7 +34,7 @@ from train import train
 from call import call
 
 
-logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
+logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
                     level=os.environ.get('JV_LOGLEVEL', logging.INFO)) # handlers=[RichHandler()])
 

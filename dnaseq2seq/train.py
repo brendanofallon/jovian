@@ -632,6 +632,7 @@ def train(output_model, input_model, epochs, **kwargs):
         if MASTER_PROCESS:
             logger.info(f"Master process is {os.getpid()}")
         DEVICE = f"cuda:{os.environ['RANK']}"
+        logger.info(f"Setting cuda device to {DEVICE}")
         torch.cuda.set_device(DEVICE)
         logger.info(f"DDP [{os.getpid()}] CUDA device {DEVICE} name: {torch.cuda.get_device_name()}")
         dist.init_process_group(backend="nccl")
