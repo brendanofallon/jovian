@@ -37,8 +37,9 @@ ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 if ENABLE_WANDB:
     import wandb
 
-
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
+USE_DDP = os.environ.get('RANK', -1) > 0 and os.environ.get('WORLD_SIZE') > 0
+MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == 0
+DEVICE = None # This is set in the 'train' method
 
 
 class TrainLogger:
@@ -624,19 +625,22 @@ def train(output_model, input_model, epochs, **kwargs):
     :param epochs: How many passes over training data to conduct
     """
 
-    
-    logger.info(f"Found torch device: {DEVICE}")
-    if 'cuda' in str(DEVICE):
-        for idev in range(torch.cuda.device_count()):
-            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
-    
-    env_dict = {
-        key: os.environ[key]
-        for key in ("MASTER_ADDR", "MASTER_PORT", "RANK", "WORLD_SIZE")
-    }
-    logger.info(f"[{os.getpid()}] Initializing process group with: {env_dict}")  
-    torch.cuda.set_device(int(os.environ['RANK']))
-    dist.init_process_group(backend="nccl", rank=int(os.environ['RANK']))
+    global DEVICE
+
+    if USE_DDP:
+        logger.info(f"Using DDP: Master addr: {os.environ['MASTER_ADDR']}, port: {os.environ['MASTER_PORT']}, global rank: {os.environ['RANK']}, world size: {os.environ['WORLD_SIZE']}") 
+        if MASTER_PROCESS:
+            logger.info(f"Master process is {os.getpid()}")
+        DEVICE = f"cuda:{os.environ['RANK']}"
+        torch.cuda.set_device(DEVICE)
+        logger.info(f"DDP: CUDA device {DEVICE} name: {torch.cuda.get_device_name()}")
+        dist.init_process_group(backend="nccl")
+    else:
+        logger.info(f"Configuring for non-DDP: torch device: {DEVICE}")
+        if 'cuda' in str(DEVICE):
+            for idev in range(torch.cuda.device_count()):
+                logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
+        DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
     
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
     dataloader = loader.PregenLoader(DEVICE,

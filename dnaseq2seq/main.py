@@ -40,7 +40,6 @@ logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s'
 
 logger = logging.getLogger(__name__)
 
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
