@@ -37,7 +37,7 @@ ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 if ENABLE_WANDB:
     import wandb
 
-USE_DDP = os.environ.get('RANK', -1) > 0 and os.environ.get('WORLD_SIZE') > 0
+USE_DDP = int(os.environ.get('RANK', -1)) > 0 and os.environ.get('WORLD_SIZE') is not None
 MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == 0
 DEVICE = None # This is set in the 'train' method
 
