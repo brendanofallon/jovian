@@ -433,8 +433,15 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
-    model = model.to(DEVICE)
-    model = DDP(model)
+    if USE_DDP:
+        rank = dist.get_rank()
+        device_id = rank % torch.cuda.device_count()
+        logger.info(f"Creating DDP model with rank {rank} and device_id: {device_id}")
+        model = model.to(device_id)
+        model = DDP(model, device_ids=[device_id])
+    else:
+        model = model.to(DEVICE)
+
 
     model.train()
 
