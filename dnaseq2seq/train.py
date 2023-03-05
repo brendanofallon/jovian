@@ -641,7 +641,7 @@ def train(output_model, input_model, epochs, **kwargs):
         else:
             logger.info(f"Process {os.getpid()} is NOT the master")
         logger.info(f"Number of available CUDA devices: {torch.cuda.device_count()}")
-        DEVICE = f"cuda" #:{os.environ['RANK']}"
+        DEVICE = f"cuda:{os.environ['RANK']}"
         logger.info(f"Setting cuda device to {DEVICE}")
         torch.cuda.set_device(DEVICE)
         logger.info(f"DDP [{os.getpid()}] CUDA device {DEVICE} name: {torch.cuda.get_device_name()}")
