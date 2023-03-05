@@ -40,7 +40,6 @@ set -x
 
 export ENABLE_WANDB=0
 
-echo "Hello I am in $(pwd)"
 
 export JV_LOGLEVEL=INFO; $PYTHON dnaseq2seq/dnaseq2seq/main.py train \
     -d $PREGEN_DIR \
