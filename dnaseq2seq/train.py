@@ -32,14 +32,15 @@ from swloss import SmithWatermanLoss
 
 logger = logging.getLogger(__name__)
 
-ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
+USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
+MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
+DEVICE = None # This is set in the 'train' method
+
+ENABLE_WANDB = os.getenv('ENABLE_WANDB', False) and MASTER_PROCESS
 
 if ENABLE_WANDB:
     import wandb
 
-USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
-MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
-DEVICE = None # This is set in the 'train' method
 
 
 class TrainLogger:
