@@ -63,7 +63,7 @@ for line in open(sys.argv[3]):
     interval_count = len(intervals)
 
     if mappability_forest:
-        mappability_count = len(list(mappability_forest[chrom].search(start, end)))
+        mappability_count = len(list(mappability_forest[chrom].overlap(start, end)))
 
 
     snv_count = len([v for v in variants if len(v.ref) == 1 and len(v.alts[0]) == 1])

@@ -28,7 +28,6 @@ import vcf
 import loader
 import util
 from model import VarTransformer
-from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
