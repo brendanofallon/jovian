@@ -34,13 +34,12 @@ from train import train
 from call import call
 
 
-logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
+logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
                     level=os.environ.get('JV_LOGLEVEL', logging.INFO)) # handlers=[RichHandler()])
 
 logger = logging.getLogger(__name__)
 
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
@@ -101,7 +100,7 @@ def pregen(config, **kwargs):
     """
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 200)
+    reads_per_pileup = kwargs.get('read_depth', 150)
     samples_per_pos = kwargs.get('samples_per_pos', 2)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])

@@ -314,7 +314,7 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
 def extract_feats(vcf, aln, var_freq_file):
     allfeats = []
     featstrs = []
-    for var in pysam.VariantFile(vcf, ignore_truncation=True):
+    for var in vcf:
         feats = var_feats(var, aln, var_freq_file)
         allfeats.append(feats)
         fstr = ",".join(str(x) for x in feats)
@@ -349,7 +349,7 @@ def _process_sample(args):
     if type(tps) == str:
         tps = [tps]
     for tp in tps:
-        vcfiter = vcf_sampling_iter(tp, max_snvs=1000, max_dels=1000, max_ins=1000, skip=random.randint(0, 10000))
+        vcfiter = vcf_sampling_iter(tp, max_snvs=3000, max_dels=1000, max_ins=1000, skip=random.randint(0, 10000))
         tpf, tpfeatstrs = extract_feats(vcfiter, aln, var_freq_file)
         tp_feats.extend(tpf)
         featstrs.extend(tpfeatstrs)

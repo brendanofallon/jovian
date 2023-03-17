@@ -20,15 +20,17 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_multindel_splits_chrsE.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_bigvars_conf.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbig_sus_chrs21and22.yaml
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbig_sus_5more_chrsE.yaml
+#CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbig_sus_5more_chrsE.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/decoder_fpfn_chr1_conf.yaml
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbigmap_chrs21and22.yaml
 
-DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_depth200_5more_chrsE
+
+DEST=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/pregen_lcbigmap_d150_chrs21and22
 
 BATCH_SIZE=512
 
 mkdir -p $DEST
 cp $CONF $DEST/
 
-$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 6 --batch-size $BATCH_SIZE > $DEST/stdout.log 
+$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 28 --batch-size $BATCH_SIZE > $DEST/stdout.log 
 
