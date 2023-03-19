@@ -199,7 +199,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, epoch_times
 
 
-def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
+def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule_func=None):
 
     samples_seen = 0
     loss_sum = 0
@@ -223,6 +223,11 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         optimizer.step()
         if batch % 10 == 0:
             logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f}")
+        if lr_schedule_func and batch % 10 == 0:
+            lr = lr_schedule_func(samples_seen)
+            logger.info(f"Setting learning rate to {lr :.6f}")
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
         samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
@@ -377,7 +382,6 @@ def train_epochs(epochs,
                  model_dest=None,
                  val_dir=None,
                  batch_size=64,
-                 lossfunc='ce',
                  wandb_run_name=None,
                  wandb_notes="",
                  cl_args = {},
@@ -453,26 +457,11 @@ def train_epochs(epochs,
 
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=init_learning_rate, betas=(0.9, 0.999))
 
-    if lossfunc == 'ce':
-        logger.info("Creating N.L.L. Loss loss function")
-        criterion = nn.NLLLoss()
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    elif lossfunc == 'sw':
-        gap_open_penalty = -5
-        gap_exend_penalty = -1
-        temperature = 1.0
-        trim_width = 100
-        logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
-        criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
-                                    gap_extend_penalty=gap_exend_penalty,
-                                    temperature=temperature,
-                                    trim_width=trim_width,
-                                    device=DEVICE,
-                                    reduction=None,
-                                    window_mode="random")
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
+    criterion = nn.NLLLoss()
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
+    scheduler = util.make_lr_scheduler(init_learning_rate, init_learning_rate / 3.0, 1e6, 20e6)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -539,16 +528,20 @@ def train_epochs(epochs,
         logger.info(f"Pulled {len(valpaths)} samples to use for validation")
 
     try:
+        sample_iter = iter_indefinitely(dataloader, batch_size)
         for epoch in range(epochs):
             starttime = datetime.now()
             if samples_per_epoch > 0:
                 loss = train_n_samples(model,
                                   optimizer,
                                   criterion,
-                                  iter_indefinitely(dataloader, batch_size),
-                                  samples_per_epoch)
+                                  sample_iter,
+                                  samples_per_epoch,
+                                  scheduler)
             else:
                 loss, _ = train_epoch(model, optimizer, criterion, dataloader, batch_size)
+
+
 
             elapsed = datetime.now() - starttime
 
