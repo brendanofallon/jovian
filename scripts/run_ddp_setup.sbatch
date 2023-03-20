@@ -33,7 +33,7 @@ cd $RUN_NAME
 
 git clone $REPO_BASE
 
-cd dnaseq2seq
+cd jovian
 git checkout $GIT_BRANCH
 COMMIT=$(git rev-parse HEAD)
 

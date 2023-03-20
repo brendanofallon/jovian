@@ -676,7 +676,6 @@ def train(output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
-                 lossfunc=kwargs.get('loss'),
                  wandb_run_name=kwargs.get("wandb_run_name"),
                  wandb_notes=kwargs.get("wandb_notes"),
                  cl_args=kwargs.get("cl_args"),

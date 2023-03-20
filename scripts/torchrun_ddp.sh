@@ -28,5 +28,5 @@ echo "Master addr: $MASTER_ADDR, master port: $MASTER_PORT"
 
 export ENABLE_WANDB=1
 
-torchrun --nnodes=2 --nproc_per_node=2 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
+$HOME/miniconda3/envs/pt2/bin/torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
 
