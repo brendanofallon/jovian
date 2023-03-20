@@ -199,7 +199,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, epoch_times
 
 
-def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule_func=None):
+def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None):
 
     samples_seen = 0
     loss_sum = 0
@@ -221,11 +221,12 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         logger.debug("Stepping optimizer...")
         optimizer.step()
+        lr_schedule.add_iters(src.shape[0])
         if batch % 10 == 0:
             logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f}")
-        if lr_schedule_func and batch % 10 == 0:
-            lr = lr_schedule_func(samples_seen)
-            logger.info(f"Setting learning rate to {lr :.6f}")
+        if lr_schedule and batch % 10 == 0:
+            lr = lr_schedule.get_lr()
+            logger.info(f"LR samples seen: {lr_schedule.iters}, learning rate: {lr_schedule.get_last_lr() :.6f}")
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
         samples_seen += src.shape[0]
@@ -461,7 +462,7 @@ def train_epochs(epochs,
 
     criterion = nn.NLLLoss()
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    scheduler = util.make_lr_scheduler(init_learning_rate, init_learning_rate / 3.0, 1e6, 20e6)
+    scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 3.0, warmup_iters=1e6, lr_decay_iters=20e6)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
