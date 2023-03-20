@@ -15,6 +15,8 @@ import logging
 import shutil
 from itertools import chain
 
+from torch.nn.parallel import DistributedDataParallel
+
 logger = logging.getLogger(__name__)
 
 
@@ -333,7 +335,7 @@ def predict_sequence(src, model, n_output_toks, device):
     """
     Generate a predicted sequence with next-word prediction be repeatedly calling the model
     """
-    if isinstance(model, nn.DataParallel):
+    if isinstance(model, nn.DataParallel) or isinstance(model, DistributedDataParallel):
         model = model.module
     start = time.perf_counter()
     predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
