@@ -20,7 +20,7 @@ export MASTER_PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)
 
 
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/
-REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
+REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
