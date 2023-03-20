@@ -358,7 +358,7 @@ class WarmupCosineLRScheduler:
     def __init__(self, max_lr, min_lr, warmup_iters, lr_decay_iters):
         self.max_lr = max_lr
         self.min_lr = min_lr
-        self.warmup_ites = warmup_iters
+        self.warmup_iters = warmup_iters
         self.lr_decay_iters = lr_decay_iters
         self.iters = 0
         self.last_lr = float("NaN")
@@ -387,7 +387,4 @@ class WarmupCosineLRScheduler:
         self.last_lr = lr
         return lr
 
-def make_lr_scheduler(learning_rate, min_lr, warmup_iters, lr_decay_iters):
 
-
-    return get_lr
