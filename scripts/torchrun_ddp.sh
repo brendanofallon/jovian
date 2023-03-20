@@ -9,14 +9,13 @@ VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen_lcbigmap_d150_ch
 PREGEN_DIR=/scratch/general/vast/u0379426/pregen_lcbigmap_d150/
 
 
-RUN_SCRIPT=$HOME/src/dnaseq2seq/scripts/run_train_clone.sh
 
-RUNCMD="dnaseq2seq/dnaseq2seq/main.py train \
+RUNCMD="jovian/dnaseq2seq/main.py train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 25 \
-    --batch-size 128 \
-    --learning-rate 0.00003 \
+    --batch-size 256 \
+    --learning-rate 0.00006 \
     --checkpoint-freq 1 \
     -o ${RUN_NAME}.model \
     --threads 16 \
