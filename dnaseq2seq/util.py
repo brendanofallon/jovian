@@ -375,7 +375,7 @@ class WarmupCosineLRScheduler:
     def get_lr(self):
         # 1) linear warmup for warmup_iters steps
         if self.iters < self.warmup_iters:
-            return self.learning_rate * (self.iters+1) / (self.warmup_iters)
+            return self.max_lr * (self.iters+1) / (self.warmup_iters)
         # 2) if it > lr_decay_iters, return min learning rate
         if self.iters > self.lr_decay_iters:
             return self.min_lr
@@ -383,7 +383,7 @@ class WarmupCosineLRScheduler:
         decay_ratio = (self.iters - self.warmup_iters) / (self.lr_decay_iters - self.warmup_iters)
         assert 0 <= decay_ratio <= 1
         coeff = 0.5 * (1.0 + np.cos(np.pi * decay_ratio))  # coeff ranges 0..1
-        lr = self.min_lr + coeff * (self.learning_rate - self.min_lr)
+        lr = self.min_lr + coeff * (self.max_lr - self.min_lr)
         self.last_lr = lr
         return lr
 
