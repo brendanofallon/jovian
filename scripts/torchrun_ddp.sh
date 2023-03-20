@@ -20,7 +20,7 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
-    --samples-per-epoch 10000000 \
+    --samples-per-epoch 1000000 \
     --wandb-run-name $RUN_NAME"
 
 echo "Full run cmd: $RUNCMD"
