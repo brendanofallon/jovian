@@ -24,7 +24,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="grrrrfixbar"
+export RUN_NAME="grrrrfixbaz"
 export RUN_NOTES="Test AdamW optimizer and ramping up LR"
 
 cd $ROOT_DIR
