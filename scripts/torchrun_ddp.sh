@@ -15,7 +15,7 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     --val-dir $VAL_DIR \
     -n 25 \
     --batch-size 256 \
-    --learning-rate 0.00006 \
+    --learning-rate 0.00008 \
     --checkpoint-freq 1 \
     -o ${RUN_NAME}.model \
     --threads 16 \
