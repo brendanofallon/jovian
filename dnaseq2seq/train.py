@@ -574,7 +574,6 @@ def train_epochs(epochs,
                     "epochtime": elapsed.total_seconds(),
                 })
 
-            scheduler.step()
             trainlogger.log({
                 "epoch": epoch,
                 "trainingloss": loss,
