@@ -574,23 +574,24 @@ def train_epochs(epochs,
                     "epochtime": elapsed.total_seconds(),
                 })
 
-            trainlogger.log({
-                "epoch": epoch,
-                "trainingloss": loss,
-                "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
-                "mean_var_count": var_count0,
-                "ppa_snv": ppa_snv,
-                "ppa_ins": ppa_ins,
-                "ppa_dels": ppa_dels,
-                "ppv_ins": ppv_ins,
-                "ppv_snv": ppv_snv,
-                "ppv_dels": ppv_dels,
-                "learning_rate": scheduler.get_last_lr()[0],
-                "epochtime": elapsed.total_seconds(),
-            })
+            if MASTER_PROCESS:
+                trainlogger.log({
+                    "epoch": epoch,
+                    "trainingloss": loss,
+                    "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
+                    "mean_var_count": var_count0,
+                    "ppa_snv": ppa_snv,
+                    "ppa_ins": ppa_ins,
+                    "ppa_dels": ppa_dels,
+                    "ppv_ins": ppv_ins,
+                    "ppv_snv": ppv_snv,
+                    "ppv_dels": ppv_dels,
+                    "learning_rate": scheduler.get_last_lr()[0],
+                    "epochtime": elapsed.total_seconds(),
+                })
 
 
-            if epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
+            if MASTER_PROCESS and epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
