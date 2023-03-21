@@ -20,7 +20,7 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
-    --samples-per-epoch 1000000 \
+    --samples-per-epoch 100000 \
     --wandb-run-name $RUN_NAME"
 
 echo "Full run cmd: $RUNCMD"
@@ -28,5 +28,5 @@ echo "Master addr: $MASTER_ADDR, master port: $MASTER_PORT"
 
 export ENABLE_WANDB=1
 
-$HOME/miniconda3/envs/pt2/bin/torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
+$HOME/miniconda3/envs/jv/bin/torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
 
