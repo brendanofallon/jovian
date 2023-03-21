@@ -570,7 +570,7 @@ def train_epochs(epochs,
                     "accuracy/ppv dels": ppv_dels,
                     "accuracy/ppv ins": ppv_ins,
                     "accuracy/ppv snv": ppv_snv,
-                    "learning_rate": scheduler.get_last_lr()[0],
+                    "learning_rate": scheduler.get_last_lr(),
                     "epochtime": elapsed.total_seconds(),
                 })
 
@@ -586,7 +586,7 @@ def train_epochs(epochs,
                     "ppv_ins": ppv_ins,
                     "ppv_snv": ppv_snv,
                     "ppv_dels": ppv_dels,
-                    "learning_rate": scheduler.get_last_lr()[0],
+                    "learning_rate": scheduler.get_last_lr(),
                     "epochtime": elapsed.total_seconds(),
                 })
 
