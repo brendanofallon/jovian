@@ -595,7 +595,7 @@ def train_epochs(epochs,
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
-                m = model.module if (isinstance(model, nn.DataParallel) or isinstance DDP) else model
+                m = model.module if (isinstance(model, nn.DataParallel) or isinstance(model, DDP)) else model
                 torch.save(m.state_dict(), checkpoint_name)
 
         logger.info(f"Training completed after {epoch} epochs")
