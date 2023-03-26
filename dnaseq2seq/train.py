@@ -462,7 +462,7 @@ def train_epochs(epochs,
 
     criterion = nn.NLLLoss()
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 3.0, warmup_iters=1e6, lr_decay_iters=20e6)
+    scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 2.0, warmup_iters=1e6, lr_decay_iters=20e6)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -595,7 +595,7 @@ def train_epochs(epochs,
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
-                m = model.module if isinstance(model, nn.DataParallel) else model
+                m = model.module if (isinstance(model, nn.DataParallel) or isinstance DDP) else model
                 torch.save(m.state_dict(), checkpoint_name)
 
         logger.info(f"Training completed after {epoch} epochs")

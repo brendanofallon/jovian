@@ -13,14 +13,15 @@ PREGEN_DIR=/scratch/general/vast/u0379426/pregen_lcbigmap_d150/
 RUNCMD="jovian/dnaseq2seq/main.py train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
-    -n 25 \
+    -n 100 \
     --batch-size 256 \
-    --learning-rate 0.00008 \
+    --learning-rate 0.00005 \
     --checkpoint-freq 1 \
     -o ${RUN_NAME}.model \
     --threads 16 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/96M_rampLR_lcbigmap2X_fixalltheissues/96M_rampLR_lcbigmap2X_fixalltheissues_epoch24_unwrapped.model \
     --max-decomp-batches 8 \
-    --samples-per-epoch 10000 \
+    --samples-per-epoch 1000000 \
     --wandb-run-name $RUN_NAME"
 
 echo "Full run cmd: $RUNCMD"
