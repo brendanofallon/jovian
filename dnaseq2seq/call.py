@@ -535,6 +535,36 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     return hap0, hap1
 
 
+def merge_multialts(reference, v0, v1):
+    """
+    Merge two VcfVar objects into a single one with two alts
+
+    ATCT   G
+    A     GCAC
+      -->
+    ATCT   G,GCACT
+
+    """
+    assert v0.pos == v1.pos
+    assert v0.het and v1.het
+    if v0.ref == v1.ref:
+        v0.alts.append(v1.alt)
+        v0.qual = (v0.qual + v1.qual) / 2  # Average quality??
+        v0.genotype = (1,2)
+        return v0
+
+    else:
+        shorter, longer = sorted([v0, v1], key=lambda x: len(x.ref))
+        extra_ref = longer.ref[len(shorter.ref):]
+        newalt = shorter.alts[0] + extra_ref
+        longer.alts.append(newalt)
+        longer.qual = (longer.qual + shorter.qual) / 2
+        longer.genotype = (1, 2)
+        return longer
+
+
+
+
 def vars_hap_to_records(
     chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
 ):
@@ -550,10 +580,23 @@ def vars_hap_to_records(
         reference=reference
     )
 
+    bypos = defaultdict(list)
+    for v in vcf_vars:
+        bypos[v.pos].append(v)
+
+    mergedvars = []
+    for pos, vars in bypos.items():
+        if len(vars) == 2:
+            multialt = merge_multialts(reference, vars[0], vars[1])
+            mergedvars.append(multialt)
+        else:
+            mergedvars.append(vars[0])
+
+
     # covert variants to pysam vcf records
     vcf_records = [
         vcf.create_vcf_rec(var, vcf_template)
-        for var in sorted(vcf_vars, key=lambda x: x.pos)
+        for var in sorted(mergedvars, key=lambda x: x.pos)
     ]
 
     for rec in vcf_records:
