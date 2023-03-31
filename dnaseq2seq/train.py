@@ -28,7 +28,6 @@ import vcf
 import loader
 import util
 from model import VarTransformer
-from swloss import SmithWatermanLoss
 
 ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
 
@@ -442,20 +441,8 @@ def train_epochs(epochs,
         logger.info("Creating N.L.L. Loss loss function")
         criterion = nn.NLLLoss()
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    elif lossfunc == 'sw':
-        gap_open_penalty = -5
-        gap_exend_penalty = -1
-        temperature = 1.0
-        trim_width = 100
-        logger.info(f"Creating Smith-Waterman loss function with gap open: {gap_open_penalty} extend: {gap_exend_penalty} temp: {temperature:.4f}, trim_width: {trim_width}")
-        criterion = SmithWatermanLoss(gap_open_penalty=gap_open_penalty,
-                                    gap_extend_penalty=gap_exend_penalty,
-                                    temperature=temperature,
-                                    trim_width=trim_width,
-                                    device=DEVICE,
-                                    reduction=None,
-                                    window_mode="random")
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.90)
+    else:
+        raise NotImplemented("Only cross entropy loss supported for now")
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
