@@ -535,14 +535,14 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     return hap0, hap1
 
 
-def merge_multialts(v0, v1):
+def merge_multialts(reference, v0, v1):
     """
     Merge two VcfVar objects into a single one with two alts
 
     ATCT   G
-    AT     G
+    A     GCAC
       -->
-    ATCT   G,GCT
+    ATCT   G,GCACT
 
     """
     assert v0.pos == v1.pos
@@ -552,19 +552,15 @@ def merge_multialts(v0, v1):
         v0.qual = (v0.qual + v1.qual) / 2  # Average quality??
         v0.genotype = (1,2)
         return v0
-    elif v0.alts[0] == v1.alts[0]:
-        longer, shorter = sorted([v0, v1], key=lambda x: len(x.ref))
+
+    else:
+        shorter, longer = sorted([v0, v1], key=lambda x: len(x.ref))
         extra_ref = longer.ref[len(shorter.ref):]
         newalt = shorter.alts[0] + extra_ref
         longer.alts.append(newalt)
         longer.qual = (longer.qual + shorter.qual) / 2
         longer.genotype = (1, 2)
         return longer
-    else:
-        raise Exception(f"What? Two variant with different refs and alts at same position: {v0} and {v1}")
-
-
-
 
 
 
@@ -591,7 +587,7 @@ def vars_hap_to_records(
     mergedvars = []
     for pos, vars in bypos.items():
         if len(vars) == 2:
-            multialt = merge_multialts(vars[0], vars[1])
+            multialt = merge_multialts(reference, vars[0], vars[1])
             mergedvars.append(multialt)
         else:
             mergedvars.append(vars[0])

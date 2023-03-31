@@ -378,7 +378,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             var.filter.append("SingleCallHom")
 
         # adjust insertions and deletions so no blank ref or alt
-        if var.ref == "" or any(v == "" for v in var.alts[0]):
+        if var.ref == "" or any(v == "" for v in var.alts):
             leading_ref_base = reference.fetch(reference=var.chrom, start=var.pos - 2, end=var.pos - 1)
             var.pos = var.pos - 1
             var.ref = leading_ref_base + var.ref
