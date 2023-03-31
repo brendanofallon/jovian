@@ -53,7 +53,7 @@ class VcfVar:
     chrom: str
     pos: int
     ref: str
-    alt: str
+    # alt: str
     quals: list
     qual: float
     filter: list
@@ -72,6 +72,11 @@ class VcfVar:
     genotype: tuple
     het: bool
     duplicate: bool
+    alts: list
+
+    @property
+    def alt(self):
+        return self.alts[0]
 
 
 def _cigtups(cigstr):
@@ -273,6 +278,7 @@ def var_depth(var, chrom, aln):
 def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=30):
     """
     From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
+    This creates VcfVar objects, which are almost like pysam.VariantRecord objects but not quite
     :param vars_hap0:
     :param vars_hap1:
     :param chrom:
@@ -290,7 +296,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             chrom=chrom,
             pos=var[0] + 1,
             ref=var[1],
-            alt=var[2],
+            alts=[var[2]],
             quals=[call.qual for call in vars_hap0[var]],
             qual=float(np.mean([call.qual for call in vars_hap0[var]])),
             filter=[],
@@ -319,7 +325,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             chrom=chrom,
             pos=var[0] + 1,
             ref=var[1],
-            alt=var[2],
+            alts=[var[2]],
             quals=[call.qual for call in vars_hap1[var]],
             qual=float(np.mean([call.qual for call in vars_hap1[var]])),
             filter=[],
@@ -357,8 +363,9 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
 
     # combine haplotypes
     assert len(set(vcfvars_hap0) & set(vcfvars_hap1)) == 0, (
-        "There should be no vars shared between vcfvars_hap0 and vcfvars_hap1 (hom vars should all be in hap0"
+        "There should be no vars shared between vcfvars_hap0 and vcfvars_hap1 (hom vars should all be in hap0)"
     )
+
     vcfvars = {**vcfvars_hap0, **vcfvars_hap1}
 
     for key, var in vcfvars.items():
@@ -371,11 +378,13 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             var.filter.append("SingleCallHom")
 
         # adjust insertions and deletions so no blank ref or alt
-        if var.ref == "" or var.alt == "":
+        if var.ref == "" or any(v == "" for v in var.alts[0]):
             leading_ref_base = reference.fetch(reference=var.chrom, start=var.pos - 2, end=var.pos - 1)
             var.pos = var.pos - 1
             var.ref = leading_ref_base + var.ref
-            var.alt = leading_ref_base + var.alt
+            newalts = [leading_ref_base + a for a in var.alts]
+            var.alts = newalts
+
 
     # go back and set phased to true if more than one het variant remains
     het_vcfvars = [k for k, v in vcfvars.items() if v.het]
@@ -491,7 +500,7 @@ def create_vcf_rec(var, vcf_file):
     if np.isnan(var.qual):
         logger.error(f"Quality is NaN for variant {var}")
     r = vcf_file.new_record(contig=var.chrom, start=var.pos - 1, stop=var.pos - 1 + len(var.ref), 
-                       alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
+                       alleles=(var.ref, *var.alts), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
     r.samples['sample'].phased = var.phased  # note: need to set phased after setting genotype
