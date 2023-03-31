@@ -20,22 +20,26 @@ from pygit2 import Repository
 import numpy as np
 import torch
 from torch import nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
-
-logger = logging.getLogger(__name__)
 
 import vcf
 import loader
 import util
 from model import VarTransformer
 
-ENABLE_WANDB = os.getenv('ENABLE_WANDB', False)
+logger = logging.getLogger(__name__)
+
+USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
+MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
+DEVICE = None # This is set in the 'train' method
+
+ENABLE_WANDB = os.getenv('ENABLE_WANDB', False) and MASTER_PROCESS
 
 if ENABLE_WANDB:
     import wandb
 
-
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 
 class TrainLogger:
@@ -195,7 +199,7 @@ def train_epoch(model, optimizer, criterion, loader, batch_size):
     return epoch_loss_sum, epoch_times
 
 
-def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
+def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None):
 
     samples_seen = 0
     loss_sum = 0
@@ -217,8 +221,14 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples):
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         logger.debug("Stepping optimizer...")
         optimizer.step()
+        lr_schedule.add_iters(src.shape[0])
         if batch % 10 == 0:
             logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f}")
+        if lr_schedule and batch % 10 == 0:
+            lr = lr_schedule.get_lr()
+            logger.info(f"LR samples seen: {lr_schedule.iters}, learning rate: {lr_schedule.get_last_lr() :.6f}")
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
         samples_seen += src.shape[0]
         if samples_seen > num_samples:
             return loss_sum
@@ -373,7 +383,6 @@ def train_epochs(epochs,
                  model_dest=None,
                  val_dir=None,
                  batch_size=64,
-                 lossfunc='ce',
                  wandb_run_name=None,
                  wandb_notes="",
                  cl_args = {},
@@ -404,6 +413,14 @@ def train_epochs(epochs,
     decoder_layers = 10 # was 2
     embed_dim_factor = 160 # was 100
 
+    # 200M params
+    #encoder_attention_heads = 12 # was 4
+    #decoder_attention_heads = 13 # Must evenly divide 260
+    #dim_feedforward = 1024
+    #encoder_layers = 10
+    #decoder_layers = 10 # was 2
+    #embed_dim_factor = 180 # was 100
+
     # Small, for testing params
     #encoder_attention_heads = 2  # was 4
     #decoder_attention_heads = 2  # was 4
@@ -429,20 +446,24 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
-    model = model.to(DEVICE)
+    if USE_DDP:
+        rank = dist.get_rank()
+        device_id = rank % torch.cuda.device_count()
+        logger.info(f"Creating DDP model with rank {rank} and device_id: {device_id}")
+        model = model.to(device_id)
+        model = DDP(model, device_ids=[device_id])
+    else:
+        model = model.to(DEVICE)
+
 
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=init_learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=init_learning_rate, betas=(0.9, 0.999))
 
-    if lossfunc == 'ce':
-        logger.info("Creating N.L.L. Loss loss function")
-        criterion = nn.NLLLoss()
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    else:
-        raise NotImplemented("Only cross entropy loss supported for now")
+    criterion = nn.NLLLoss()
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
+    scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 2.0, warmup_iters=1e6, lr_decay_iters=20e6)
+
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -509,16 +530,20 @@ def train_epochs(epochs,
         logger.info(f"Pulled {len(valpaths)} samples to use for validation")
 
     try:
+        sample_iter = iter_indefinitely(dataloader, batch_size)
         for epoch in range(epochs):
             starttime = datetime.now()
             if samples_per_epoch > 0:
                 loss = train_n_samples(model,
                                   optimizer,
                                   criterion,
-                                  iter_indefinitely(dataloader, batch_size),
-                                  samples_per_epoch)
+                                  sample_iter,
+                                  samples_per_epoch,
+                                  scheduler)
             else:
                 loss, _ = train_epoch(model, optimizer, criterion, dataloader, batch_size)
+
+
 
             elapsed = datetime.now() - starttime
 
@@ -609,11 +634,30 @@ def train(output_model, input_model, epochs, **kwargs):
     :param input_model: Start training with params from input_model
     :param epochs: How many passes over training data to conduct
     """
-    logger.info(f"Found torch device: {DEVICE}")
-    if 'cuda' in str(DEVICE):
-        for idev in range(torch.cuda.device_count()):
-            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
 
+    global DEVICE
+
+    if USE_DDP:
+        logger.info(f"Using DDP: Master addr: {os.environ['MASTER_ADDR']}, port: {os.environ['MASTER_PORT']}, global rank: {os.environ['RANK']}, world size: {os.environ['WORLD_SIZE']}") 
+        if MASTER_PROCESS:
+            logger.info(f"Master process is {os.getpid()}")
+        else:
+            logger.info(f"Process {os.getpid()} is NOT the master")
+        logger.info(f"Number of available CUDA devices: {torch.cuda.device_count()}")
+        dist.init_process_group(backend="nccl")
+        rank = dist.get_rank()
+        device_id = rank % torch.cuda.device_count()
+        DEVICE = f"cuda:{device_id}"
+        logger.info(f"Setting cuda device to {DEVICE}")
+        torch.cuda.set_device(DEVICE)
+        logger.info(f"DDP [{os.getpid()}] CUDA device {DEVICE} name: {torch.cuda.get_device_name()}")
+    else:
+        logger.info(f"Configuring for non-DDP: torch device: {DEVICE}")
+        if 'cuda' in str(DEVICE):
+            for idev in range(torch.cuda.device_count()):
+                logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
+        DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
+    
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
     dataloader = loader.PregenLoader(DEVICE,
                                      kwargs.get("datadir"),
@@ -623,7 +667,6 @@ def train(output_model, input_model, epochs, **kwargs):
 
 
 
-    torch.cuda.empty_cache()   
     train_epochs(epochs,
                  dataloader,
                  max_read_depth=150,

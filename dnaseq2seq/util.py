@@ -352,3 +352,42 @@ def predict_sequence(src, model, n_output_toks, device):
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]
 
+
+class WarmupCosineLRScheduler:
+
+    def __init__(self, max_lr, min_lr, warmup_iters, lr_decay_iters):
+        self.max_lr = max_lr
+        self.min_lr = min_lr
+        self.warmup_ites = warmup_iters
+        self.lr_decay_iters = lr_decay_iters
+        self.iters = 0
+        self.last_lr = float("NaN")
+
+    def add_iters(self, iters):
+        self.iters += iters
+
+    def set_iters(self, iters):
+        self.iters = iters
+
+    def get_last_lr(self):
+        return self.last_lr
+
+    def get_lr(self):
+        # 1) linear warmup for warmup_iters steps
+        if self.iters < self.warmup_iters:
+            return self.learning_rate * (self.iters+1) / (self.warmup_iters)
+        # 2) if it > lr_decay_iters, return min learning rate
+        if self.iters > self.lr_decay_iters:
+            return self.min_lr
+        # 3) in between, use cosine decay down to min learning rate
+        decay_ratio = (self.iters - self.warmup_iters) / (self.lr_decay_iters - self.warmup_iters)
+        assert 0 <= decay_ratio <= 1
+        coeff = 0.5 * (1.0 + np.cos(np.pi * decay_ratio))  # coeff ranges 0..1
+        lr = self.min_lr + coeff * (self.learning_rate - self.min_lr)
+        self.last_lr = lr
+        return lr
+
+def make_lr_scheduler(learning_rate, min_lr, warmup_iters, lr_decay_iters):
+
+
+    return get_lr

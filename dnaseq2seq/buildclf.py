@@ -6,9 +6,9 @@ import numpy as np
 import bisect
 import pysam
 import pickle
-import sklearn
+#import sklearn
 import multiprocessing as mp
-from sklearn.ensemble import RandomForestClassifier
+#from sklearn.ensemble import RandomForestClassifier
 import scipy.stats as stats
 from xgboost import XGBClassifier
 from functools import lru_cache
