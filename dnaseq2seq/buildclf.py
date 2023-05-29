@@ -9,6 +9,8 @@ import pickle
 #import sklearn
 import multiprocessing as mp
 #from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import precision_recall_fscore_support
 import scipy.stats as stats
 from xgboost import XGBClassifier
 from functools import lru_cache
@@ -235,7 +237,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
-    feats.append(var.info['WIN_TRANS_COUNT'][0])
+    #feats.append(var.info['WIN_TRANS_COUNT'][0])
     feats.append(var.info['STEP_COUNT'][0])
     feats.append(var.info['CALL_COUNT'][0])
     feats.append(min(var.info['WIN_OFFSETS']))
@@ -259,7 +261,7 @@ def feat_names():
             "max_qual",
             "var_count",
             "cis_count",
-            "trans_count",
+            #"trans_count",
             "step_count",
             "call_count",
             "min_win_offset",
@@ -349,7 +351,7 @@ def _process_sample(args):
     if type(tps) == str:
         tps = [tps]
     for tp in tps:
-        vcfiter = vcf_sampling_iter(tp, max_snvs=3000, max_dels=1000, max_ins=1000, skip=random.randint(0, 10000))
+        vcfiter = vcf_sampling_iter(tp, max_snvs=5000, max_dels=2000, max_ins=2000, skip=random.randint(0, 20000))
         tpf, tpfeatstrs = extract_feats(vcfiter, aln, var_freq_file)
         tp_feats.extend(tpf)
         featstrs.extend(tpfeatstrs)
@@ -406,13 +408,29 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     if label_fh:
         label_fh.close()
 
+    
+
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
 
+    feat_train, feat_test, lab_train, lab_test = train_test_split(feats, y, test_size=0.1)
+    print(f"Test set size: {len(lab_test)}")
     #clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
-    clf = XGBClassifier(n_estimators=100, max_depth=25, learning_rate=1, objective='binary:logistic')
+    clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
     
-    clf.fit(feats, y)
+    clf.fit(feat_train, lab_train)
+
+    preds = clf.predict_proba(feat_test)[:,1]
+    threshold = 0.25 
+    ppv, ppa, fscore, support = precision_recall_fscore_support(lab_test, preds > threshold)
+    print("Metrics at threshold : {threshold}")
+    print(f"PPA : {ppa[1] :.5f}")
+    print(f"PPV : {ppv[1] :.5f}")
+    print(f"F1 : {fscore[1] :.5f}")
+    
+    fi = sorted((zip(clf.feature_names_in_, clf.feature_importances_)), key=lambda x: x[1])
+    print("Feature importances :")
+    print(fi)
     return clf
 
 

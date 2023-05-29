@@ -546,7 +546,7 @@ def merge_multialts(reference, v0, v1):
 
     """
     assert v0.pos == v1.pos
-    assert v0.het and v1.het
+    #assert v0.het and v1.het
     if v0.ref == v1.ref:
         v0.alts.append(v1.alt)
         v0.qual = (v0.qual + v1.qual) / 2  # Average quality??
