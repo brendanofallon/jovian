@@ -446,6 +446,13 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
+    # Quantization aware training - see https://pytorch.org/docs/stable/quantization.html
+    #model.eval() # Must be in eval mode for operator fusing - but we don't do this now
+    model.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
+    model = torch.ao.quantization.prepare_qat(model)
+
+
+
     if USE_DDP:
         rank = dist.get_rank()
         device_id = rank % torch.cuda.device_count()

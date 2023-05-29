@@ -115,6 +115,9 @@ class VarTransformer(nn.Module):
                  p_dropout=0.1,
                  device='cpu'):
         super().__init__()
+
+        # For quantization aware training - see https://pytorch.org/tutorials/recipes/quantization.html
+        self.quant = torch.ao.quantization.QuantStub()
         self.device = device
         self.read_depth = read_depth
         self.kmer_dim = kmer_dim
@@ -148,6 +151,7 @@ class VarTransformer(nn.Module):
         self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
         self.softmax = nn.LogSoftmax(dim=-1)
         self.elu = torch.nn.ELU()
+        self.dequant = torch.ao.quantization.DeQuantStub()
 
     def encode(self, src):
         src = self.elu(self.fc1(src))
@@ -174,7 +178,9 @@ class VarTransformer(nn.Module):
         return torch.stack((h0, h1), dim=1)
 
     def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None):
+        src = self.quant(src)
         mem = self.encode(src)
         result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        result = self.dequant(result)
         return result
 
