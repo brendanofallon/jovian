@@ -24,7 +24,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="96M_rampLR_lcbigmap2X_fixalltheissues_cont2"
+export RUN_NAME="96M_test_qat"
 export RUN_NOTES="Test AdamW optimizer and ramping up LR"
 
 cd $ROOT_DIR
