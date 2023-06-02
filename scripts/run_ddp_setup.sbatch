@@ -19,7 +19,7 @@ export MASTER_PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)
 #echo "Master addr: $master_addr, port: $master_port"
 
 
-ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/
+ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"

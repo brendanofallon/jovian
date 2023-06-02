@@ -447,10 +447,10 @@ def train_epochs(epochs,
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
     # Quantization aware training - see https://pytorch.org/docs/stable/quantization.html
-    #model.eval() # Must be in eval mode for operator fusing - but we don't do this now
+    model.eval() # Must be in eval mode for operator fusing - but we don't do this now
     model.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
     model = torch.ao.quantization.prepare_qat(model)
-
+    model = model.train()
 
 
     if USE_DDP:
