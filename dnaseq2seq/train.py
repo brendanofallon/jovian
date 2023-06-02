@@ -449,8 +449,8 @@ def train_epochs(epochs,
     # Quantization aware training - see https://pytorch.org/docs/stable/quantization.html
     model.eval() # Must be in eval mode for operator fusing - but we don't do this now
     model.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
-    model_fused = torch.ao.quantization.fuse_modules(model, [['bn', 'elu']])
-    model = torch.ao.quantization.prepare_qat(model_fused)
+    model_fused = torch.ao.quantization.fuse_modules(model, [])
+    model = torch.ao.quantization.prepare_qat(model_fused.train())
 
 
     if USE_DDP:
