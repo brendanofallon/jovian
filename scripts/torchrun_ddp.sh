@@ -19,7 +19,6 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     --checkpoint-freq 1 \
     -o ${RUN_NAME}.model \
     --threads 16 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/96M_rampLR_lcbigmap2X_fixalltheissues_cont/96M_rampLR_lcbigmap2X_fixalltheissues_cont_epoch28_unwrapped.model \
     --max-decomp-batches 8 \
     --samples-per-epoch 1000000 \
     --wandb-run-name $RUN_NAME"
