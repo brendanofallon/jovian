@@ -79,6 +79,7 @@ class VcfVar:
         return self.alts[0]
 
 
+
 def _cigtups(cigstr):
     """
     Generator for Cigar objects from a cigar string
