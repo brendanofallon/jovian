@@ -634,6 +634,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
         start += max_batch_size
     return seq_preds, probs
 
+
 def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks, max_batch_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
