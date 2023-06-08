@@ -464,7 +464,6 @@ def train_epochs(epochs,
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
     scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 2.0, warmup_iters=1e6, lr_decay_iters=20e6)
 
-
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
 
@@ -547,13 +546,14 @@ def train_epochs(epochs,
 
             elapsed = datetime.now() - starttime
 
-            acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
+            if MASTER_PROCESS:
+                acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
 
-            ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
-            ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
-            ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
+                ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
+                ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
+                ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
 
-            logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr()[0]:.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
+                logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
             if ENABLE_WANDB:
                 wandb.log({
@@ -570,32 +570,32 @@ def train_epochs(epochs,
                     "accuracy/ppv dels": ppv_dels,
                     "accuracy/ppv ins": ppv_ins,
                     "accuracy/ppv snv": ppv_snv,
-                    "learning_rate": scheduler.get_last_lr()[0],
+                    "learning_rate": scheduler.get_last_lr(),
                     "epochtime": elapsed.total_seconds(),
                 })
 
-            scheduler.step()
-            trainlogger.log({
-                "epoch": epoch,
-                "trainingloss": loss,
-                "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
-                "mean_var_count": var_count0,
-                "ppa_snv": ppa_snv,
-                "ppa_ins": ppa_ins,
-                "ppa_dels": ppa_dels,
-                "ppv_ins": ppv_ins,
-                "ppv_snv": ppv_snv,
-                "ppv_dels": ppv_dels,
-                "learning_rate": scheduler.get_last_lr()[0],
-                "epochtime": elapsed.total_seconds(),
-            })
+            if MASTER_PROCESS:
+                trainlogger.log({
+                    "epoch": epoch,
+                    "trainingloss": loss,
+                    "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
+                    "mean_var_count": var_count0,
+                    "ppa_snv": ppa_snv,
+                    "ppa_ins": ppa_ins,
+                    "ppa_dels": ppa_dels,
+                    "ppv_ins": ppv_ins,
+                    "ppv_snv": ppv_snv,
+                    "ppv_dels": ppv_dels,
+                    "learning_rate": scheduler.get_last_lr(),
+                    "epochtime": elapsed.total_seconds(),
+                })
 
 
-            if epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
+            if MASTER_PROCESS and epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
-                m = model.module if isinstance(model, nn.DataParallel) else model
+                m = model.module if (isinstance(model, nn.DataParallel) or isinstance(model, DDP)) else model
                 torch.save(m.state_dict(), checkpoint_name)
 
         logger.info(f"Training completed after {epoch} epochs")
@@ -677,7 +677,6 @@ def train(output_model, input_model, epochs, **kwargs):
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
-                 lossfunc=kwargs.get('loss'),
                  wandb_run_name=kwargs.get("wandb_run_name"),
                  wandb_notes=kwargs.get("wandb_notes"),
                  cl_args=kwargs.get("cl_args"),

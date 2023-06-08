@@ -20,11 +20,11 @@ export MASTER_PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)
 
 
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/
-REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/
+REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="96M_rampLR_lcbigmap2x_fix"
+export RUN_NAME="96M_rampLR_lcbigmap2X_fixalltheissues_cont2"
 export RUN_NOTES="Test AdamW optimizer and ramping up LR"
 
 cd $ROOT_DIR
@@ -33,7 +33,7 @@ cd $RUN_NAME
 
 git clone $REPO_BASE
 
-cd dnaseq2seq
+cd jovian
 git checkout $GIT_BRANCH
 COMMIT=$(git rev-parse HEAD)
 
