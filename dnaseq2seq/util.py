@@ -270,11 +270,25 @@ def dedup_vcf(input_vcf, dest):
         if clump:
             ofh.write(str(clump[0]))
 
+def check_overlap(interval1, interval2):
+    start1, end1 = interval1
+    start2, end2 = interval2
+    return not (end1 < start2 or end2 < start1)
+
+def records_overlap(rec1, rec2):
+    """ True if the two records share any reference bases """
+    return check_overlap(
+        (rec1.pos, rec1.pos + len(rec1.ref)),
+        (rec2.pos, rec2.pos + len(rec2.ref)),
+    )
+
 def merge_overlapping_regions(regions):
     """
     Merge any overlapping regions in the list into a single region
     Assumes regions is list / iterable of (chrom, chunk_index, start, end) tuples
     """
+    if not len(list(regions)):
+        return []
     regions = sorted(regions, key=lambda x: x[1])
     merged = [regions[0]]
     for region in regions[1:]:

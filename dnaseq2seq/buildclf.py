@@ -458,7 +458,9 @@ def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
     :return: classifier quality
     """
     feats = var_feats(var_rec, aln, var_freq_file)
+    logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
+    logger.debug(f"Prediction for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {prediction}")
     return prediction[0, 1]
 
 
