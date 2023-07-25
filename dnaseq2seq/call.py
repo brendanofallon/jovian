@@ -88,20 +88,20 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 def load_model(model_path):
     
     #96M params
-    encoder_attention_heads = 8
-    decoder_attention_heads = 10 
-    dim_feedforward = 512
-    encoder_layers = 10
-    decoder_layers = 10 
-    embed_dim_factor = 160 
+    #encoder_attention_heads = 8
+    #decoder_attention_heads = 10 
+    #dim_feedforward = 512
+    #encoder_layers = 10
+    #decoder_layers = 10 
+    #embed_dim_factor = 160 
 
     #50M params
-    #encoder_attention_heads = 8
-    #decoder_attention_heads = 4 
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6
-    #embed_dim_factor = 120 
+    encoder_attention_heads = 8
+    decoder_attention_heads = 4 
+    dim_feedforward = 512
+    encoder_layers = 8
+    decoder_layers = 6
+    embed_dim_factor = 120 
 
 
     # 35M params
@@ -112,7 +112,7 @@ def load_model(model_path):
     #decoder_layers = 4 # was 2
     #embed_dim_factor = 120 # was 100
 
-    model = VarTransformer(read_depth=150,
+    model = VarTransformer(read_depth=100,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
@@ -283,7 +283,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 150
+    max_read_depth = 100
     logger.info(f"Max read depth: {max_read_depth}")
     logger.info(f"Max batch size: {max_batch_size}")
 
@@ -570,8 +570,6 @@ def het(rec):
 def merge_overlaps(overlaps, min_qual):
     """
      Attempt to merge overlapping VCF records in a sane way
-     Currently, if the share the same start position we merge into a single multi-alt record
-     If they overlap but do not share the same start position then we modify the genotypes to be half-missing
      As a special case if there is only one input record we just return that
     """
     if len(overlaps) == 1:
@@ -579,6 +577,9 @@ def merge_overlaps(overlaps, min_qual):
     overlaps = list(filter(lambda x: x.qual > min_qual, overlaps))
     if len(overlaps) == 1:
         return [overlaps[0]]
+    elif len(overlaps) == 0:
+        return []
+
     result = []
     overlaps = sorted(overlaps, key=lambda x: x.qual, reverse=True)[0:2]  # Two highest quality alleles
     overlaps[0].samples['sample']['GT'] = (None, 1)
@@ -613,6 +614,10 @@ def vars_hap_to_records(
         vcf.create_vcf_rec(var, vcf_template)
         for var in sorted(vcf_vars, key=lambda x: x.pos)
     ]
+
+    if not vcf_records:
+        return []
+
 
     for rec in vcf_records:
         if rec.ref == rec.alts[0]:

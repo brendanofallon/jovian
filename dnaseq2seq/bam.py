@@ -104,7 +104,7 @@ class ReadWindow:
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
-        t = torch.zeros(window_size, max_reads, 10, device='cpu')
+        t = torch.zeros(window_size, max_reads, 10, device='cpu') - 1000.0
         for i, (readstart, read) in enumerate(allreads):
             encoded = self.cache[read]
             enc_start_offset = max(0,  start - readstart)
