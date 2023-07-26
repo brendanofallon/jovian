@@ -24,7 +24,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="96M_test_n1k_4"
+export RUN_NAME="96M_test_n1k_5"
 export RUN_NOTES="Tensor elements not in a read are all -1000"
 
 cd $ROOT_DIR
