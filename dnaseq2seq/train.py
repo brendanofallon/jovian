@@ -35,10 +35,18 @@ USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') 
 MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
 DEVICE = None # This is set in the 'train' method
 
-ENABLE_WANDB = os.getenv('ENABLE_WANDB', False) and MASTER_PROCESS
 
-if ENABLE_WANDB:
-    import wandb
+if os.getenv("ENABLE_COMET"):
+    logger.info("Enabling Comet.ai logging")
+    from comet_ml import Experiment
+
+    experiment = Experiment(
+      api_key=os.getenv('COMET_API_KEY'),
+      project_name="variant-transformer",
+      workspace="brendan"
+    )
+else:
+    experiment = None
 
 
 
@@ -474,8 +482,7 @@ def train_epochs(epochs,
             "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
     ])
 
-    if ENABLE_WANDB:
-        import wandb
+    if experiment:
         # get git branch info for logging
         git_repo = Repository(os.path.abspath(__file__))
         # what to log in wandb
@@ -505,16 +512,13 @@ def train_epochs(epochs,
         git_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(git_dir)
 
-        wandb.init(
-                config=wandb_config_params,
-                project='variant-transformer',
-                entity='arup-rnd',
-                dir=current_working_dir,
-                name=wandb_run_name,
-                notes=wandb_notes,
-                resume=True,
-        )
-        wandb.watch(model, log="all", log_freq=1000)
+        if experiment:
+            experiment.log_parameters({
+                    "config": wandb_config_params,
+                    "dir": current_working_dir,
+                    "run_name": wandb_run_name,
+                    "notes": wandb_notes,
+            })
 
         # back to correct working dir
         os.chdir(current_working_dir)
@@ -555,8 +559,8 @@ def train_epochs(epochs,
 
                 logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
-            if ENABLE_WANDB:
-                wandb.log({
+            if experiment:
+                experiment.log_metrics({
                     "epoch": epoch,
                     "trainingloss": loss,
                     "validation_loss": val_loss,
@@ -572,7 +576,7 @@ def train_epochs(epochs,
                     "accuracy/ppv snv": ppv_snv,
                     "learning_rate": scheduler.get_last_lr(),
                     "epochtime": elapsed.total_seconds(),
-                })
+                }, step=epoch)
 
             if MASTER_PROCESS:
                 trainlogger.log({
