@@ -312,15 +312,18 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
 
         yield var
 
+def rec_extract_feats(var, aln, var_freq_file):
+    feats = var_feats(var, aln, var_freq_file)
+    fstr = ",".join(str(x) for x in [varstr(var)] + list(feats))
+    return feats, fstr
 
 def extract_feats(vcf, aln, var_freq_file):
     allfeats = []
     featstrs = []
     for var in vcf:
-        feats = var_feats(var, aln, var_freq_file)
+        feats, fstr = rec_extract_feats(var, aln, var_freq_file)
         allfeats.append(feats)
-        fstr = ",".join(str(x) for x in feats)
-        featstrs.append(f"{varstr(var)},{fstr}")
+        featstrs.append(fstr)
     return allfeats, featstrs
 
 
@@ -335,10 +338,16 @@ def load_model(path):
     with open(path, 'rb') as fh:
         return pickle.load(fh)
 
-
+def _find_var(chrom, pos, ref, alts, vcf):
+    assert type(alts) == tuple, "alts must be a tuple"
+    alts = set(alts)
+    for v in vcf.fetch(chrom, pos-2, pos+2):
+        if v.chrom == chrom and v.pos == pos and v.ref == ref and set(v.alts) == alts:
+            return v
+    return None
 
 def _process_sample(args):
-    sample, bampath, reference_filename, tps, fps = args
+    sample, bampath, reference_filename, varoutputs, tps, fps = args
     var_freq_file = None
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
@@ -346,27 +355,54 @@ def _process_sample(args):
     fp_feats = []
     featstrs = []
     labels = []
-    if tps is None:
-        tps = []
-    if type(tps) == str:
-        tps = [tps]
-    for tp in tps:
-        vcfiter = vcf_sampling_iter(tp, max_snvs=5000, max_dels=2000, max_ins=2000, skip=random.randint(0, 20000))
-        tpf, tpfeatstrs = extract_feats(vcfiter, aln, var_freq_file)
-        tp_feats.extend(tpf)
-        featstrs.extend(tpfeatstrs)
-        labels.extend([1] * len(tpf))
-
-    if fps is None:
-        fps = []
-    if type(fps) == str:
-        fps = [fps]
-    for fp in fps:
-        vcfiter = vcf_sampling_iter(fp)
-        fpf, fpfeatstrs = extract_feats(vcfiter, aln, var_freq_file)
-        fp_feats.extend(fpf)
-        featstrs.extend(fpfeatstrs)
-        labels.extend([0] * len(fpf))
+    max_tp_snvs = 5000
+    max_tp_dels = 2000
+    max_tp_ins = 2000
+    tpsnvs = 0
+    tpins = 0
+    tpdels = 0
+    tp_downsample_freq = 0.01
+    for outputfile, tp, fp in zip(varoutputs, tps, fps):
+        tpfile = pysam.VariantFile(tp)
+        fpfile = pysam.VariantFile(fp)
+        for var in pysam.VariantFile(outputfile):
+            base = var.info.get('BASE', '')
+            if "CA" in base:
+                continue
+            call = var.info.get('CALL')
+            if call is None:
+                continue
+            if call == 'TP' and random.random() < tp_downsample_freq:
+                if ((is_snv(var) and tpsnvs < max_tp_snvs)
+                        or (is_ins(var) and tpins < max_tp_ins)
+                        or (is_del(var) and tpdels < max_tp_dels)):
+                    tpvar = _find_var(var.chrom, var.pos, var.ref, var.alts, tpfile)
+                    if tpvar is None:
+                        print(f"Uh oh couldn't find true pos match for {var}")
+                        exit(1)
+                    feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
+                    tp_feats.append(feats)
+                    featstrs.append(fstr)
+                    labels.append(1)
+                    if is_snv(var):
+                        tpsnvs += 1
+                    elif is_ins(var):
+                        tpins += 1
+                    elif is_del(var):
+                        tpdels += 1
+            elif call == 'FP':
+                alleles = list(var.samples['CALLS']['GT'])
+                if 0 in alleles:
+                    alleles.remove(0)
+                alts = tuple(var.alleles[a] for a in alleles) # Trailing comma important
+                fpvar = _find_var(var.chrom, var.pos, var.ref, alts, fpfile)
+                if fpvar is None:
+                    print(f"Whoa cant find variant {var}")
+                    exit(1)
+                feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
+                fp_feats.append(feats)
+                featstrs.append(fstr)
+                labels.append(0)
 
     logger.info(f"Done with {sample} : TPs: {len(tp_feats)} FPs: {len(fp_feats)}")
     return tp_feats, fp_feats, featstrs, labels
@@ -389,7 +425,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         label_fh = None
 
     with mp.Pool(24) as pool:
-        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
+        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
 
     y = []
     for tpfeats, fpfeats, fstrs, labs in results:
@@ -408,7 +444,6 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     if label_fh:
         label_fh.close()
 
-    
 
     logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
     feats = alltps + allfps
@@ -421,16 +456,13 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     clf.fit(feat_train, lab_train)
 
     preds = clf.predict_proba(feat_test)[:,1]
-    threshold = 0.25 
+    threshold = 0.1
     ppv, ppa, fscore, support = precision_recall_fscore_support(lab_test, preds > threshold)
     print("Metrics at threshold : {threshold}")
     print(f"PPA : {ppa[1] :.5f}")
     print(f"PPV : {ppv[1] :.5f}")
     print(f"F1 : {fscore[1] :.5f}")
-    
-    fi = sorted((zip(clf.feature_names_in_, clf.feature_importances_)), key=lambda x: x[1])
-    print("Feature importances :")
-    print(fi)
+
     return clf
 
 
@@ -458,12 +490,14 @@ def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
     :return: classifier quality
     """
     feats = var_feats(var_rec, aln, var_freq_file)
+    logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
+    logger.debug(f"Prediction for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {prediction}")
     return prediction[0, 1]
 
 
 def train(conf, output, **kwargs):
-    logger.info("Loading configuration from {conf_file}")
+    logger.info(f"Loading configuration from {conf}")
     conf = yaml.safe_load(open(conf).read())
     model = train_model(conf, 
             threads=kwargs.get('threads'), 

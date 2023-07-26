@@ -548,7 +548,7 @@ def merge_multialts(v0, v1):
     assert v0.pos == v1.pos
     #assert v0.het and v1.het
     if v0.ref == v1.ref:
-        v0.alts = (v0.alts[0], v1.alt)
+        v0.alts = (v0.alts[0], v1.alts[0])
         v0.qual = (v0.qual + v1.qual) / 2  # Average quality??
         v0.samples['sample']['GT'] = (1,2)
         return v0
@@ -563,12 +563,42 @@ def merge_multialts(v0, v1):
         return longer
 
 
+
+def het(rec):
+    return rec.samples[0]['GT'] == (0,1) or rec.samples[0]['GT'] == (1,0)
+
+def merge_overlaps(overlaps, min_qual):
+    """
+     Attempt to merge overlapping VCF records in a sane way
+     Currently, if the share the same start position we merge into a single multi-alt record
+     If they overlap but do not share the same start position then we modify the genotypes to be half-missing
+     As a special case if there is only one input record we just return that
+    """
+    if len(overlaps) == 1:
+        return [overlaps[0]]
+    overlaps = list(filter(lambda x: x.qual > min_qual, overlaps))
+    if len(overlaps) == 1:
+        return [overlaps[0]]
+    result = []
+    overlaps = sorted(overlaps, key=lambda x: x.qual, reverse=True)[0:2]  # Two highest quality alleles
+    overlaps[0].samples['sample']['GT'] = (None, 1)
+    overlaps[1].samples['sample']['GT'] = (1, None)
+    result.extend(sorted(overlaps, key=lambda x: x.pos))
+    return result
+
+
 def vars_hap_to_records(
     chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
 ):
     """
     Convert variant haplotype objects to variant records
     """
+
+    # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
+    # we hard-filter out very poor quality variants that overlap other, higher-quality variants
+    # This value defines the min qual to be included when merging overlapping variants
+    min_merge_qual = 0.05
+
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
         vars_hap1=vars_hap1,
@@ -592,23 +622,24 @@ def vars_hap_to_records(
             rec.info["RAW_QUAL"] = rec.qual
             rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
 
-    bypos = defaultdict(list)
-    for v in vcf_records:
-        bypos[v.pos].append(v)
-
-    mergedvars = []
-    for pos, vars in bypos.items():
-        if len(vars) == 2:
-            loqual, hiqual = sorted(vars, key=lambda x: x.qual)
-            if loqual.qual > 0.05: # Only merge multialts if they are both relatively high quality
-                multialt = merge_multialts(vars[0], vars[1])
-                mergedvars.append(multialt)
-            else:
-                mergedvars.append(hiqual)
+    merged = []
+    overlaps = [vcf_records[0]]
+    for rec in vcf_records[1:]:
+        if overlaps and util.records_overlap(overlaps[-1], rec):
+            overlaps.append(rec)
+        elif overlaps: #
+            result = merge_overlaps(overlaps, min_qual=min_merge_qual)
+            merged.extend(result)
+            overlaps = [rec]
         else:
-            mergedvars.append(vars[0])
+            overlaps = [rec]
 
-    return mergedvars
+    if overlaps:
+        merged.extend(merge_overlaps(overlaps, min_qual=min_merge_qual))
+    else:
+        merged.append(rec)
+
+    return merged
 
 
 def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
