@@ -36,7 +36,7 @@ MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
 DEVICE = None # This is set in the 'train' method
 
 
-if os.getenv("ENABLE_COMET") and MASTER_PRORCESS:
+af os.getenv("ENABLE_COMET") and MASTER_PROCESS:
     logger.info("Enabling Comet.ai logging")
     from comet_ml import Experiment
 
@@ -523,9 +523,9 @@ def train_epochs(epochs,
             experiment.log_parameters({
                     "config": wandb_config_params,
                     "dir": current_working_dir,
-                    "run_name": wandb_run_name,
                     "notes": wandb_notes,
             })
+            experiment.set_name(wandb_run_name)
 
         # back to correct working dir
         os.chdir(current_working_dir)
