@@ -36,7 +36,7 @@ MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
 DEVICE = None # This is set in the 'train' method
 
 
-if os.getenv("ENABLE_COMET"):
+if os.getenv("ENABLE_COMET") and MASTER_PRORCESS:
     logger.info("Enabling Comet.ai logging")
     from comet_ml import Experiment
 

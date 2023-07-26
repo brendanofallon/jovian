@@ -78,6 +78,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
+        logger.info(f"Src dtype is {src.dtype}")
         for data, prefix in zip([src, tgt_kmers, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
@@ -155,8 +156,9 @@ def print_pileup(path, idx, target=None, **kwargs):
 
     src = util.tensor_from_file(path, device='cpu')
     logger.info(f"Loaded tensor with shape {src.shape}")
-    s = util.to_pileup(src[idx, :, :, :])
-    print(s)
+    #s = util.to_pileup(src[idx, :, :, :])
+    print(src[idx, 5, 0:10, :])
+    #print(s)
 
 
 def alphanumeric_no_spaces(name):

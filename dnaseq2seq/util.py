@@ -206,6 +206,8 @@ def writeseqtensor(t):
     for pos in range(t.shape[0]):
         if torch.sum(t[pos, 0:4]) == 0:
             base = '.'
+        elif torch.sum(t[pos, 0:4]) < 0:
+            base = '-'
         else:
             base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
         print(f"{base}", end="")
