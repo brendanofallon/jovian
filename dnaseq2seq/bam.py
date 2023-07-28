@@ -104,9 +104,9 @@ class ReadWindow:
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
-        t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.float) - 1000.0
+        t = torch.zeros(window_size, max_reads, 10, device='cpu')
         for i, (readstart, read) in enumerate(allreads):
-            encoded = self.cache[read].float()
+            encoded = self.cache[read].char()
             enc_start_offset = max(0,  start - readstart)
             enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
             t_start_offset = max(0, readstart - start)
@@ -141,7 +141,7 @@ def encode_read(read, prepad=0, tot_length=None):
     if tot_length is not None:
         while len(bases) < tot_length:
             bases.append(torch.zeros(FEATURE_NUM))
-    return torch.stack(tuple(bases)).float()
+    return torch.stack(tuple(bases)).char()
 
 
 def base_index(base):

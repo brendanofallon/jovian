@@ -623,18 +623,18 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
         #    logger.info(f"Loaded {count} tensors from {bampath}")
         if count == max_to_load:
             #logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc).float(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc).float(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
             allsrc = []
             alltgt = []
             alltgtvaf = []
             varsinfo = []
 
     if len(allsrc):
-        yield torch.stack(allsrc).float(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
 
     logger.info(f"Done loading {count} tensors from {bampath}")
 
