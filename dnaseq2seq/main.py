@@ -66,7 +66,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
     """
-    TRUNCATE_LEN=148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
+    TRUNCATE_LEN = 148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
     tgt_prefix = "tgkmers"
@@ -106,6 +106,7 @@ def pregen(config, **kwargs):
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
+    logger.info(f"Full config: {conf}")
     output_dir = Path(kwargs.get('dir'))
     metadata_file = kwargs.get("metadata_file", None)
     if metadata_file is None:
