@@ -30,9 +30,11 @@ import util
 from model import VarTransformer
 
 LOG_FORMAT='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
+formatter = logging.Formatter(LOG_FORMAT)
 handler = logging.FileHandler("jovian_train.log")
 handler.setLevel(logging.INFO)
-handler.setFormatter(logging.Formatter(LOG_FORMAT))
+handler.setFormatter(formatter)
+
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)
 
