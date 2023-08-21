@@ -428,7 +428,7 @@ def train_epochs(epochs,
     dim_feedforward = 1024
     encoder_layers = 6
     decoder_layers = 6 # was 2
-    embed_dim_factor = 180 # was 100
+    embed_dim_factor = 200 # was 100
 
 
 
