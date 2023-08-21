@@ -24,7 +24,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="50M_lcbig2x_another2"
+export RUN_NAME="50M_lcbig2x_wide"
 export RUN_NOTES=""
 
 cd $ROOT_DIR

@@ -416,8 +416,8 @@ def train_epochs(epochs,
     encoder_attention_heads = 4 # was 4
     decoder_attention_heads = 4 # was 4
     dim_feedforward = 1024
-    encoder_layers = 4
-    decoder_layers = 4 # was 2
+    encoder_layers = 6
+    decoder_layers = 6 # was 2
     embed_dim_factor = 180 # was 100
 
 
@@ -459,6 +459,7 @@ def train_epochs(epochs,
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Creating model with {model_tot_params} trainable params")
     
+
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
