@@ -29,7 +29,15 @@ import loader
 import util
 from model import VarTransformer
 
+LOG_FORMAT='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
+handler = logging.FileHandler("jovian_train.log")
+handler.setLevel(logging.INFO)
+handler.setFormatter(LOG_FORMAT)
 logger = logging.getLogger(__name__)
+logger.addHandler(handler)
+
+
+
 
 USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
 MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'

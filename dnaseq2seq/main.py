@@ -36,7 +36,10 @@ from call import call
 
 logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
-                    level=os.environ.get('JV_LOGLEVEL', logging.INFO)) # handlers=[RichHandler()])
+                    level=os.environ.get('JV_LOGLEVEL', logging.INFO),
+                    handlers=[
+                        logging.StreamHandler(),  # Output logs to stdout
+                    ]) # handlers=[RichHandler()])
 
 logger = logging.getLogger(__name__)
 
