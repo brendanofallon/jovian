@@ -29,16 +29,34 @@ import loader
 import util
 from model import VarTransformer
 
+LOG_FORMAT='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
+formatter = logging.Formatter(LOG_FORMAT)
+handler = logging.FileHandler("jovian_train.log")
+handler.setLevel(logging.INFO)
+handler.setFormatter(formatter)
+
 logger = logging.getLogger(__name__)
+logger.addHandler(handler)
+
+
+
 
 USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
 MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
 DEVICE = None # This is set in the 'train' method
 
-ENABLE_WANDB = os.getenv('ENABLE_WANDB', False) and MASTER_PROCESS
 
-if ENABLE_WANDB:
-    import wandb
+if os.getenv("ENABLE_COMET") and MASTER_PROCESS:
+    logger.info("Enabling Comet.ai logging")
+    from comet_ml import Experiment
+
+    experiment = Experiment(
+      api_key=os.getenv('COMET_API_KEY'),
+      project_name="variant-transformer",
+      workspace="brendan"
+    )
+else:
+    experiment = None
 
 
 
@@ -404,14 +422,23 @@ def train_epochs(epochs,
     #decoder_layers = 6 # was 2
     #embed_dim_factor = 120 # was 100
 
+    #Wider model
+    encoder_attention_heads = 4 # was 4
+    decoder_attention_heads = 4 # was 4
+    dim_feedforward = 1024
+    encoder_layers = 6
+    decoder_layers = 6 # was 2
+    embed_dim_factor = 180 # was 100
+
+
 
     # 100M params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 10 # was 4
-    dim_feedforward = 512
-    encoder_layers = 10
-    decoder_layers = 10 # was 2
-    embed_dim_factor = 160 # was 100
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 10 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 10
+    #decoder_layers = 10 # was 2
+    #embed_dim_factor = 160 # was 100
 
     # 200M params
     #encoder_attention_heads = 12 # was 4
@@ -442,10 +469,18 @@ def train_epochs(epochs,
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Creating model with {model_tot_params} trainable params")
     
+
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
+    # Quantization aware training - see https://pytorch.org/docs/stable/quantization.html
+    #model.eval() # Must be in eval mode for operator fusing - but we don't do this now
+    #model.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
+    #model_fused = torch.ao.quantization.fuse_modules(model, [])
+    #model = torch.ao.quantization.prepare_qat(model.train())
+
+
     if USE_DDP:
         rank = dist.get_rank()
         device_id = rank % torch.cuda.device_count()
@@ -474,8 +509,7 @@ def train_epochs(epochs,
             "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
     ])
 
-    if ENABLE_WANDB:
-        import wandb
+    if experiment:
         # get git branch info for logging
         git_repo = Repository(os.path.abspath(__file__))
         # what to log in wandb
@@ -505,16 +539,13 @@ def train_epochs(epochs,
         git_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(git_dir)
 
-        wandb.init(
-                config=wandb_config_params,
-                project='variant-transformer',
-                entity='arup-rnd',
-                dir=current_working_dir,
-                name=wandb_run_name,
-                notes=wandb_notes,
-                resume=True,
-        )
-        wandb.watch(model, log="all", log_freq=1000)
+        if experiment:
+            experiment.log_parameters({
+                    "config": wandb_config_params,
+                    "dir": current_working_dir,
+                    "notes": wandb_notes,
+            })
+            experiment.set_name(wandb_run_name)
 
         # back to correct working dir
         os.chdir(current_working_dir)
@@ -555,8 +586,8 @@ def train_epochs(epochs,
 
                 logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
 
-            if ENABLE_WANDB:
-                wandb.log({
+            if experiment:
+                experiment.log_metrics({
                     "epoch": epoch,
                     "trainingloss": loss,
                     "validation_loss": val_loss,
@@ -572,7 +603,7 @@ def train_epochs(epochs,
                     "accuracy/ppv snv": ppv_snv,
                     "learning_rate": scheduler.get_last_lr(),
                     "epochtime": elapsed.total_seconds(),
-                })
+                }, step=epoch)
 
             if MASTER_PROCESS:
                 trainlogger.log({

@@ -5,7 +5,7 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=10-0
@@ -19,13 +19,13 @@ export MASTER_PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)
 #echo "Master addr: $master_addr, port: $master_port"
 
 
-ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage3/u0379426/variant_transformer_runs/
+ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="96M_rampLR_lcbigmap2X_fixalltheissues_cont2"
-export RUN_NOTES="Test AdamW optimizer and ramping up LR"
+export RUN_NAME="50M_lcbig2x_wide"
+export RUN_NOTES=""
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME

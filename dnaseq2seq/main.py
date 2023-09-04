@@ -36,7 +36,10 @@ from call import call
 
 logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
-                    level=os.environ.get('JV_LOGLEVEL', logging.INFO)) # handlers=[RichHandler()])
+                    level=os.environ.get('JV_LOGLEVEL', logging.INFO),
+                    handlers=[
+                        logging.StreamHandler(),  # Output logs to stdout
+                    ]) # handlers=[RichHandler()])
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +69,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
     """
-    TRUNCATE_LEN=148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
+    TRUNCATE_LEN = 148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
     tgt_prefix = "tgkmers"
@@ -78,6 +81,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
+        logger.info(f"Src dtype is {src.dtype}")
         for data, prefix in zip([src, tgt_kmers, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
@@ -105,6 +109,7 @@ def pregen(config, **kwargs):
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
+    logger.info(f"Full config: {conf}")
     output_dir = Path(kwargs.get('dir'))
     metadata_file = kwargs.get("metadata_file", None)
     if metadata_file is None:
@@ -155,8 +160,9 @@ def print_pileup(path, idx, target=None, **kwargs):
 
     src = util.tensor_from_file(path, device='cpu')
     logger.info(f"Loaded tensor with shape {src.shape}")
-    s = util.to_pileup(src[idx, :, :, :])
-    print(s)
+    #s = util.to_pileup(src[idx, :, :, :])
+    print(src[idx, 5, 0:10, :])
+    #print(s)
 
 
 def alphanumeric_no_spaces(name):

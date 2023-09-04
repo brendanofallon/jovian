@@ -115,6 +115,8 @@ class VarTransformer(nn.Module):
                  p_dropout=0.1,
                  device='cpu'):
         super().__init__()
+
+        # For quantization aware training - see https://pytorch.org/tutorials/recipes/quantization.html
         self.device = device
         self.read_depth = read_depth
         self.kmer_dim = kmer_dim

@@ -237,7 +237,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(max(var.info['QUALS']))
     feats.append(var.info['WIN_VAR_COUNT'][0])
     feats.append(var.info['WIN_CIS_COUNT'][0])
-    #feats.append(var.info['WIN_TRANS_COUNT'][0])
+    feats.append(var.info['WIN_TRANS_COUNT'][0]) # Not used in latest lcbm model
     feats.append(var.info['STEP_COUNT'][0])
     feats.append(var.info['CALL_COUNT'][0])
     feats.append(min(var.info['WIN_OFFSETS']))
@@ -361,7 +361,7 @@ def _process_sample(args):
     tpsnvs = 0
     tpins = 0
     tpdels = 0
-    tp_downsample_freq = 0.01
+    tp_downsample_freq = 0.025
     for outputfile, tp, fp in zip(varoutputs, tps, fps):
         tpfile = pysam.VariantFile(tp)
         fpfile = pysam.VariantFile(fp)
@@ -378,8 +378,8 @@ def _process_sample(args):
                         or (is_del(var) and tpdels < max_tp_dels)):
                     tpvar = _find_var(var.chrom, var.pos, var.ref, var.alts, tpfile)
                     if tpvar is None:
-                        print(f"Uh oh couldn't find true pos match for {var}")
-                        exit(1)
+                        logger.warning(f"Couldn't find true pos match for {var}")
+                        continue
                     feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
                     tp_feats.append(feats)
                     featstrs.append(fstr)
@@ -397,8 +397,8 @@ def _process_sample(args):
                 alts = tuple(var.alleles[a] for a in alleles) # Trailing comma important
                 fpvar = _find_var(var.chrom, var.pos, var.ref, alts, fpfile)
                 if fpvar is None:
-                    print(f"Whoa cant find variant {var}")
-                    exit(1)
+                    logger.warning(f"Couldn't find FP match for find variant {var}")
+                    continue
                 feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
                 fp_feats.append(feats)
                 featstrs.append(fstr)
