@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=10-0
+#SBATCH --time=14-0
 
 # --- Setup In Master ---
 # Master will be the one running this bash script (SLURM runs this only once)

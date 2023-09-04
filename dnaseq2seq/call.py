@@ -88,20 +88,20 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 def load_model(model_path):
     
     #96M params
-    #encoder_attention_heads = 8
-    #decoder_attention_heads = 10 
-    #dim_feedforward = 512
-    #encoder_layers = 10
-    #decoder_layers = 10 
-    #embed_dim_factor = 160 
+    encoder_attention_heads = 8
+    decoder_attention_heads = 10 
+    dim_feedforward = 512
+    encoder_layers = 10
+    decoder_layers = 10 
+    embed_dim_factor = 160 
 
     #50M params
-    encoder_attention_heads = 8
-    decoder_attention_heads = 4 
-    dim_feedforward = 512
-    encoder_layers = 8
-    decoder_layers = 6
-    embed_dim_factor = 120 
+    #encoder_attention_heads = 8
+    #decoder_attention_heads = 4 
+    #dim_feedforward = 512
+    #encoder_layers = 8
+    #decoder_layers = 6
+    #embed_dim_factor = 120 
 
 
     # 35M params
@@ -112,7 +112,7 @@ def load_model(model_path):
     #decoder_layers = 4 # was 2
     #embed_dim_factor = 120 # was 100
 
-    model = VarTransformer(read_depth=100,
+    model = VarTransformer(read_depth=150,
                             feature_count=10,
                             kmer_dim=util.FEATURE_DIM, # Number of possible kmers
                             n_encoder_layers=encoder_layers,
@@ -283,7 +283,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 100
+    max_read_depth = 150
     logger.info(f"Max read depth: {max_read_depth}")
     logger.info(f"Max batch size: {max_batch_size}")
 
