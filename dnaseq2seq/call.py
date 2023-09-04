@@ -369,6 +369,7 @@ def process_block(raw_regions,
     batch_count = 0
     window_count = 0
     var_records = [] # Stores all variant records so we can sort before writing
+    window_idx = -1
     with torch.no_grad():
         for path in encoded_paths:
             # Load the data, parsing location + encoded data from file
@@ -576,6 +577,8 @@ def merge_overlaps(overlaps, min_qual):
         return [overlaps[0]]
     overlaps = list(filter(lambda x: x.qual > min_qual, overlaps))
     if len(overlaps) == 1:
+        # An important case where two variants overlap but one of them is low quality
+        # Should the remaining variant be het or hom?
         return [overlaps[0]]
     elif len(overlaps) == 0:
         return []
