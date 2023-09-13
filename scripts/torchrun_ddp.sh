@@ -8,14 +8,15 @@ RUN_NOTES="$4"
 #VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen/pregen_lcbigmap_d150_chrs21and22
 VAL_DIR=/scratch/general/vast/u0379426/pregen_lcbigmap_d150_chrs21and22
 PREGEN_DIR=/scratch/general/vast/u0379426/lcbigmap2x
-
+#PREGEN_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen/fpfns_moresupp
 
 
 RUNCMD="jovian/dnaseq2seq/main.py train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 500 \
-    --batch-size 256 \
+    -i /uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/50M_lcbig2x_another/50M_lcbig2x_another_epoch191.model \
+    --batch-size 512 \
     --learning-rate 0.00005 \
     --checkpoint-freq 10 \
     -o ${RUN_NAME}.model \

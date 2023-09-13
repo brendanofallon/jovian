@@ -292,7 +292,10 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
     snvcount = 0
     delcount = 0
     inscount = 0
-    for i, var in enumerate(pysam.VariantFile(vcf, ignore_truncation=True)):
+    varfile = pysam.VariantFile(vcf, ignore_truncation=True)
+    if varfile is None:
+        raise ValueError(f"Unable to open variant file {vcf}")
+    for i, var in enumerate():
         if i < skip:
             continue
         if is_snv(var):
@@ -347,8 +350,10 @@ def _find_var(chrom, pos, ref, alts, vcf):
     return None
 
 def _process_sample(args):
-    sample, bampath, reference_filename, varoutputs, tps, fps = args
-    var_freq_file = None
+    sample, bampath, reference_filename, varoutputs, tps, fps, var_freq_file = args
+    if var_freq_file:
+        logger.info(f"Loading variant frequency file from {var_freq_file}")
+        var_freq_file = pysam.VariantFile(var_freq_file)
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
     tp_feats = []
@@ -411,7 +416,6 @@ def _process_sample(args):
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
     alltps = []
     allfps = []
-    var_freq_file = None #pysam.VariantFile(var_freq_file)
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -424,8 +428,8 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     else:
         label_fh = None
 
-    with mp.Pool(24) as pool:
-        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
+    with mp.Pool(threads) as pool:
+        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps'), var_freq_file) for sample in conf.keys()))
 
     y = []
     for tpfeats, fpfeats, fstrs, labs in results:

@@ -5,7 +5,7 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=2
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=14-0
@@ -24,7 +24,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="decoder_big"
 
-export RUN_NAME="100M_lcbig2x_again"
+export RUN_NAME="50M_lcbig2x_another_cont"
 export RUN_NOTES=""
 
 cd $ROOT_DIR
