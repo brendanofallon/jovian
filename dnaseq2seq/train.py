@@ -446,7 +446,7 @@ def train_epochs(epochs,
     dim_feedforward = 1024
     encoder_layers = 10
     decoder_layers = 10 # was 2
-    embed_dim_factor = 180 # was 100
+    embed_dim_factor = 160 # was 100
 
     # Small, for testing params
     #encoder_attention_heads = 2  # was 4
