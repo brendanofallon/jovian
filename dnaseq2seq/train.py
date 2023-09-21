@@ -407,12 +407,12 @@ def train_epochs(epochs,
                  samples_per_epoch=10000,
 ):
     # 35M model params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 4 # was 4
-    dim_feedforward = 512
-    encoder_layers = 6
-    decoder_layers = 4 # was 2
-    embed_dim_factor = 100 # was 100
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
+    #encoder_layers = 6
+    #decoder_layers = 4 # was 2
+    #embed_dim_factor = 100 # was 100
 
     # 50M model params
     #encoder_attention_heads = 8 # was 4
@@ -441,12 +441,12 @@ def train_epochs(epochs,
     #embed_dim_factor = 160 # was 100
 
     # 200M params
-    #encoder_attention_heads = 12 # was 4
-    #decoder_attention_heads = 13 # Must evenly divide 260
-    #dim_feedforward = 1024
-    #encoder_layers = 10
-    #decoder_layers = 10 # was 2
-    #embed_dim_factor = 180 # was 100
+    encoder_attention_heads = 12 # was 4
+    decoder_attention_heads = 13 # Must evenly divide 260
+    dim_feedforward = 1024
+    encoder_layers = 10
+    decoder_layers = 10 # was 2
+    embed_dim_factor = 180 # was 100
 
     # Small, for testing params
     #encoder_attention_heads = 2  # was 4

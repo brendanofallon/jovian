@@ -15,7 +15,6 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     -d $PREGEN_DIR \
     --val-dir $VAL_DIR \
     -n 500 \
-    -i /uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/50M_lcbig2x_another/50M_lcbig2x_another_epoch191.model \
     --batch-size 512 \
     --learning-rate 0.00005 \
     --checkpoint-freq 10 \
