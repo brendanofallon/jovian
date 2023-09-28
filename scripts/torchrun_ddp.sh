@@ -18,7 +18,6 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     --batch-size 200 \
     --learning-rate 0.00005 \
     --checkpoint-freq 10 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/200M_lcbig2x/200M_lcbig2x_epoch70.model \
     -o ${RUN_NAME}.model \
     --threads 16 \
     --max-decomp-batches 8 \
@@ -29,6 +28,7 @@ echo "Full run cmd: $RUNCMD"
 echo "Master addr: $MASTER_ADDR, master port: $MASTER_PORT"
 
 export ENABLE_COMET=1
+export COMET_GIT_DIRECTORY=jovian/
 
-$HOME/miniconda3/envs/jv2/bin/torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
+$HOME/miniconda3/envs/jv2/bin/torchrun --nnodes=1 --nproc_per_node=1 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
 
