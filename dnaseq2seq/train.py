@@ -441,11 +441,20 @@ def train_epochs(epochs,
     #embed_dim_factor = 160 # was 100
 
     # 200M params
-    encoder_attention_heads = 12 # was 4
-    decoder_attention_heads = 13 # Must evenly divide 260
+    #encoder_attention_heads = 12 # was 4
+    #decoder_attention_heads = 13 # Must evenly divide 260
+    #dim_feedforward = 1024
+    #encoder_layers = 10
+    #decoder_layers = 10 # was 2
+    #embed_dim_factor = 160 # was 100
+
+
+    # More layers but less model dim
+    encoder_attention_heads = 10 # was 4
+    decoder_attention_heads = 10 # Must evenly divide 260
     dim_feedforward = 1024
-    encoder_layers = 10
-    decoder_layers = 10 # was 2
+    encoder_layers = 14
+    decoder_layers = 14 # was 2
     embed_dim_factor = 160 # was 100
 
     # Small, for testing params
