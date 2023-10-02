@@ -231,7 +231,10 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
-        seq_preds = model(src, tgt_kmers_input, tgt_mask)
+        with torch.autocast():
+            seq_preds = model(src, tgt_kmers_input, tgt_mask)
+            seq_preds.float()
+
         logger.debug(f"Computing loss...")
         loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
         loss.backward()
@@ -487,7 +490,7 @@ def train_epochs(epochs,
     #model_fused = torch.ao.quantization.fuse_modules(model, [])
     #model = torch.ao.quantization.prepare_qat(model.train())
 
-    model = model.half()
+    #model = model.half()
 
     if USE_DDP:
         rank = dist.get_rank()

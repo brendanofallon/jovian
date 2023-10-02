@@ -3,7 +3,7 @@
 
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=2
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8

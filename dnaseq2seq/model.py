@@ -74,7 +74,7 @@ class PositionalEncoding2D(nn.Module):
         emb = torch.zeros((x, y, self.channels * 2), device=tensor.device).type(tensor.type())
         emb[:, :, :self.channels] = emb_x
         emb[:, :, self.channels:2 * self.channels] = emb_y
-        emb = emb.half()
+        #emb = emb.half()
         if tensor.get_device() > -1 and tensor.get_device() != emb.get_device():
             emb = emb.to(tensor.get_device())
         return tensor + emb[None, :, :, :orig_ch].expand(batch_size, -1, -1, -1)
@@ -163,7 +163,7 @@ class VarTransformer(nn.Module):
         self.elu = torch.nn.ELU()
 
     def encode(self, src):
-        src.half()
+        #src.half()
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
@@ -173,12 +173,12 @@ class VarTransformer(nn.Module):
         return mem_proj
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        mem.half()
-        tgt.half()
-        tgt_mask.half()
+        #mem.half()
+        #tgt.half()
+        #tgt_mask.half()
         #tgt_key_padding_mask.half()
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]).half()
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]).half()
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]) #.half()
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]) #.half()
 
         # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
         # This hack just forces it to be a square again
