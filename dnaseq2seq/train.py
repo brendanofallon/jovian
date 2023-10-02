@@ -430,15 +430,13 @@ def train_epochs(epochs,
     #decoder_layers = 6 # was 2
     #embed_dim_factor = 200 # was 100
 
-
-
     # 100M params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 10 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 10
-    #decoder_layers = 10 # was 2
-    #embed_dim_factor = 160 # was 100
+    encoder_attention_heads = 8 # was 4
+    decoder_attention_heads = 10 # was 4
+    dim_feedforward = 512
+    encoder_layers = 10
+    decoder_layers = 10 # was 2
+    embed_dim_factor = 160 # was 100
 
     # 200M params
     #encoder_attention_heads = 12 # was 4
@@ -450,12 +448,12 @@ def train_epochs(epochs,
 
 
     # More layers but less model dim
-    encoder_attention_heads = 10 # was 4
-    decoder_attention_heads = 10 # Must evenly divide 260
-    dim_feedforward = 1024
-    encoder_layers = 14
-    decoder_layers = 14 # was 2
-    embed_dim_factor = 160 # was 100
+    #encoder_attention_heads = 10 # was 4
+    #decoder_attention_heads = 10 # Must evenly divide 260
+    #dim_feedforward = 1024
+    #encoder_layers = 14
+    #decoder_layers = 14 # was 2
+    #embed_dim_factor = 160 # was 100
 
     # Small, for testing params
     #encoder_attention_heads = 2  # was 4
@@ -489,6 +487,7 @@ def train_epochs(epochs,
     #model_fused = torch.ao.quantization.fuse_modules(model, [])
     #model = torch.ao.quantization.prepare_qat(model.train())
 
+    model = model.half()
 
     if USE_DDP:
         rank = dist.get_rank()

@@ -123,6 +123,8 @@ def load_model(model_path):
                             d_ff=dim_feedforward,
                             device=DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+    model.half()
+    model = torch.compile(model)
     model.eval()
     model.to(DEVICE)
     return model
@@ -685,6 +687,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
+    encoded_reads = encoded_reads.half()
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
     calledvars = []
