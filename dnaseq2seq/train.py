@@ -231,7 +231,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
-        with torch.autocast():
+        with torch.autocast(device_type='cuda'):
             seq_preds = model(src, tgt_kmers_input, tgt_mask)
             seq_preds.float()
 
