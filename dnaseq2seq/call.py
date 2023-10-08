@@ -124,7 +124,7 @@ def load_model(model_path):
                             device=DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.half()
-    model = torch.compile(model)
+    #model = torch.compile(model)
     model.eval()
     model.to(DEVICE)
     return model

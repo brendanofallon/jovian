@@ -16,7 +16,7 @@ RUNCMD="jovian/dnaseq2seq/main.py train \
     --val-dir $VAL_DIR \
     -n 500 \
     --batch-size 128 \
-    --learning-rate 0.00005 \
+    --learning-rate 0.00003 \
     -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/100M_lcbig2x_again_cont/100M_lcbig2x_again_cont_epoch170.model \
     --checkpoint-freq 2 \
     -o ${RUN_NAME}.model \
