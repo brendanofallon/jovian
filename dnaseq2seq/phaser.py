@@ -16,7 +16,7 @@ import pysam
 from intervaltree import IntervalTree
 from collections import defaultdict
 
-from dnaseq2seq import loader
+import loader
 
 logger = logging.getLogger(__name__)
 

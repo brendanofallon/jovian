@@ -1,4 +1,4 @@
 lz4
 pygit2
 pysam
-torch==1.12
+xgboost

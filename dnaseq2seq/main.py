@@ -14,6 +14,7 @@ If not, see <https://www.gnu.org/licenses/>.
 import sys
 import logging
 import random
+import os
 from collections import defaultdict
 from pathlib import Path
 from string import ascii_letters, digits
@@ -27,18 +28,21 @@ from concurrent.futures.process import ProcessPoolExecutor
 import argparse
 import yaml
 
-from dnaseq2seq import util
-from dnaseq2seq import loader
-from dnaseq2seq.train import train
-from dnaseq2seq.call import call
+import util
+import loader
+from train import train
+from call import call
 
 
-logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
+logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
-                    level=logging.INFO) # handlers=[RichHandler()])
+                    level=os.environ.get('JV_LOGLEVEL', logging.INFO),
+                    handlers=[
+                        logging.StreamHandler(),  # Output logs to stdout
+                    ]) # handlers=[RichHandler()])
+
 logger = logging.getLogger(__name__)
 
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
 
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
@@ -59,29 +63,26 @@ def default_vals_per_class():
     return 0
 
 
-def load_conf(confyaml):
-    logger.info(f"Loading configuration from {confyaml}")
-    conf = yaml.safe_load(open(confyaml).read())
-    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
-    assert 'data' in conf, "Expected 'data' entry in training configuration"
-    return conf
 
 
 def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
     """
+    TRUNCATE_LEN = 148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
-    tgt_prefix = "tgt"
+    tgt_prefix = "tgkmers"
     vaf_prefix = "vaftgt"
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
     logger.info(f"Saving tensors to {output_dir}/")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+        tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
-        for data, prefix in zip([src, tgt, vaftgt],
+        logger.info(f"Src dtype is {src.dtype}")
+        for data, prefix in zip([src, tgt_kmers, vaftgt],
                                 [src_prefix, tgt_prefix, vaf_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
@@ -103,11 +104,12 @@ def pregen(config, **kwargs):
     """
     conf = load_conf(config)
     batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 100)
+    reads_per_pileup = kwargs.get('read_depth', 150)
     samples_per_pos = kwargs.get('samples_per_pos', 2)
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
+    logger.info(f"Full config: {conf}")
     output_dir = Path(kwargs.get('dir'))
     metadata_file = kwargs.get("metadata_file", None)
     if metadata_file is None:
@@ -158,8 +160,9 @@ def print_pileup(path, idx, target=None, **kwargs):
 
     src = util.tensor_from_file(path, device='cpu')
     logger.info(f"Loaded tensor with shape {src.shape}")
-    s = util.to_pileup(src[idx, :, :, :])
-    print(s)
+    #s = util.to_pileup(src[idx, :, :, :])
+    print(src[idx, 5, 0:10, :])
+    #print(s)
 
 
 def alphanumeric_no_spaces(name):
@@ -170,6 +173,8 @@ def alphanumeric_no_spaces(name):
 
 
 def main():
+    logger.debug("Turning on DEBUG log level")
+    logger.info(f"PyTorch version: {torch.__version__}")
     parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
 
@@ -195,7 +200,8 @@ def main():
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
     trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=10, type=int)
     trainparser.add_argument("-lr", "--learning-rate", help="Initial learning rate", default=0.001, type=float)
-    trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
+    # trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
+    trainparser.add_argument("-s", "--samples-per-epoch", help="Number of samples to process before emitting stats", type=int, default=100000)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
     trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
@@ -216,11 +222,14 @@ def main():
     callparser.add_argument("-c", "--classifier-path", help="Stored variant classifier model", default=None, type=str)
     callparser.add_argument("-r", "--reference-fasta", help="Path to Fasta reference genome", required=True)
     callparser.add_argument("-b", "--bam", help="Input BAM file", required=True)
-    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=False)
+    callparser.add_argument("-d", "--bed", help="bed file defining regions to call", required=True)
     callparser.add_argument("-g", "--region", help="Region to call variants in, of form chr:start-end", required=False)
     callparser.add_argument("-f", "--freq-file", help="Population frequency file for classifier")
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
+    callparser.add_argument("-td", "--temp-dir", help="Temporary data storage location", default=os.environ.get("JV_TMPDIR", "."))
+    callparser.add_argument("-mx", "--max-batch-size", help="Max number of regions to process at once", type=int, default=64)
+
     callparser.set_defaults(func=call)
 
     args = parser.parse_args()

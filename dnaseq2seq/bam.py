@@ -7,11 +7,13 @@ import torch
 import logging
 from collections import defaultdict
 
-from dnaseq2seq import util
+import util
 
 logger = logging.getLogger(__name__)
 
-EMPTY_TENSOR = torch.zeros(9)
+FEATURE_NUM=10
+
+#EMPTY_TENSOR = torch.zeros(10)
 
 
 
@@ -88,7 +90,6 @@ class ReadWindow:
                 if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
                     continue
                 allreads.append((pos, read))
-
         if len(allreads) < 5:
             raise LowReadCountException(f"Only {len(allreads)} reads in window")
             
@@ -96,15 +97,16 @@ class ReadWindow:
             num_reads_to_sample = downsample_read_count
         else:
             num_reads_to_sample = max_reads
+
         if len(allreads) > num_reads_to_sample:
+            logger.debug(f"Window has {len(allreads)}, downsampling to {num_reads_to_sample}")
             allreads = random.sample(allreads, num_reads_to_sample)
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
-        t = torch.zeros(window_size, max_reads, 9)
-
+        t = torch.zeros(window_size, max_reads, 10, device='cpu')
         for i, (readstart, read) in enumerate(allreads):
-            encoded = self.cache[read]
+            encoded = self.cache[read].char()
             enc_start_offset = max(0,  start - readstart)
             enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
             t_start_offset = max(0, readstart - start)
@@ -125,7 +127,7 @@ def encode_read(read, prepad=0, tot_length=None):
         assert prepad < tot_length, f"Cant have more padding than total length"
     bases = []
     for i in range(prepad):
-        bases.append(EMPTY_TENSOR)
+        bases.append(torch.zeros(FEATURE_NUM))
 
     try:
         for t in iterate_bases(read):
@@ -138,7 +140,7 @@ def encode_read(read, prepad=0, tot_length=None):
 
     if tot_length is not None:
         while len(bases) < tot_length:
-            bases.append(EMPTY_TENSOR)
+            bases.append(torch.zeros(FEATURE_NUM))
     return torch.stack(tuple(bases)).char()
 
 
@@ -171,14 +173,15 @@ def update_from_base(base, tensor):
     return tensor
 
 
-def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped):
-    ebc = torch.zeros(9).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
+def encode_basecall(base, qual, consumes_ref_base, consumes_read_base, strand, clipped, mapq):
+    ebc = torch.zeros(10).char() # Char is a signed 8-bit integer, so ints from -128 - 127 only
     ebc = update_from_base(base, ebc)
     ebc[4] = int(round(qual / 10))
     ebc[5] = consumes_ref_base # Consumes a base on reference seq - which means not insertion
     ebc[6] = consumes_read_base # Consumes a base on read - so not a deletion
     ebc[7] = 1 if strand else 0
     ebc[8] = 1 if clipped else 0
+    ebc[9] = int(round(mapq / 10))
     return ebc
 
 
@@ -192,7 +195,7 @@ def decode(t):
 
 
 def string_to_tensor(bases):
-    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0) for b in bases])
+    return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0, 50) for b in bases])
 
 
 def target_string_to_tensor(bases):
@@ -238,7 +241,7 @@ def iterate_cigar(rec):
         if is_ref_consumed:
             refpos += 1
 
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped), is_ref_consumed
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clippead, rec.mapping_quality), is_ref_consumed
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -271,7 +274,7 @@ def iterate_bases(rec):
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
         readpos = i/150 if not rec.is_reverse else 1.0 - i/150
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped)
+        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped, rec.mapping_quality)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
             cig_index += 1
@@ -286,7 +289,7 @@ def iterate_bases(rec):
 
 def rec_tensor_it(read, minref):
     for i in range(alnstart(read) - minref):
-        yield EMPTY_TENSOR
+        yield torch.zeros(FEATURE_NUM)
 
     try:
         for t in iterate_bases(read):
@@ -295,7 +298,7 @@ def rec_tensor_it(read, minref):
         pass
 
     while True:
-        yield EMPTY_TENSOR
+        yield torch.zeros(FEATURE_NUM)
 
 
 def emit_tensor_aln(t):
@@ -441,7 +444,7 @@ def encode_with_ref(chrom, pos, ref, alt, bam, fasta, maxreads):
     return encoded_with_ref, refseq, altseq
 
 
-def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples, downsample_frac=0.3):
+def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_samples, downsample_frac=0.2):
     """
     Returns 'num_samples' tuples of read tensors and corresponding reference sequence and alt sequence for the given
     chrom/pos/ref/alt. Each sample is for the same position, but contains a random sample of 'maxreads' from all of the

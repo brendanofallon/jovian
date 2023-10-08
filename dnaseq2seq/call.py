@@ -8,8 +8,7 @@ warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Gen
 You should have received a copy of the GNU General Public License along with this program.
 If not, see <https://www.gnu.org/licenses/>.
 """
-
-
+import concurrent.futures
 import os
 import time
 
@@ -17,27 +16,30 @@ import datetime
 import logging
 import string
 import random
+import itertools
 from collections import defaultdict
 from functools import partial
-from tempfile import NamedTemporaryFile as NTFile
-from concurrent.futures import ProcessPoolExecutor
-
+from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
 import pysam
-import pandas as pd
+import numpy as np
 
-from dnaseq2seq.model import VarTransformer
-from dnaseq2seq import buildclf
-from dnaseq2seq import vcf
-from dnaseq2seq import util
-from dnaseq2seq import bam
+from model import VarTransformer
+import buildclf
+import vcf
+import util
+import bam
 
 logger = logging.getLogger(__name__)
 
 
-DEVICE = torch.device("cpu")
+DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
+
+import warnings
+warnings.filterwarnings(action='ignore')
+
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
@@ -60,7 +62,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
-    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter'):
+    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter', multiple_iterators=False):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
         if start <= col.reference_pos < stop:
@@ -82,74 +84,47 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                     break
 
 
-def reconcile_current_window(prev_win, current_win):
-    """
-    modify variant parameters in current window depending on any overlapping variants in previous window
-    :param prev_win: variant dict for previous window (to left of current)
-    :param current_win: variant dict for current window (most recent variants called)
-    :return: modified variant dict for current window
-    """
-    overlap_vars = set(prev_win) & set(current_win)
-
-    # swap haplotypes if supported by previous window
-    same_hap_var_count, opposite_hap_var_count = 0, 0
-    for v in overlap_vars:
-        if prev_win[v].het and current_win[v].het:
-            if prev_win[v].haplotype == current_win[v].haplotype:
-                same_hap_var_count += 1
-            else:
-                opposite_hap_var_count += 1
-    if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-        for k, v in current_win.items():
-            current_win[k].genotype = tuple(reversed(current_win[k].genotype))
-            if v.het and v.haplotype == 0:
-                v.haplotype = 1
-            elif v.het and v.haplotype == 1:
-                v.haplotype = 0
-
-    for var in overlap_vars:
-        # if hom in both windows
-        #   - just mark as DUPLICATE
-        if not prev_win[var].het and not current_win[var].het:
-            current_win[var].duplicate = True
-        # if het in both windows and same genotype order ( 0|1 or 1|0 )
-        #   - change phase set (PS) of current window to previous window
-        #   - mark var as DUPLICATE in current window
-        if prev_win[var].het and current_win[var].het and prev_win[var].genotype == current_win[var].genotype:
-            current_win[var].duplicate = True
-            for v in current_win:
-                current_win[v].phase_set = prev_win[var].phase_set
-        # if het in both windows and different haplotype (hap0 or hap1)
-        #   - change phase set (PS) of current window to prev window
-        #   - mark var as DUPLICATE in current window
-        #   - reverse genotype of all current window vars (i.e., (0,1) to (1,0))
-        if prev_win[var].het and current_win[var].het and prev_win[var].genotype != current_win[var].genotype:
-            current_win[var].duplicate = True
-    return current_win
-
 
 def load_model(model_path):
     
-    # 25m
-    attention_heads = 8
-    encoder_layers = 8
-    transformer_dim = 400
-    embed_dim_factor = 100
-    
-    # 10m
-    #attention_heads = 6
+    #96M params
+    encoder_attention_heads = 8
+    decoder_attention_heads = 10 
+    dim_feedforward = 512
+    encoder_layers = 10
+    decoder_layers = 10 
+    embed_dim_factor = 160 
+
+    #50M params
+    #encoder_attention_heads = 8
+    #decoder_attention_heads = 4 
+    #dim_feedforward = 512
+    #encoder_layers = 8
+    #decoder_layers = 6
+    #embed_dim_factor = 120 
+
+
+    # 35M params
+    #encoder_attention_heads = 8 # was 4
+    #decoder_attention_heads = 4 # was 4
+    #dim_feedforward = 512
     #encoder_layers = 6
-    #transformer_dim = 250
-    #embed_dim_factor = 100
-    model = VarTransformer(read_depth=100,
-                           feature_count=9,
-                           out_dim=4,
-                           embed_dim_factor=embed_dim_factor,
-                           nhead=attention_heads,
-                           d_hid=transformer_dim,
-                           n_encoder_layers=encoder_layers,
-                           device=DEVICE)
+    #decoder_layers = 4 # was 2
+    #embed_dim_factor = 120 # was 100
+
+    model = VarTransformer(read_depth=150,
+                            feature_count=10,
+                            kmer_dim=util.FEATURE_DIM, # Number of possible kmers
+                            n_encoder_layers=encoder_layers,
+                            n_decoder_layers=decoder_layers,
+                            embed_dim_factor=embed_dim_factor,
+                            encoder_attention_heads=encoder_attention_heads,
+                            decoder_attention_heads=decoder_attention_heads,
+                            d_ff=dim_feedforward,
+                            device=DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+    model.half()
+    #model = torch.compile(model)
     model.eval()
     model.to(DEVICE)
     return model
@@ -165,7 +140,9 @@ def read_bed_regions(bedpath):
             if len(line) == 0 or line.startswith("#"):
                 continue
             toks = line.split("\t")
-            yield toks[0], int(toks[1]), int(toks[2])
+            chrom, start, end = toks[0], int(toks[1]), int(toks[2])
+            assert end > start, f"End position {end} must be strictly greater start {start}"
+            yield chrom, start, end
 
 
 def split_large_regions(regions, max_region_size):
@@ -219,42 +196,6 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     ]
 
 
-def chroms_in_bed(bed):
-    """
-    Extract all unique chromosome names from a BED file.
-    :param bed: the BED file
-    :return: a list of unique chromosome names in the BED file.
-    """
-    df = pd.read_csv(bed, sep="\t", comment="#", usecols=[0], dtype=str, header=None)
-    return list(df[df.columns[0]].unique())
-
-
-def bed_for_chrom(chrom, bed, folder="."):
-    """
-    Extract all the regions defined in the given bed file that are on the
-    given collection of chromosome; these regions are saved in a new BED
-    file that is returned to the caller.
-
-    :param chrom: a chromosome name
-    :param bed: the path to a BED file.
-    :param folder: the directory where the new BED file will be saved.
-
-    :return: a BED file that contains all the regions on the given chromosome.
-    """
-    chrom_bed = NTFile(
-        mode="w+t", delete=False, suffix=".bed", dir=folder, prefix=f"chrom_{chrom}."
-    )
-    with open(bed) as fh:
-        for line in fh:
-            if not line.startswith("#"):
-                contig, start, end = line.split("\t")[:3]
-                if contig == chrom:
-                    chrom_bed.write(line)
-
-    chrom_bed.close()
-    return chrom_bed.name
-
-
 def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
@@ -273,10 +214,15 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param clf_model_path:
     """
     start_time = time.perf_counter()
-
+    tmpdir_root = Path(kwargs.get("temp_dir"))
     threads = kwargs.get('threads', 1)
-    min_qual = kwargs.get('min_qual', 1e-4)
-    logger.info(f"Using {threads} threads")
+    max_batch_size = kwargs.get('max_batch_size', 64)
+    logger.info(f"Using {threads} threads for encoding")
+    logger.info(f"Found torch device: {DEVICE}")
+
+    if 'cuda' in str(DEVICE):
+        for idev in range(torch.cuda.device_count()):
+            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
 
     var_freq_file = kwargs.get('freq_file')
     if var_freq_file:
@@ -284,72 +230,50 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     else:
         logger.info(f"No variant frequency file specified, this might not work depending on the classifier requirements")
 
-    tmpdir = f".tmp.varcalls_{randchars()}"
+    tmpdir = tmpdir_root / f"jv_tmpdata_{randchars()}"
+    logger.info(f"Saving temp data in {tmpdir}")
     os.makedirs(tmpdir, exist_ok=False)
-
-    chroms = chroms_in_bed(bed)
-    func = partial(bed_for_chrom, bed=bed, folder=tmpdir)
-    chrom_beds = [b for b in mp.Pool(threads).map(func, chroms)]
 
     logger.info(f"The model will be loaded from path {model_path}")
 
-    vcf_file = vcf.init_vcf(
-        vcf_out, sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline')
+    vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
+    vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
+    vcf_out_fh = open(vcf_out, mode='w')
+    logger.info(f"Writing variants to {Path(vcf_out).absolute()}")
+    vcf_out_fh.write(str(vcf_header))
+
+    call_vars_in_blocks(
+        bamfile=bam,
+        bed=bed,
+        reference_fasta=reference_fasta,
+        model_path=model_path,
+        classifier_path=classifier_path,
+        threads=threads,
+        tmpdir=tmpdir,
+        max_batch_size=max_batch_size,
+        var_freq_file=var_freq_file,
+        vcf_out=vcf_out_fh,
+        vcf_template=vcf_template,
     )
 
-    for chrom, chrom_bed in zip(chroms, chrom_beds):
-        chrom_vcf = call_variants_on_chrom(
-            chrom,
-            bamfile=bam,
-            bed=chrom_bed,
-            reference_fasta=reference_fasta,
-            model_path=model_path, 
-            classifier_path=classifier_path,
-            threads=threads,
-            tmpdir=tmpdir,
-            var_freq_file=var_freq_file,
-        )
-        for var in pysam.VariantFile(chrom_vcf):
-            if var.qual > min_qual:
-                vcf_file.write(var)
-        os.unlink(chrom_vcf)
-        os.unlink(chrom_bed)
-
-    vcf_file.close()
-    logger.info(f"All variants are saved to {vcf_out}")
-
+    vcf_out_fh.close()
+    logger.info(f"All variants saved to {vcf_out}")
+    tmpdir.rmdir()
     end_time = time.perf_counter()
-    logger.info(f"Total running time of call subcommand is: {end_time - start_time}")
+    elapsed_seconds = end_time - start_time
+    if elapsed_seconds > 3600:
+        logger.info(f"Total running time of call subcommand is: {elapsed_seconds / 3600 :.2f} hours")
+    elif elapsed_seconds > 120:
+        logger.info(f"Total running time of call subcommand is: {elapsed_seconds / 60 :.2f} minutes")
+    else:
+        logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
 
 
-def split_even_chunks(n_item, n_chunk):
-    """
-    This function splits n_items into n_chunk chunks
-    :param n_item : total number of items that will be splitted.
-    :param n_chunk: the number of chunks
-    :return chunks: the start index and end index of each chunk.
-    """
-    chunks = []
-    chunk_size = n_item // n_chunk
-    num_left = n_item - chunk_size * n_chunk
-    for i in range(n_chunk):
-        chunks.append(chunk_size)
-    for i in range(num_left):
-        chunks[i] += 1
-
-    start_idx = 0
-    end_idx = 0
-    for i in range(n_chunk):
-        start_idx = end_idx
-        end_idx = start_idx + chunks[i]
-        yield (start_idx, end_idx)
-
-
-def call_variants_on_chrom(
-    chrom, bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, var_freq_file
+def call_vars_in_blocks(
+    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, max_batch_size, var_freq_file, vcf_out, vcf_template,
 ):
     """
-    Call variants on the given chromsome and write the variants to a temporary VCF.
+    Split the input BED file into chunks and call variants in each chunk sequentially
     :param chrom: the chromosome name
     :param bamfile: the alignment file
     :param bed: the BED file for the given chromosome
@@ -361,202 +285,327 @@ def call_variants_on_chrom(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 100
+    max_read_depth = 150
+    logger.info(f"Max read depth: {max_read_depth}")
+    logger.info(f"Max batch size: {max_batch_size}")
 
     # Iterate over the input BED file, splitting larger regions into chunks
     # of at most 'max_region_size'
-
     logger.info(f"Creating windows from {bed}")
     windows = [
         (chrom, window_idx, window_start, window_end) 
         for window_idx, (chrom, window_start, window_end) in enumerate(
-            split_large_regions(read_bed_regions(bed), max_region_size=1000)
+            split_large_regions(read_bed_regions(bed), max_region_size=10000)
         )
     ]
 
-    func = partial(
+    regions_per_block = max(4, threads)
+    start_block = 0
+    while start_block < len(windows):
+        logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(windows)}  {start_block / len(windows) * 100 :.2f}% done")
+        process_block(windows[start_block:start_block + regions_per_block],
+                      bamfile=bamfile,
+                      model_path=model_path,
+                      reference_fasta=reference_fasta,
+                      classifier_path=classifier_path,
+                      tmpdir=tmpdir,
+                      threads=threads,
+                      max_read_depth=max_read_depth,
+                      window_size=150,
+                      vcf_out=vcf_out,
+                      vcf_template=vcf_template,
+                      max_batch_size=max_batch_size,
+                      var_freq_file=var_freq_file)
+        start_block += regions_per_block
+
+
+def process_block(raw_regions,
+              bamfile,
+              model_path,
+              reference_fasta,
+              classifier_path,
+              tmpdir,
+              threads,
+              max_read_depth,
+              window_size,
+              vcf_out,
+              vcf_template,
+              max_batch_size,
+              var_freq_file=None):
+    """
+    For each region in the given list of regions, generate input tensors and then call variants on that data
+    Input tensor generation is done in parallel and the result tensors are saved to disk in 'tmpdir'
+    Calling is done on the main thread and loads the tensors one at a time from disk
+
+    """
+    sus_start = datetime.datetime.now()
+    cluster_positions_func = partial(
         cluster_positions_for_window,
         bamfile=bamfile,
         reference_fasta=reference_fasta,
         maxdist=100,
     )
-
-    logger.info(f"Generating regions from windows on chromosome {chrom}...")
-    region_file = f"{tmpdir}/chrom_{chrom}.regions.txt"
-    n_regions = 0
-    with open(region_file, "w") as rfh:
-        for regions in mp.Pool(threads).map(func, windows):
-            for r in regions:
-                print(f"{r[0]}\t{r[1]}\t{r[2]}\t{r[3]}", file=rfh)
-                n_regions += 1
-    logger.info(f"Generated a total of {n_regions} regions on chromosome {chrom}")
-
-    chunks = [(chrom, si, ei) for si, ei in split_even_chunks(n_regions, threads)]
-
-    process_chunk_func = partial(
-        process_chunk_regions,
-        region_file=region_file,
-        bamfile=bamfile,
-        model_path=model_path,
-        reference_fasta=reference_fasta,
-        classifier_path=classifier_path,
-        tmpdir=tmpdir,
-        max_read_depth=max_read_depth,
-        window_size=150,
-        window_step=33,
-        var_freq_file=var_freq_file
-    )
-
-    chrom_vcf = f"{tmpdir}/chrom_{chrom}_raw.vcf"
-    vcf_file = vcf.init_vcf(chrom_vcf, sample_name="sample", lowcov=20)
-    vcf_file.close()
-
-
-    chrom_nvar = 0
-    with open(chrom_vcf, "a") as chrom_vfh:
-        if threads == 1:
-            for chunk in chunks:
-                chunk_nvar, chunk_vcf = process_chunk_func(chunk)
-                for var in pysam.VariantFile(chunk_vcf):
-                    chrom_vfh.write(str(var))
-                os.unlink(chunk_vcf)
-                chrom_nvar += chunk_nvar
-        else:
-            futs = []
-            with ProcessPoolExecutor(max_workers=threads) as pool:
-                for chunk in chunks:
-                    fut = pool.submit(process_chunk_func, chunk)
-                    futs.append(fut)
-                logger.info(f"Submitted {len(futs)} jobs for variant calling")
-                for i, fut in enumerate(futs):
-                    try:
-                        nvars, chunk_vcf = fut.result(timeout= 5 * 60 * 60)
-                        logger.debug(f"Got result {i} of {len(futs)} results for chunked variant calling with {nvars} vars")
-                        chrom_nvar += nvars
-                        for var in pysam.VariantFile(chunk_vcf):
-                            chrom_vfh.write(str(var))
-                            chrom_vfh.flush()
-                    except Exception as ex:
-                        logger.error(f"Exception processing chunk {i} ({chunk}): {ex}")
-                        raise ex
-
-                os.unlink(chunk_vcf)
-
-    logger.info(f"Done calling variants on {len(chunks)} chunks, now sorting & deduping raw VCF")
-    chrom_vcf_sorted = f"{tmpdir}/chrom_{chrom}_sorted.vcf"
-    util.sort_chrom_vcf(chrom_vcf, chrom_vcf_sorted)
-    logger.info(f"Done sorting, now deduping..")
-    chrom_vcf_dedup = f"{tmpdir}/chrom_{chrom}_dedup.vcf"
-    util.dedup_vcf(chrom_vcf_sorted, chrom_vcf_dedup)
-
-    logger.info(
-        f"A total of {chrom_nvar} variants called on chromosome {chrom} and saved "
-        f"to {chrom_vcf_dedup}"
-    )
-    os.unlink(region_file)
-    os.unlink(chrom_vcf)
-    os.unlink(chrom_vcf_sorted)
-    
-    return chrom_vcf_dedup
-
-
-def process_chunk_regions(
-    chunk,
-    region_file,
-    bamfile,
-    model_path,
-    reference_fasta,
-    classifier_path,
-    max_read_depth,
-    tmpdir,
-    var_freq_file,
-    window_size=300,
-    min_reads=5,
-    window_step=50,
-):
-    """
-    Call variants on the given region and write variants to a temporary VCF file.
-    """
-    chrom, start_idx, end_idx = chunk
-    chunk_vcf =f"{tmpdir}/chrom_{chrom}.chunk_{start_idx}-{end_idx}.vcf"
-    chunk_vfh = vcf.init_vcf(chunk_vcf, sample_name="sample", lowcov=20)
-    chunk_vfh.close()
-    
-    cpname = mp.current_process().name
-    logger.debug(
-        f"{cpname}: Writing variants to tmp VCF {chunk_vcf}"
-    )
-
-
+    sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
+    sus_regions = util.merge_overlapping_regions( list(itertools.chain(*sus_regions)))
+    sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
+    enc_start = datetime.datetime.now()
+    logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
+    encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64, window_step=25)
+    enc_elapsed = datetime.datetime.now() - enc_start
+    logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
+    model = load_model(model_path)
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
-    model = load_model(model_path)
 
     if var_freq_file:
         var_freq_file = pysam.VariantFile(var_freq_file)
-
-    # if classifier model available then use classifier quality
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
 
-    chunk_nvar = 0
-    with open(region_file) as fh, open(chunk_vcf, "a") as chunk_vfh:
-        for idx, line in enumerate(fh):
-            if idx < start_idx or idx >= end_idx:
-                continue
-            chrom, window_idx, start, end = line.strip().split("\t")[0:4]
-            window_idx, start, end = int(window_idx), int(start), int(end)
-            
-            logger.debug(f"{cpname}: calling variants in region {chrom}:{start}-{end} (window {window_idx})")
-            try:
-                chrom, window_idx, vars_hap0, vars_hap1 = _call_vars_region(
-                    chrom,
-                    window_idx,
-                    start,
-                    end,
-                    aln=aln,
-                    model=model,
-                    reference=reference,
-                    max_read_depth=max_read_depth,
-                    window_size=window_size,
-                    min_reads=min_reads,
-                    window_step=window_step
+    # Accumulate regions until we have at least this many
+    min_samples_callbatch = 96
+    
+    batch_encoded = []
+    batch_start_pos = []
+    batch_regions = []
+    call_start = datetime.datetime.now()
+    batch_count = 0
+    window_count = 0
+    var_records = [] # Stores all variant records so we can sort before writing
+    window_idx = -1
+    with torch.no_grad():
+        for path in encoded_paths:
+            # Load the data, parsing location + encoded data from file
+            data = torch.load(path, map_location='cpu')
+            chrom, start, end = data['region']
+            window_idx = int(data['window_idx'])
+            batch_encoded.append(data['encoded_pileup'])
+            batch_start_pos.extend(data['start_positions'])
+            batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+            os.unlink(path)
+            window_count += len(batch_start_pos)
+            if len(batch_start_pos) > min_samples_callbatch:
+                logger.debug(f"Calling variants on window {window_idx} path: {path}")
+                batch_count += 1
+                if len(batch_encoded) > 1:
+                    allencoded = torch.concat(batch_encoded, dim=0)
+                else:
+                    allencoded = batch_encoded[0]
+                hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+                var_records.extend(
+                    vars_hap_to_records(
+                        chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+                    )
                 )
-            except Exception as ex:
-                print(f"Error calling variants in {chrom}:{start}-{end} (window {window_idx}) : {ex}")
-                raise ex
+                batch_encoded = []
+                batch_start_pos = []
+                batch_regions = []
 
-            try:
-                logger.debug(f"{cpname}: Creating variant records for region {chrom}:{start}-{end} (window {window_idx})")
-                nvar, vcfname = vars_hap_to_records(
-                    chrom,
-                    window_idx=window_idx,
-                    vars_hap0=vars_hap0,
-                    vars_hap1=vars_hap1,
-                    aln=aln,
-                    reference=reference,
-                    classifier_model=classifier_model,
-                    tmpdir=tmpdir,
-                    var_freq_file=var_freq_file
+        # Write last few
+        logger.debug(f"Calling variants on window {window_idx} path: {path}")
+        if len(batch_start_pos):
+            batch_count += 1
+            if len(batch_encoded) > 1:
+                allencoded = torch.concat(batch_encoded, dim=0)
+            else:
+                allencoded = batch_encoded[0]
+            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+            var_records.extend(
+                vars_hap_to_records(
+                    chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
                 )
-            except Exception as ex:
-                logger.error(f"Error converting variants to VCF records in window {window_idx}: {ex}")
-                raise ex
+            )
 
-            #logger.info(f"Writing {nvar} variants from chunk {chrom}:{start}-{end} to {chunk_vcf}")
-            for var in pysam.VariantFile(vcfname):
-                chunk_vfh.write(str(var))
-            os.unlink(vcfname)
-            chunk_nvar += nvar
+    # We already do this in vars_hap_to_records!
+    if classifier_model:
+        for v in var_records:
+            v.qual = buildclf.predict_one_record(classifier_model, v, aln, var_freq_file)
+    for var in sorted(var_records, key=lambda x: x.pos):
+        vcf_out.write(str(var))
+    vcf_out.flush()
+    call_elapsed = datetime.datetime.now() - call_start
+    logger.info(f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds")
 
-    return chunk_nvar, chunk_vcf
+
+
+def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size, window_step):
+    """
+    Encode and save all the regions in the regions list in parallel, and return the list of files to the saved data
+    """
+    torch.set_num_threads(1) # Required to avoid deadlocks when creating tensors
+    encode_func = partial(
+        encode_and_save_region,
+        bamfile=bamfile,
+        refpath=reference_fasta,
+        tmpdir=tmpdir,
+        max_read_depth=max_read_depth,
+        window_size=window_size,
+        min_reads=5,
+        batch_size=batch_size,
+        window_step=window_step,
+    )
+
+    futures = []
+    result_paths = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_threads) as pool:
+        for chrom, window_idx, start, end in regions:
+            fut = pool.submit(encode_func, region=(chrom, window_idx, int(start), int(end)))
+            futures.append(fut)
+
+        for fut in futures:
+            result = fut.result(timeout=300) # Timeout in 5 mins - typical time for encoding is 1-3 seconds
+            if result is not None:
+                result_paths.append(result)
+            else:
+                logger.error("Weird, found an empty result object, ignoring it... but this could mean missed variant calls")
+
+    torch.set_num_threads(n_threads)
+    return result_paths
+
+
+def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, window_size, min_reads, batch_size, window_step):
+    """
+    Encode the reads in the given region and save the data along with the region and start offsets to a file
+    and return the absolute path of the file
+
+    Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
+    """
+    chrom, window_idx, start, end = region
+    aln = pysam.AlignmentFile(bamfile, reference_filename=refpath)
+    reference = pysam.FastaFile(refpath)
+    all_encoded = []
+    all_starts = []
+    logger.debug(f"Encoding region {chrom}:{start}-{end} idx: {window_idx}")
+    for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
+                                                     window_size=window_size, min_reads=min_reads, batch_size=batch_size, window_step=window_step):
+        all_encoded.append(encoded_region)
+        all_starts.extend(start_positions)
+    logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
+    if len(all_encoded) > 1:
+        encoded = torch.concat(all_encoded, dim=0)
+    elif len(all_encoded) == 1:
+        encoded = all_encoded[0]
+    else:
+        logger.error(f"Uh oh, did not find any encoded paths!, region is {chrom}:{start}-{end}")
+        return None
+
+    data = {
+        'encoded_pileup': encoded,
+        'region': (chrom, start, end),
+        'start_positions': all_starts,
+        'window_idx': window_idx,
+    }
+    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
+    logger.debug(f"Saving data as {dest.absolute()}")
+    torch.save(data, dest)
+    return dest.absolute()
+
+
+def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
+    """
+
+    """
+    dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+    subbatch_idx = np.zeros(len(dists), dtype=int)
+
+    byregion = defaultdict(list)
+    max_dist = max(dists)
+    # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
+    for sbi in range(max(subbatch_idx) + 1):
+        which = np.where(subbatch_idx == sbi)[0]
+        subbatch = batch[torch.tensor(which), :, :, :]
+        subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
+        subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
+        subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
+
+        logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
+        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
+
+        for region, bvars in zip(subbatch_regions, batchvars):
+            byregion[region].append(bvars)
+
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
+    for region, rvars in byregion.items():
+        chrom, start, end = region
+        h0, h1 = merge_genotypes(rvars)
+        for k, v in h0.items():
+            if start <= v[0].pos < end:
+                hap0[k].extend(v)
+        for k, v in h1.items():
+            if start <= v[0].pos < end:
+                hap1[k].extend(v)
+
+    return hap0, hap1
+
+
+def merge_multialts(v0, v1):
+    """
+    Merge two VcfVar objects into a single one with two alts
+
+    ATCT   G
+    A     GCAC
+      -->
+    ATCT   G,GCACT
+
+    """
+    assert v0.pos == v1.pos
+    #assert v0.het and v1.het
+    if v0.ref == v1.ref:
+        v0.alts = (v0.alts[0], v1.alts[0])
+        v0.qual = (v0.qual + v1.qual) / 2  # Average quality??
+        v0.samples['sample']['GT'] = (1,2)
+        return v0
+
+    else:
+        shorter, longer = sorted([v0, v1], key=lambda x: len(x.ref))
+        extra_ref = longer.ref[len(shorter.ref):]
+        newalt = shorter.alts[0] + extra_ref
+        longer.alts = (longer.alts[0], newalt)
+        longer.qual = (longer.qual + shorter.qual) / 2
+        longer.samples['sample']['GT'] = (1, 2)
+        return longer
+
+
+
+def het(rec):
+    return rec.samples[0]['GT'] == (0,1) or rec.samples[0]['GT'] == (1,0)
+
+def merge_overlaps(overlaps, min_qual):
+    """
+     Attempt to merge overlapping VCF records in a sane way
+     As a special case if there is only one input record we just return that
+    """
+    if len(overlaps) == 1:
+        return [overlaps[0]]
+    overlaps = list(filter(lambda x: x.qual > min_qual, overlaps))
+    if len(overlaps) == 1:
+        # An important case where two variants overlap but one of them is low quality
+        # Should the remaining variant be het or hom?
+        return [overlaps[0]]
+    elif len(overlaps) == 0:
+        return []
+
+    result = []
+    overlaps = sorted(overlaps, key=lambda x: x.qual, reverse=True)[0:2]  # Two highest quality alleles
+    overlaps[0].samples['sample']['GT'] = (None, 1)
+    overlaps[1].samples['sample']['GT'] = (1, None)
+    result.extend(sorted(overlaps, key=lambda x: x.pos))
+    return result
 
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, tmpdir, var_freq_file
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
 ):
     """
-    Convert variant haplotypes to variant records and write the records to a temporary VCF file.
+    Convert variant haplotype objects to variant records
     """
+
+    # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
+    # we hard-filter out very poor quality variants that overlap other, higher-quality variants
+    # This value defines the min qual to be included when merging overlapping variants
+    min_merge_qual = 0.05
+
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
         vars_hap1=vars_hap1,
@@ -566,83 +615,97 @@ def vars_hap_to_records(
         reference=reference
     )
 
-    vcfh = NTFile(
-        mode="w+t", delete=False, suffix=".vcf", dir=tmpdir, prefix=f"chrom_{chrom}_w{window_idx}."
-    )
-    vcfh.close()
-    vcf_file = vcf.init_vcf(vcfh.name, sample_name="sample", lowcov=20)
-
     # covert variants to pysam vcf records
     vcf_records = [
-        vcf.create_vcf_rec(var, vcf_file)
+        vcf.create_vcf_rec(var, vcf_template)
         for var in sorted(vcf_vars, key=lambda x: x.pos)
     ]
 
-    # write to a chunk VCF
+    if not vcf_records:
+        return []
+
+
     for rec in vcf_records:
+        if rec.ref == rec.alts[0]:
+            logger.warning(f"Whoa, found a REF == ALT variant: {rec}")
+
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
             rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
-        vcf_file.write(rec)
 
-    vcf_file.close()
+    merged = []
+    overlaps = [vcf_records[0]]
+    for rec in vcf_records[1:]:
+        if overlaps and util.records_overlap(overlaps[-1], rec):
+            overlaps.append(rec)
+        elif overlaps: #
+            result = merge_overlaps(overlaps, min_qual=min_merge_qual)
+            merged.extend(result)
+            overlaps = [rec]
+        else:
+            overlaps = [rec]
 
-    return len(vcf_records), vcfh.name
+    if overlaps:
+        merged.extend(merge_overlaps(overlaps, min_qual=min_merge_qual))
+    else:
+        merged.append(rec)
+
+    return merged
 
 
-def call_batch(encoded_reads, batch_pos_offsets, model, reference, chrom, window_size, var_retain_window_size):
+def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
+    """
+    Predict the sequence for the encoded reads, but dont submit more than 'max_batch_size' samples
+    at once
+    """
+    seq_preds = None
+    probs = None
+    start = 0
+    
+    while start < encoded_reads.shape[0]:
+        end = start + max_batch_size
+        preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+                                            n_output_toks=n_output_toks, device=DEVICE)
+        if seq_preds is None:
+            seq_preds = preds
+        else:
+            seq_preds = torch.concat((seq_preds, preds), dim=0)
+        if probs is None:
+            probs = prbs.detach().cpu().numpy()
+        else:
+            probs = np.concatenate((probs, prbs.detach().cpu().numpy()), axis=0)
+        start += max_batch_size
+    return seq_preds, probs
+
+
+def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks, max_batch_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
     mismatching parts
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
-    seq_preds = model(encoded_reads.to(DEVICE))
+    assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
+    assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
+    encoded_reads = encoded_reads.half()
+    seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
+
     calledvars = []
-    for b in range(seq_preds.shape[0]):
+    for offset, (chrom, start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
-        offset = batch_pos_offsets[b]
-        hap0 = util.readstr(hap0_t)
-        hap1 = util.readstr(hap1_t)
-        hap0_probs = hap0_t.detach().cpu().numpy().max(axis=-1)
-        hap1_probs = hap1_t.detach().cpu().numpy().max(axis=-1)
+        hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
+        hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
+        probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
+        probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
-        refseq = reference.fetch(chrom, offset, offset + window_size)
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, hap0_probs) if v.pos < offset + var_retain_window_size)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, hap1_probs) if v.pos < offset + var_retain_window_size)
-        calledvars.append((vars_hap0, vars_hap1))
+        refseq = reference.fetch(chrom, offset, offset + len(hap0))
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
+        #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
+        #calledvars.append((vars_hap0, vars_hap1))
+        calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
+
     return calledvars
-
-
-# def update_batchvars(allvars0, allvars1, batchvars, batch_offsets, step_count, window_retain_size=150):
-#     for window_start, (vars_hap0, vars_hap1) in zip(batch_offsets, batchvars):
-#         stepvars0 = {}
-#         for v in vars_hap0:
-#             if v.pos < (window_start + window_retain_size):
-#                 v.hap_model = 0
-#                 v.step = step_count
-#                 stepvars0[(v.pos, v.ref, v.alt)] = v
-#         stepvars1 = {}
-#         for v in vars_hap1:
-#             if v.pos < (window_start + window_retain_size):
-#                 v.hap_model = 1
-#                 v.step = step_count
-#                 stepvars1[(v.pos, v.ref, v.alt)] = v
-#
-#         # swap haplotypes if supported by previous vars
-#         same_hap_var_count = sum(len(allvars0[v]) for v in stepvars0 if v in allvars0)
-#         same_hap_var_count += sum(len(allvars1[v]) for v in stepvars1 if v in allvars1)
-#         opposite_hap_var_count = sum(len(allvars1[v]) for v in stepvars0 if v in allvars1)
-#         opposite_hap_var_count += sum(len(allvars0[v]) for v in stepvars1 if v in allvars0)
-#         if opposite_hap_var_count > same_hap_var_count:  # swap haplotypes
-#             stepvars1, stepvars0 = stepvars0, stepvars1
-#
-#         # add this step's vars to allvars
-#         [allvars0[key].append(v) for key, v in stepvars0.items()]
-#         [allvars1[key].append(v) for key, v in stepvars1.items()]
-#         step_count = step_count + 1
-#
-#     return allvars0, allvars1
 
 
 def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
@@ -654,7 +717,7 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
 
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=300, min_reads=5, window_step=50, batch_size=64):
+def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64, window_step=25):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -676,27 +739,30 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = start - 2 * window_step  # We start with regions a bit upstream of the focal / target region
+    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, window_start, end + window_size)
-    while window_start <= end:
+    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
+    logger.debug(f"Encoding region {chrom}:{start}-{end}")
+    returned_count = 0
+    while window_start <= (end - 0.2 * window_size):
         try:
+            #logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
             encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
                                              max_read_depth=max_read_depth)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
+            #logger.debug(f"Added item to batch from window_start {window_start}")
         except bam.LowReadCountException:
-            logger.debug(
+            logger.info(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
-
         window_start += window_step
-
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
+            returned_count += 1
             yield encodedreads, batch_offsets
             batch = []
             batch_offsets = []
@@ -704,73 +770,11 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     # Last few
     if batch:
         encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
+        returned_count += 1
         yield encodedreads, batch_offsets
 
-
-def _call_vars_region(
-    chrom, window_idx, start, end, aln, model, reference, max_read_depth, window_size=300, min_reads=5, window_step=50
-):
-    """
-    For the given region, identify variants by repeatedly calling the model over a sliding window,
-    tallying all of the variants called, and passing back all call and repeat count info
-    for further exploration
-    Currently:
-    - exclude all variants in the downstream half of the window
-    - retain all remaining var calls noting how many time each one was called, qualities, etc.
-    - call with no repeats are mostly false positives but they are retained
-    - haplotype 0 and 1 for each step are set by comparing with repeat vars from previous steps
-
-    TODO:
-      - add prob info from alt sequence to vars?
-      - add depth derived from tensor to vars?
-      - create new prob from all duplicate calls?
-    """
-    cpname = mp.current_process().name
-    logger.debug(
-        f"{cpname}: Processing region: {chrom}:{start}-{end} on window {window_idx}"
-    )
-
-    step_count = 0  # initialize
-    var_retain_window_size = 125
-    batch_size = 128
-
-    enctime_total = datetime.timedelta(0)
-    calltime_total = datetime.timedelta(0)
-    encstart = datetime.datetime.now()
-    hap0 = defaultdict(list)
-    hap1 = defaultdict(list)
-    for batch, batch_offsets in _encode_region(aln, reference, chrom, start, end,
-                                               max_read_depth,
-                                               window_size=window_size,
-                                               min_reads=min_reads,
-                                               window_step=window_step,
-                                               batch_size=batch_size):
-        logger.debug(f"{cpname}: Forward pass for batch with starts {min(batch_offsets)} - {max(batch_offsets)}")
-        enctime_total += (datetime.datetime.now() - encstart)
-        callstart = datetime.datetime.now()
-        batchvars = call_batch(batch, batch_offsets, model, reference, chrom, window_size, var_retain_window_size)
-        h0, h1 = merge_genotypes(batchvars)
-        for k, v in h0.items():
-            hap0[k].extend(v)
-        for k, v in h1.items():
-            hap1[k].extend(v)
-        calltime_total += (datetime.datetime.now() - callstart)
-
-        step_count += batch.shape[0]
-
-    # Only return variants that are actually in the window
-    hap0_passing = {k: v for k, v in hap0.items() if start <= v[0].pos <= end}
-    hap1_passing = {k: v for k, v in hap1.items() if start <= v[0].pos <= end}
-
-    logger.debug(f"{cpname}: Enc time total: {enctime_total.total_seconds()}  calltime total: {calltime_total.total_seconds()}")
-    return chrom, window_idx, hap0_passing, hap1_passing
-
-
-def vars_dont_overlap(v0, v1):
-    """
-    True if the two variant do not share any reference bases
-    """
-    return v0.pos + len(v0.ref) < v1.pos or v1.pos + len(v1.ref) < v0.pos
+    if not returned_count:
+        logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
 
 
 def merge_genotypes(genos):
@@ -837,4 +841,5 @@ def merge_genotypes(genos):
     for v in results[1]:
         allvars1[v.key] = [t for t in allvars if t.key == v.key]
     return allvars0, allvars1
+
 

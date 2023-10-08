@@ -1,9 +1,12 @@
 
 import numpy as np
 from dataclasses import dataclass
+import logging
 import pysam
 
 from skbio.alignment import StripedSmithWaterman
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Variant:
@@ -15,6 +18,8 @@ class Variant:
     step: int = None
     window_offset: int = None
     var_index: int = None
+    var_count: int = None
+    aln_score: int = None
 
     def __eq__(self, other):
         return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
@@ -24,6 +29,10 @@ class Variant:
 
     def __gt__(self, other):
         return self.pos > other.pos
+
+    @property
+    def end(self):
+        return self.pos + len(self.ref)
 
     @property
     def key(self):
@@ -44,7 +53,7 @@ class VcfVar:
     chrom: str
     pos: int
     ref: str
-    alt: str
+    # alt: str
     quals: list
     qual: float
     filter: list
@@ -63,6 +72,12 @@ class VcfVar:
     genotype: tuple
     het: bool
     duplicate: bool
+    alts: list
+
+    @property
+    def alt(self):
+        return self.alts[0]
+
 
 
 def _cigtups(cigstr):
@@ -88,19 +103,19 @@ def _geomean(probs):
     return np.exp(np.log(probs).mean())
 
 
-def align_sequences(query, target):
+def align_sequences(query, target, gap_open_penalty=3, gap_extend_penalty=1, match_score=2, mismatch_score=-1):
     """
     Return Smith-Watterman alignment of both sequences
     """
     ssw = StripedSmithWaterman(query,
-                               gap_open_penalty=3,
-                               gap_extend_penalty=1,
-                               match_score=2,
-                               mismatch_score=-1)
+                               gap_open_penalty=gap_open_penalty,
+                               gap_extend_penalty=gap_extend_penalty,
+                               match_score=match_score,
+                               mismatch_score=mismatch_score)
     return ssw(target)
 
 
-def _mismatches_to_vars(query, target, offset, probs):
+def _mismatches_to_vars(query, target, cig_offset, window_offset, probs):
     """
     Zip both sequences and look for mismatches, if any are found convert them to Variant objects
     and return them
@@ -117,7 +132,7 @@ def _mismatches_to_vars(query, target, offset, probs):
                               alt="".join(mismatches[1]).replace("-", ""),
                               pos=mismatchstart,
                               qual=_geomean(mismatch_quals),  # Geometric mean?
-                              window_offset=mismatchstart - offset,
+                              window_offset=mismatchstart - cig_offset + window_offset,
                               )
             mismatches = []
             mismatch_quals = []
@@ -129,7 +144,7 @@ def _mismatches_to_vars(query, target, offset, probs):
             else:
                 mismatches = [a, b]
                 mismatch_quals = [probs[i]]
-                mismatchstart = i + offset
+                mismatchstart = i + cig_offset
 
     # Could be mismatches at the end
     if mismatches:
@@ -137,7 +152,36 @@ def _mismatches_to_vars(query, target, offset, probs):
                       alt="".join(mismatches[1]).replace("-", ""),
                       pos=mismatchstart,
                       qual=_geomean(mismatch_quals),
-                      window_offset=mismatchstart - offset)
+                      window_offset=mismatchstart - cig_offset + window_offset)
+
+
+def _display_aln(aln):
+    qit = iter(aln.query_sequence)
+    tit = iter(aln.target_sequence)
+    tbases = 0
+    for cig in _cigtups(aln.cigar):
+        if cig.op == "M":
+            for _ in range(cig.len):
+                q = next(qit)
+                t = next(tit)
+                if q == t:
+                    print(f"{tbases}\tM   {q} = {t}")
+                else:
+                    print(f"{tbases}\tM   {q} ! {t}")
+                tbases += 1
+        elif cig.op == "I":
+            for _ in range(cig.len):
+                q = next(qit)
+                t = "-"
+                print(f"{tbases}\tI  {q}   {t}")
+        elif cig.op == "D":
+            for _ in range(cig.len):
+                q = "-"
+                t = next(tit)
+                print(f"{tbases}   D  {q}   {t}")
+                tbases += 1
+        else:
+            raise ValueError(f"Unknown cigar op {cig.op}")
 
 
 def aln_to_vars(refseq, altseq, offset=0, probs=None):
@@ -149,65 +193,69 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     :param offset: This amount will be added to each variant position
     :return: Generator over variants
     """
-
     num_vars = 0
     if probs is not None:
         assert len(probs) == len(altseq), f"Probabilities must contain same number of elements as alt sequence"
     else:
         probs = np.ones(len(altseq))
-    aln = align_sequences(altseq, refseq)
+    aln = align_sequences(altseq, refseq, gap_open_penalty=4, gap_extend_penalty=0.2, match_score=1, mismatch_score=-1)
+    ref_seq_consumed = 0
     q_offset = 0
     t_offset = 0
 
     variant_pos_offset = 0
     if aln.query_begin > 0:
-        q_offset += aln.query_begin # Maybe we don't want this?
+        q_offset += aln.query_begin # Maybe we don't want this? query is alt sequence, so nonzero indicates first alt base matches downstream of first ref base
     if aln.target_begin > 0:
+        ref_seq_consumed += aln.target_begin
         t_offset += aln.target_begin
 
+    variants = []
     for cig in _cigtups(aln.cigar):
         if cig.op == "M":
             for v in _mismatches_to_vars(
                     refseq[t_offset:t_offset+cig.len],
                     altseq[q_offset:q_offset+cig.len],
                     offset + t_offset,
+                    t_offset,
                     probs[q_offset:q_offset+cig.len]):
                 v.var_index = num_vars
-                yield v
+                variants.append(v)
                 num_vars += 1
             q_offset += cig.len
             variant_pos_offset += cig.len
             t_offset += cig.len
 
         elif cig.op == "I":
-            yield Variant(ref='',
-                          alt=altseq[q_offset:q_offset+cig.len],
-                          pos=offset + variant_pos_offset,
-                          qual=_geomean(probs[q_offset:q_offset+cig.len]),
-                          window_offset=variant_pos_offset,
-                          var_index=num_vars)
+            variants.append(
+                Variant(ref='',
+                        alt=altseq[q_offset:q_offset+cig.len],
+                        pos=offset + variant_pos_offset + aln.target_begin,
+                        qual=_geomean(probs[q_offset:q_offset+cig.len]),
+                        window_offset=variant_pos_offset,
+                        var_index=num_vars)
+                )
             num_vars += 1
             q_offset += cig.len
-            variant_pos_offset += cig.len
+            # variant_pos_offset += cig.len
 
         elif cig.op == "D":
-            yield Variant(ref=refseq[t_offset:t_offset + cig.len],
-                          alt='',
-                          pos=offset + t_offset,
-                          qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
-                          window_offset=t_offset,
-                          var_index=num_vars)  # Is this right??
+            variants.append(
+                Variant(ref=refseq[t_offset:t_offset + cig.len],
+                        alt='',
+                        pos=offset + t_offset,
+                        qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
+                        window_offset=t_offset,
+                        var_index=num_vars)
+                )
             num_vars += 1
             t_offset += cig.len
+            variant_pos_offset += cig.len
 
-
-
-# import numpy as np
-# ref = "ACTGACTG"
-# alt = "ACTGCTG"
-# probs = np.arange(7) * 0.1
-# for v in aln_to_vars(ref, alt, probs=probs):
-#     print(v)
+    for v in variants:
+        v.aln_score = aln.optimal_alignment_score
+        v.var_count = len(variants)
+    return variants
 
 
 def var_depth(var, chrom, aln):
@@ -231,6 +279,7 @@ def var_depth(var, chrom, aln):
 def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=30):
     """
     From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
+    This creates VcfVar objects, which are almost like pysam.VariantRecord objects but not quite
     :param vars_hap0:
     :param vars_hap1:
     :param chrom:
@@ -248,7 +297,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             chrom=chrom,
             pos=var[0] + 1,
             ref=var[1],
-            alt=var[2],
+            alts=[var[2]],
             quals=[call.qual for call in vars_hap0[var]],
             qual=float(np.mean([call.qual for call in vars_hap0[var]])),
             filter=[],
@@ -258,7 +307,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             haplotype=0,  # defalt vars_hap0 to haplotype 0 for now
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
-            window_cis_vars=len(vars_hap0),
+            window_cis_vars=min(v.var_count for v in vars_hap0[var]),
             window_trans_vars=len(vars_hap1),
             call_count=len(vars_hap0[var]),
             step_count=len(vars_hap0[var]),
@@ -271,12 +320,13 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
 
     vcfvars_hap1 = {}
     for var in vars_hap1:
+        logger.debug(f"Computing {var}")
         depth = var_depth(var, chrom, aln)
         vcfvars_hap1[var] = VcfVar(
             chrom=chrom,
             pos=var[0] + 1,
             ref=var[1],
-            alt=var[2],
+            alts=[var[2]],
             quals=[call.qual for call in vars_hap1[var]],
             qual=float(np.mean([call.qual for call in vars_hap1[var]])),
             filter=[],
@@ -286,7 +336,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             haplotype=1,  # defalt vars_hap1 to haplotype 1 for now
             window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
-            window_cis_vars=len(vars_hap1),
+            window_cis_vars=min(v.var_count for v in vars_hap1[var]),
             window_trans_vars=len(vars_hap0),
             call_count=len(vars_hap1[var]),
             step_count=len(vars_hap1[var]),
@@ -303,7 +353,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         # modify hap0 var info
         vcfvars_hap0[var].qual = (vcfvars_hap0[var].qual + vcfvars_hap1[var].qual) / 2  # Mean of each call??
         vcfvars_hap0[var].quals = vcfvars_hap0[var].quals + vcfvars_hap1[var].quals  # combine haps
-        vcfvars_hap0[var].window_cis_vars += vcfvars_hap0[var].window_trans_vars  # cis and trans are now cis
+        vcfvars_hap0[var].window_cis_vars = min(vcfvars_hap0[var].window_cis_vars, vcfvars_hap1[var].window_cis_vars)  # cis and trans are now cis
         vcfvars_hap0[var].window_trans_vars = 0  # moved all vars to cis
         vcfvars_hap0[var].call_count += vcfvars_hap1[var].call_count  # combine call counts in both haplotypes
         vcfvars_hap0[var].genotype = (1, 1)
@@ -314,8 +364,9 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
 
     # combine haplotypes
     assert len(set(vcfvars_hap0) & set(vcfvars_hap1)) == 0, (
-        "There should be no vars shared between vcfvars_hap0 and vcfvars_hap1 (hom vars should all be in hap0"
+        "There should be no vars shared between vcfvars_hap0 and vcfvars_hap1 (hom vars should all be in hap0)"
     )
+
     vcfvars = {**vcfvars_hap0, **vcfvars_hap1}
 
     for key, var in vcfvars.items():
@@ -328,11 +379,13 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             var.filter.append("SingleCallHom")
 
         # adjust insertions and deletions so no blank ref or alt
-        if var.ref == "" or var.alt == "":
+        if var.ref == "" or any(v == "" for v in var.alts):
             leading_ref_base = reference.fetch(reference=var.chrom, start=var.pos - 2, end=var.pos - 1)
             var.pos = var.pos - 1
             var.ref = leading_ref_base + var.ref
-            var.alt = leading_ref_base + var.alt
+            newalts = [leading_ref_base + a for a in var.alts]
+            var.alts = newalts
+
 
     # go back and set phased to true if more than one het variant remains
     het_vcfvars = [k for k, v in vcfvars.items() if v.het]
@@ -343,7 +396,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
     return vcfvars.values()
 
 
-def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
+def create_vcf_header(sample_name="sample", lowcov=30, cmdline=None):
     """
     Initialize pysam VariantFile vcf object and create it's header
     :param path: vcf file path
@@ -419,13 +472,16 @@ def init_vcf(path, sample_name="sample", lowcov=30, cmdline=None):
     vcfh.add_meta('INFO', items=[('ID', "RAW_QUAL"), ('Number', 1), ('Type', 'Float'),
                                  ('Description', 'Original quality if classifier used to update QUAL field')])
     # write to new vcf file object
-    return pysam.VariantFile(path, "w", header=vcfh)
+    return vcfh
 
 
 def prob_to_phred(p, max_qual=1000.0):
     """
     Convert a probability in 0..1 to phred scale
     """
+    if np.isnan(p):
+        logger.warning(f"Found NaN probability for variant, returning quality 0")
+        return 0.0
     assert 0.0 <= p <= 1.0, f"Probability must be in [0, 1], but found {p}"
     if p == 1.0:
         return max_qual
@@ -442,8 +498,10 @@ def create_vcf_rec(var, vcf_file):
     """
     # Create record
     vcf_filter = var.filter if var.filter else "PASS"
-    r = vcf_file.new_record(contig=var.chrom, start=var.pos -1, stop=var.pos,
-                       alleles=(var.ref, var.alt), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
+    if np.isnan(var.qual):
+        logger.error(f"Quality is NaN for variant {var}")
+    r = vcf_file.new_record(contig=var.chrom, start=var.pos - 1, stop=var.pos - 1 + len(var.ref), 
+                       alleles=(var.ref, *var.alts), filter=vcf_filter, qual=int(round(prob_to_phred(var.qual))))
     # Set FORMAT values
     r.samples['sample']['GT'] = var.genotype
     r.samples['sample'].phased = var.phased  # note: need to set phased after setting genotype

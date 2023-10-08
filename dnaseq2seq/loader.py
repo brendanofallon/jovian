@@ -19,12 +19,12 @@ import math
 from pathlib import Path
 from collections import defaultdict
 from itertools import chain
-import gzip
 import lz4.frame
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback as tb
-
+from concurrent.futures import ProcessPoolExecutor
 import io
+import functools
 
 import scipy.stats as stats
 import numpy as np
@@ -32,14 +32,15 @@ import torch
 import torch.multiprocessing as mp
 import pysam
 
-from dnaseq2seq.bam import (
+
+from bam import (
     target_string_to_tensor,
     encode_with_ref,
     encode_and_downsample,
     ensure_dim,
 )
-from dnaseq2seq import util
-from dnaseq2seq import phaser
+import util
+import phaser
 
 
 class ReadLoader:
@@ -122,25 +123,96 @@ class WeightedLoader:
 
 
 def decomp_single(path):
-    if str(path).endswith('.lz4'):
-        with open(path, 'rb') as fh:
-            return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
-    else:
-        return torch.load(path, map_location='cpu')
+    with open(path, 'rb') as fh:
+        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
 
 
-def decompress_multi(paths, threads):
+def decompress_multi_ppe(paths, threads):
     """
     Read & decompress all of the items in the paths with lz4, then load them into Tensors
     but keep them on the CPU
     :returns : List of Tensors (all on CPU)
     """
+    logger.info("Hey we are in the function")
     start = datetime.now()
+    result = []
+    futs = []
+    q = mp.Queue()
+    dfunc = functools.partial(decomp_single, queue=q)
+    logger.info(f"Making the pool")
+    with ProcessPoolExecutor(threads) as pool:
+        for path in paths:
+            logger.info(f"Submitting path: {path}")
+            fut = pool.submit(dfunc, path)
+            futs.append(fut)
+
+    logger.info(f"Submitted all the funcs, now waiting for results, length: {len(q)}")
+    for f in futs:
+        logger.info("Waiting for item...")
+        f.result(timeout=20)
+        r = q.get()
+        logger.info(f"Got : {r}")
+        result.append(r)
+
+    #for i, r in enumerate(result):
+    #    logger.info(f"Result item {i}: {r.shape}")
+        
+    elapsed = datetime.now() - start
+    logger.info(
+        f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
+    )
+    return result
+
+
+def decompress_multi_map(paths, threads):
+    """
+    Read & decompress all of the items in the paths with lz4, then load them into Tensors
+    but keep them on the CPU
+    :returns : List of Tensors (all on CPU)
+    """
+    torch.set_num_threads(1)
+    start = datetime.now()
+    #decompressed = []
     with mp.Pool(threads) as pool:
         result = pool.map(decomp_single, paths)
-        elapsed = datetime.now() - start
-        logger.info(f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds()/len(result):.3f} secs per item)")
-        return result
+    
+    #result = [torch.load(d, map_location='cpu') for d in decompressed]
+           
+    elapsed = datetime.now() - start
+    logger.info(
+        f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
+    )
+    return result
+
+
+def decomp_profile(paths, threads):
+    result = []
+    paths = list(paths)
+    read_sum = timedelta(0)
+    decomp_sum = timedelta(0)
+    load_sum = timedelta(0)
+    for path in paths:
+        start = datetime.now()
+        with open(path, 'rb') as fh:
+            r = fh.read()
+        read_dt = datetime.now()
+        d = io.BytesIO(lz4.frame.decompress(r))
+        decomp_dt = datetime.now()
+        t = torch.load(d, map_location='cpu')
+        load_dt = datetime.now()
+        result.append(t)        
+        
+        read_sum = read_sum + (read_dt - start)
+        decomp_sum = decomp_sum + (decomp_dt - read_dt)
+        load_sum = load_sum + (load_dt - decomp_dt)
+
+    tot = read_sum + decomp_sum + load_sum
+    logger.info(f"Decomped {len(paths)} items")
+    logger.info(f"Total decomp time (secs): {tot.total_seconds() :.6f}")
+    logger.info(f"Read frac: {read_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    logger.info(f"Decomp frac: {decomp_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    logger.info(f"Load frac: {load_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    return result
 
 
 class PregenLoader:
@@ -158,18 +230,20 @@ class PregenLoader:
         self.datadir = Path(datadir) if datadir else None
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
-        self.vaftgt_prefix = vaftgt_prefix
         if pathpairs and datadir:
             raise ValueError(f"Both datadir and pathpairs specified for PregenLoader - please choose just one")
         if pathpairs:
             self.pathpairs = pathpairs
         else:
-            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix, self.vaftgt_prefix)
-            self.pathpairs = random.shuffle(self.pathpairs)
+            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix)
+            random.shuffle(self.pathpairs)
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
+        logger.info(f"Possible sharing strategies: {mp.get_all_sharing_strategies()}")
+        #mp.set_sharing_strategy("file_system")
+        logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
 
@@ -197,18 +271,18 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        src, tgt, vaftgt = [], [], []
+        random.shuffle(self.pathpairs)
+        src, tgt = [], []
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_multi(chain.from_iterable(paths), self.threads)
+            decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)
             decomp_end = datetime.now()
             decomp_time = (decomp_end - decomp_start).total_seconds()
 
-            for j in range(0, len(decomped), 3):
+            for j in range(0, len(decomped), 2):
                 src.append(decomped[j])
                 tgt.append(decomped[j+1])
-                vaftgt.append(decomped[j+2])
 
             total_size = sum([s.shape[0] for s in src])
             if total_size < batch_size:
@@ -218,7 +292,6 @@ class PregenLoader:
             # Make a big tensor.
             src_t = torch.cat(src, dim=0)
             tgt_t = torch.cat(tgt, dim=0)
-            vaftgt_t = torch.cat(vaftgt, dim=0)
 
             nbatch = total_size // batch_size
             remain = total_size % batch_size
@@ -241,9 +314,8 @@ class PregenLoader:
                 # The remaining data points will be in next batch. 
                 src = [src_t[nbatch * batch_size:]]
                 tgt = [tgt_t[nbatch * batch_size:]]
-                vaftgt = [vaftgt_t[nbatch * batch_size:]]
             else:
-                src, tgt, vaftgt = [], [], []
+                src, tgt = [], []
 
 
         if len(src) > 0:
@@ -251,7 +323,7 @@ class PregenLoader:
             yield (
                 torch.cat(src, dim=0).to(self.device).float(),
                 torch.cat(tgt, dim=0).to(self.device).long(),
-                None, #atorch.cat(vaftgt, dim=0).to(self.device),
+                None, 
                 None,
                 {"decomp_time": 0.0},
             )
@@ -332,9 +404,7 @@ class DownsamplingLoader:
             if np.random.rand() < self.fraction_to_augment:
                 num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
                 for idx in range(src.shape[0]):
-                    logger.debug(f"{num_reads_to_drop[idx]} reads to be dropped out of total {src.shape[2]} reads in batch: {idx}")
                     read_index_to_drop = random.sample(list(range(src.shape[2])[1:]), num_reads_to_drop[idx])
-                    logger.debug(f"Reads at batch id {idx} and read index {read_index_to_drop} are being dropped, excluding ref read at 0th position.")
                     src[idx, :, read_index_to_drop, :] = 0
                 iter += 1
             yield src, tgt, vaftgt, None, log_info
@@ -353,71 +423,6 @@ class MultiLoader:
         for loader in self.loaders:
             for src, tgt in loader.iter_once(batch_size):
                 yield src, tgt, None, None, None
-
-
-class BWASimLoader:
-
-    def __init__(self, device, regions, refpath, readsperpileup, readlength, error_rate, clip_prob):
-        self.batches_in_epoch = 10
-        self.regions = bwasim.load_regions(regions)
-        self.refpath = refpath
-        self.device = device
-        self.readsperpileup = readsperpileup
-        self.readlength = readlength
-        self.error_rate = error_rate
-        self.clip_prob = clip_prob
-        self.sim_data = []
-
-
-    def iter_once(self, batch_size):
-        if len(self.sim_data):
-            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
-
-        for i in range(self.batches_in_epoch):
-            if len(self.sim_data) <= i:
-                src, tgt, vaftgt, altmask = bwasim.make_batch(batch_size,
-                                                              self.regions,
-                                                              self.refpath,
-                                                              numreads=self.readsperpileup,
-                                                              readlength=self.readlength,
-                                                              vaf_func=bwasim.betavaf,
-                                                              var_funcs=None,
-                                                              error_rate=self.error_rate,
-                                                              clip_prob=self.clip_prob)
-
-                self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[i]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
-
-
-class SimLoader:
-
-    def __init__(self, device, seqlen, readsperbatch, readlength, error_rate, clip_prob):
-        self.batches_in_epoch = 10
-        self.device = device
-        self.seqlen = seqlen
-        self.readsperbatch = readsperbatch
-        self.readlength = readlength
-        self.error_rate = error_rate
-        self.clip_prob = clip_prob
-        self.sim_data = []
-
-
-    def iter_once(self, batch_size):
-        if len(self.sim_data):
-            self.sim_data = self.sim_data[1:] # Trim off oldest batch - but only once per epoch
-
-        for i in range(self.batches_in_epoch):
-            if len(self.sim_data) <= i:
-                src, tgt, vaftgt, altmask = sim.make_mixed_batch(batch_size,
-                                            seqlen=self.seqlen,
-                                            readsperbatch=self.readsperbatch,
-                                            readlength=self.readlength,
-                                            error_rate=self.error_rate,
-                                            clip_prob=self.clip_prob)
-                self.sim_data.append((src, tgt, vaftgt, altmask))
-            src, tgt, vaftgt, altmask = self.sim_data[-1]
-            yield src.to(self.device), tgt.to(self.device), vaftgt.to(self.device), altmask.to(self.device), None
 
 
 def trim_pileuptensor(src, tgt, width):
@@ -440,30 +445,6 @@ def trim_pileuptensor(src, tgt, width):
         tgt = tgt[:, start:start+width]
 
     return src, tgt
-
-
-# def assign_class_indexes(rows):
-#     """
-#     Iterate over every row in rows and create a list of class indexes for each element
-#     , where class index is currently row.vtype-row.status. So a class will be something like
-#     snv-TP or small_del-FP, and each class gets a unique number
-#     :returns : 1. List of class indexes across rows.
-#                2. A dictionary keyed by class index and valued by class names.
-#     """
-#     classcount = 0
-#     classes = defaultdict(int)
-#     idxs = []
-#     for row in rows:
-#         clz = f"{row.vtype}-{row.status}" # Could imagine putting VAF here too - maybe low / medium / high vaf?
-#         if clz in classes:
-#             idx = classes[clz]
-#         else:
-#             idx = classcount
-#             classcount += 1
-#             classes[clz] = idx
-#         idxs.append(idx)
-#     class_names = {v: k for k, v in classes.items()}
-#     return idxs, class_names
 
 
 def parse_rows_classes(bed):
@@ -659,33 +640,33 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
 
 
 
-def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
-    allsrc = []
-    alltgt = []
-    count = 0
-    seq_len = 150
-    logger.info(f"Creating new data loader from {bampath}")
-    counter = defaultdict(int)
-    classes = []
-    for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
-        status, vtype = row.status, row.vtype
-        label_class = "-".join((status, vtype))
-        classes.append(label_class)
-        counter[label_class] += 1
-        src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
-        assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
-        assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
-        allsrc.append(src)
-        alltgt.append(tgt)
-        count += 1
-        if count % 100 == 0:
-            logger.info(f"Loaded {count} tensors from {csv}")
-        if count == max_to_load:
-            logger.info(f"Stopping tensor load after {max_to_load}")
-            break
-    logger.info(f"Loaded {count} tensors from {csv}")
-    logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
-    weights = np.array([1.0 / counter[c] for c in classes])
-    return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
+# def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
+#     allsrc = []
+#     alltgt = []
+#     count = 0
+#     seq_len = 150
+#     logger.info(f"Creating new data loader from {bampath}")
+#     counter = defaultdict(int)
+#     classes = []
+#     for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
+#         status, vtype = row.status, row.vtype
+#         label_class = "-".join((status, vtype))
+#         classes.append(label_class)
+#         counter[label_class] += 1
+#         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
+#         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
+#         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
+#         allsrc.append(src)
+#         alltgt.append(tgt)
+#         count += 1
+#         if count % 100 == 0:
+#             logger.info(f"Loaded {count} tensors from {csv}")
+#         if count == max_to_load:
+#             logger.info(f"Stopping tensor load after {max_to_load}")
+#             break
+#     logger.info(f"Loaded {count} tensors from {csv}")
+#     logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
+#     weights = np.array([1.0 / counter[c] for c in classes])
+#     return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
 
 
