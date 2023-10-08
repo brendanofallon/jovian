@@ -2,3 +2,9 @@ lz4
 pygit2
 pysam
 xgboost
+numpy
+pandas
+intervaltree
+pyyaml
+scikit-bio
+scikit-learn

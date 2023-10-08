@@ -11,7 +11,6 @@ import multiprocessing as mp
 #from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
-import scipy.stats as stats
 from xgboost import XGBClassifier
 from functools import lru_cache
 import logging
