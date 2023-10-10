@@ -227,7 +227,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
+        tgt_mask = None #nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")

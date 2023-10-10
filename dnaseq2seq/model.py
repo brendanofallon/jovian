@@ -17,6 +17,7 @@ import torch.nn as nn
 import numpy as np
 import math
 
+from x_transformers import TransformerWrapper, Encoder, Decoder
 
 logger = logging.getLogger(__name__)
 
@@ -141,29 +142,52 @@ class VarTransformer(nn.Module):
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
         self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim, batch_first=True, max_len=500).to(self.device)
 
-        encoder_layers = nn.TransformerEncoderLayer(
-            d_model=self.embed_dim,
-            nhead=encoder_attention_heads,
-            dim_feedforward=d_ff,
-            dropout=p_dropout,
-            batch_first=True,
-            activation='gelu')
-        self.encoder = nn.TransformerEncoder(encoder_layers, num_layers=n_encoder_layers)
+        # encoder_layers = nn.TransformerEncoderLayer(
+        #     d_model=self.embed_dim,
+        #     nhead=encoder_attention_heads,
+        #     dim_feedforward=d_ff,
+        #     dropout=p_dropout,
+        #     batch_first=True,
+        #     activation='gelu')
+        # self.encoder = nn.TransformerEncoder(encoder_layers, num_layers=n_encoder_layers)
 
-        decoder_layers = nn.TransformerDecoderLayer(
-            d_model=self.kmer_dim,
-            nhead=decoder_attention_heads,
-            dim_feedforward=d_ff,
-            dropout=p_dropout,
-            batch_first=True,
-            activation='gelu')
-        self.decoder0 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
-        self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+        self.encoder = Encoder(
+                dim=self.embed_dim,
+                depth=n_encoder_layers,
+                heads=encoder_attention_heads,
+                ff_glu=True,
+                p_dropout=p_dropout,
+        )
+
+
+        # decoder_layers = nn.TransformerDecoderLayer(
+        #     d_model=self.kmer_dim,
+        #     nhead=decoder_attention_heads,
+        #     dim_feedforward=d_ff,
+        #     dropout=p_dropout,
+        #     batch_first=True,
+        #     activation='gelu')
+        # self.decoder0 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+        # self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+
+        self.decoder0 = Decoder(
+            dim=self.kmer_dim,
+            heads=decoder_attention_heads,
+            depth=n_decoder_layers,
+            cross_attend=True,
+        )
+        self.decoder1 = Decoder(
+            dim=self.kmer_dim,
+            heads=decoder_attention_heads,
+            depth=n_decoder_layers,
+            cross_attend=True,
+        )
+
         self.softmax = nn.LogSoftmax(dim=-1)
         self.elu = torch.nn.ELU()
 
     def encode(self, src):
-        src.half()
+        # src.half()
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
@@ -173,19 +197,24 @@ class VarTransformer(nn.Module):
         return mem_proj
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        mem.half()
-        tgt.half()
-        tgt_mask.half()
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]).half()
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]).half()
+        # mem.half()
+        # tgt.half()
+        # tgt_mask.half()
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]) #.half()
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]) #.half()
+
+        # tgt_mask = tgt_mask > -1
+        # tgt_mask = tgt_mask.unsqueeze(0).unsqueeze(0).expand(tgt.shape[0], tgt.shape[1], -1, -1)
 
         # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
         # This hack just forces it to be a square again
-        if tgt_mask.shape[0] != tgt_mask.shape[1]:
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
+        #if tgt_mask.shape[0] != tgt_mask.shape[1]:
+        #    tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
+
+
             #logger.info(f"Forcing tgt mask shapre to be {tgt_mask.shape}, input enc shape is: {mem.shape}")
-        h0 = self.decoder0(tgt0, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
-        h1 = self.decoder1(tgt1, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        h0 = self.decoder0(tgt0, context=mem, mask=tgt_mask)
+        h1 = self.decoder1(tgt1, context=mem, mask=tgt_mask)
         h0 = self.softmax(h0)
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)
