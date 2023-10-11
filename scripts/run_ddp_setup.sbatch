@@ -33,9 +33,9 @@ echo "MASTER_ADDR="$MASTER_ADDR
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
-GIT_BRANCH="decoder_big"
+GIT_BRANCH="master"
 
-export RUN_NAME="100M_lcbm2x_cont_autocast3"
+export RUN_NAME="100M_lcbm2x_cont_fixemb"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME

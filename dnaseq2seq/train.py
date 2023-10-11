@@ -231,9 +231,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
-        with torch.autocast(device_type='cuda'):
-            seq_preds = model(src, tgt_kmers_input, tgt_mask)
-            seq_preds.float()
+        seq_preds = model(src, tgt_kmers_input, tgt_mask)
 
         logger.debug(f"Computing loss...")
         loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
@@ -484,6 +482,10 @@ def train_epochs(epochs,
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
+    logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
+    model.fc1.requires_grad_(False)
+    model.fc2.requires_grad_(False)
+
     # Quantization aware training - see https://pytorch.org/docs/stable/quantization.html
     #model.eval() # Must be in eval mode for operator fusing - but we don't do this now
     #model.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
