@@ -2,3 +2,6 @@ lz4
 pygit2
 pysam
 xgboost
+scikit-learn
+pyyaml
+skbio
