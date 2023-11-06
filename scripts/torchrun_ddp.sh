@@ -11,18 +11,9 @@ PREGEN_DIR=/scratch/general/vast/u0379426/lcbigmap2x
 
 
 RUNCMD="jovian/dnaseq2seq/main.py train \
-    -d $PREGEN_DIR \
-    --val-dir $VAL_DIR \
-    -n 500 \
-    --batch-size 128 \
-    --learning-rate 0.00003 \
-    -i /uufs/chpc.utah.edu/common/home/u0379426/storage/variant_transformer_runs/100M_lcbig2x_again_cont/100M_lcbig2x_again_cont_epoch170.model \
-    --checkpoint-freq 2 \
+    --conf $HOME/src/jovian/train_conf_50M.yaml \
     -o ${RUN_NAME}.model \
-    --threads 16 \
-    --max-decomp-batches 8 \
-    --samples-per-epoch 500000 \
-    --wandb-run-name $RUN_NAME"
+    --run-name $RUN_NAME"
 
 echo "Full run cmd: $RUNCMD"
 echo "Master addr: $MASTER_ADDR, master port: $MASTER_PORT"
@@ -31,5 +22,5 @@ echo "Master addr: $MASTER_ADDR, master port: $MASTER_PORT"
 export ENABLE_COMET=1
 export COMET_GIT_DIRECTORY=jovian/
 
-$HOME/miniconda3/envs/jv2/bin/torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
+$HOME/miniconda3/envs/py3/bin/torchrun --nnodes=1 --nproc_per_node=1 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
 

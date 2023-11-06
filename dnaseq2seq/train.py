@@ -656,11 +656,13 @@ def set_comet_conf(model_tot_params, **kwargs):
     # back to correct working dir
     os.chdir(current_working_dir)
 
+
 def load_conf(conf_file, **kwargs):
     with open(conf_file) as fh:
         conf = yaml.safe_load(fh)
     conf.update((k,v) for k,v in kwargs.items() if v is not None)
     return conf
+
 
 def train(output_model, input_model, epochs, **kwargs):
     """
@@ -711,7 +713,7 @@ def train(output_model, input_model, epochs, **kwargs):
     model = load_model(kwargs['model'], input_model)
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if experiment:
-        set_comet_conf(model_tot_params, kwargs)
+        set_comet_conf(model_tot_params, **kwargs)
 
     train_epochs(model,
                  epochs,
