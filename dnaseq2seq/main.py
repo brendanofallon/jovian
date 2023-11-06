@@ -73,7 +73,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
     tgt_prefix = "tgkmers"
-    vaf_prefix = "vaftgt"
+    #vaf_prefix = "vaftgt"
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
@@ -82,8 +82,8 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
         tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
         logger.info(f"Src dtype is {src.dtype}")
-        for data, prefix in zip([src, tgt_kmers, vaftgt],
-                                [src_prefix, tgt_prefix, vaf_prefix]):
+        for data, prefix in zip([src, tgt_kmers],
+                                [src_prefix, tgt_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
         for idx, varinfo in enumerate(varsinfo):
@@ -160,9 +160,9 @@ def print_pileup(path, idx, target=None, **kwargs):
 
     src = util.tensor_from_file(path, device='cpu')
     logger.info(f"Loaded tensor with shape {src.shape}")
-    #s = util.to_pileup(src[idx, :, :, :])
-    print(src[idx, 5, 0:10, :])
-    #print(s)
+    s = util.to_pileup(src[idx, :, :, :])
+    #print(src[idx, 5, 0:10, :])
+    print(s)
 
 
 def alphanumeric_no_spaces(name):
@@ -181,6 +181,7 @@ def main():
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
     genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
+    genparser.add_argument("-rd", "--read-depth", help="Max read depth / tensor dim", default=128, type=int)
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)

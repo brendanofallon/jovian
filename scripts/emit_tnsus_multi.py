@@ -6,18 +6,42 @@ from subprocess import run
 from pathlib import Path
 import random
 import os
+import re
 
 sys.path.append("/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/dnaseq2seq")
 
 import call
 
 
+def parse_giab_sample(name):
+    name = str(name)
+    match = re.search(r'HG00[0-7]_', name)
+    if match:
+        return match.group().strip("_")
+    elif "NA12878" in name:
+        return "HG001"
+    elif "NA24385" in name:
+        return "HG002"
+    elif "NA24149" in name:
+        return "HG003"
+    elif "NA24143" in name:
+        return "HG004"
+    elif "GM24631" in name:
+        return "HG005"
+    elif "NA24631" in name:
+        return "HG005"
+    elif "NA24694" in name:
+        return "HG006"
+    elif "NA24695" in name:
+        return "HG007"
+
+
 def gensus(args):
-    SPLITBEDS, bampath = args
-    giab = Path(bampath).name.split("_")[0]
+    SPLITBEDS, bampath, group = args
+    giab = parse_giab_sample(bampath)
     prefix = Path(bampath).name.replace(".cram", "")
     input_bed = SPLITBEDS[giab]
-    dest = f"/uufs/chpc.utah.edu/common/home/u0379426/vast/giab_label_beds/{prefix}_labeltnsus.bed"
+    dest = f"/uufs/chpc.utah.edu/common/home/u0379426/vast/giab_label_beds/{prefix}_labeltnsus_chr{group}.bed"
     print(f"BAM: {bampath} giab: {giab} prefix: {prefix} input bed: {input_bed}  dest: {dest}")
     reference_path = os.getenv("REF_GENOME")
     ofh = open(dest, "w")
@@ -54,7 +78,7 @@ def main(group, bams):
         }
 
     with mp.Pool(24) as pool:
-        pool.map(gensus, [(SPLITBEDS, b) for b in bams])
+        pool.map(gensus, [(SPLITBEDS, b, group) for b in bams])
 
 if __name__=="__main__":
     main(sys.argv[1], sys.argv[2:])
