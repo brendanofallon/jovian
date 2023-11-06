@@ -9,8 +9,6 @@ import pysam
 import random
 
 
-
-
 def main(reference_path, bampath, input_bed):
     for line in open(input_bed).readlines():
         toks = line.strip().split("\t")

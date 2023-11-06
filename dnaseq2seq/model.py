@@ -163,7 +163,7 @@ class VarTransformer(nn.Module):
         self.elu = torch.nn.ELU()
 
     def encode(self, src):
-        src.half()
+        # src.half()
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
@@ -173,9 +173,9 @@ class VarTransformer(nn.Module):
         return mem_proj
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        mem.half()
-        tgt.half()
-        tgt_mask.half()
+        # mem.half()
+        # tgt.half()
+        # tgt_mask.half()
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]).half()
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]).half()
 

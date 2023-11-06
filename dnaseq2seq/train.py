@@ -10,6 +10,7 @@ If not, see <https://www.gnu.org/licenses/>.
 """
 
 import logging
+import sys
 from collections import defaultdict
 
 import yaml
@@ -29,7 +30,7 @@ import loader
 import util
 from model import VarTransformer
 
-LOG_FORMAT='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
+LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
 formatter = logging.Formatter(LOG_FORMAT)
 handler = logging.FileHandler("jovian_train.log")
 handler.setLevel(logging.INFO)
@@ -393,104 +394,79 @@ def safe_compute_ppav(results0, results1, key):
 
     return ppa, ppv
 
-
-def train_epochs(epochs,
-                 dataloader,
-                 max_read_depth=50,
-                 feats_per_read=10,
-                 init_learning_rate=0.0025,
-                 checkpoint_freq=0,
-                 statedict=None,
-                 model_dest=None,
-                 val_dir=None,
-                 batch_size=64,
-                 wandb_run_name=None,
-                 wandb_notes="",
-                 cl_args = {},
-                 samples_per_epoch=10000,
-):
+def load_model(modelconf, statedict):
     # 35M model params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 6
-    #decoder_layers = 4 # was 2
-    #embed_dim_factor = 100 # was 100
+    # encoder_attention_heads = 8 # was 4
+    # decoder_attention_heads = 4 # was 4
+    # dim_feedforward = 512
+    # encoder_layers = 6
+    # decoder_layers = 4 # was 2
+    # embed_dim_factor = 100 # was 100
 
     # 50M model params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6 # was 2
-    #embed_dim_factor = 120 # was 100
+    # encoder_attention_heads = 8 # was 4
+    # decoder_attention_heads = 4 # was 4
+    # dim_feedforward = 512
+    # encoder_layers = 8
+    # decoder_layers = 6 # was 2
+    # embed_dim_factor = 120 # was 100
 
-    #Wider model
-    #encoder_attention_heads = 4 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 1024
-    #encoder_layers = 6
-    #decoder_layers = 6 # was 2
-    #embed_dim_factor = 200 # was 100
+    # Wider model
+    # encoder_attention_heads = 4 # was 4
+    # decoder_attention_heads = 4 # was 4
+    # dim_feedforward = 1024
+    # encoder_layers = 6
+    # decoder_layers = 6 # was 2
+    # embed_dim_factor = 200 # was 100
 
     # 100M params
-    encoder_attention_heads = 8 # was 4
-    decoder_attention_heads = 10 # was 4
-    dim_feedforward = 512
-    encoder_layers = 10
-    decoder_layers = 10 # was 2
-    embed_dim_factor = 160 # was 100
+    # encoder_attention_heads = 8  # was 4
+    # decoder_attention_heads = 10  # was 4
+    # dim_feedforward = 512
+    # encoder_layers = 10
+    # decoder_layers = 10  # was 2
+    # embed_dim_factor = 160  # was 100
 
     # 200M params
-    #encoder_attention_heads = 12 # was 4
-    #decoder_attention_heads = 13 # Must evenly divide 260
-    #dim_feedforward = 1024
-    #encoder_layers = 10
-    #decoder_layers = 10 # was 2
-    #embed_dim_factor = 160 # was 100
-
+    # encoder_attention_heads = 12 # was 4
+    # decoder_attention_heads = 13 # Must evenly divide 260
+    # dim_feedforward = 1024
+    # encoder_layers = 10
+    # decoder_layers = 10 # was 2
+    # embed_dim_factor = 160 # was 100
 
     # More layers but less model dim
-    #encoder_attention_heads = 10 # was 4
-    #decoder_attention_heads = 10 # Must evenly divide 260
-    #dim_feedforward = 1024
-    #encoder_layers = 14
-    #decoder_layers = 14 # was 2
-    #embed_dim_factor = 160 # was 100
+    # encoder_attention_heads = 10 # was 4
+    # decoder_attention_heads = 10 # Must evenly divide 260
+    # dim_feedforward = 1024
+    # encoder_layers = 14
+    # decoder_layers = 14 # was 2
+    # embed_dim_factor = 160 # was 100
 
     # Small, for testing params
-    #encoder_attention_heads = 2  # was 4
-    #decoder_attention_heads = 2  # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 2
-    #decoder_layers = 2  # was 2
-    #embed_dim_factor = 160  # was 100
+    # encoder_attention_heads = 2  # was 4
+    # decoder_attention_heads = 2  # was 4
+    # dim_feedforward = 512
+    # encoder_layers = 2
+    # decoder_layers = 2  # was 2
+    # embed_dim_factor = 160  # was 100
 
-    model = VarTransformer(read_depth=max_read_depth,
-                            feature_count=feats_per_read, 
-                            kmer_dim=util.FEATURE_DIM, # Number of possible kmers
-                            n_encoder_layers=encoder_layers,
-                            n_decoder_layers=decoder_layers,
-                            embed_dim_factor=embed_dim_factor,
-                            encoder_attention_heads=encoder_attention_heads,
-                            decoder_attention_heads=decoder_attention_heads,
-                            d_ff=dim_feedforward,
-                            device=DEVICE)
+    model = VarTransformer(read_depth=modelconf['max_read_depth'],
+                           feature_count=modelconf['feats_per_read'],
+                           kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
+                           n_encoder_layers=modelconf['encoder_layers'],
+                           n_decoder_layers=modelconf['decoder_layers'],
+                           embed_dim_factor=modelconf['embed_dim_factor'],
+                           encoder_attention_heads=modelconf['encoder_attention_heads'],
+                           decoder_attention_heads=modelconf['decoder_attention_heads'],
+                           d_ff=modelconf['dim_feedforward'],
+                           device=DEVICE)
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Creating model with {model_tot_params} trainable params")
-    
 
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
-    
-    # Quantization aware training - see https://pytorch.org/docs/stable/quantization.html
-    #model.eval() # Must be in eval mode for operator fusing - but we don't do this now
-    #model.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
-    #model_fused = torch.ao.quantization.fuse_modules(model, [])
-    #model = torch.ao.quantization.prepare_qat(model.train())
-
-    #model = model.half()
 
     if USE_DDP:
         rank = dist.get_rank()
@@ -501,8 +477,22 @@ def train_epochs(epochs,
     else:
         model = model.to(DEVICE)
 
-
     model.train()
+    return model
+
+def train_epochs(model,
+                 epochs,
+                 dataloader,
+                 init_learning_rate=0.0025,
+                 checkpoint_freq=0,
+                 model_dest=None,
+                 val_dir=None,
+                 batch_size=64,
+                 wandb_run_name=None,
+                 wandb_notes="",
+                 cl_args = {},
+                 samples_per_epoch=10000,
+):
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=init_learning_rate, betas=(0.9, 0.999))
 
@@ -520,46 +510,6 @@ def train_epochs(epochs,
             "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
     ])
 
-    if experiment:
-        # get git branch info for logging
-        git_repo = Repository(os.path.abspath(__file__))
-        # what to log in wandb
-        wandb_config_params = dict(
-            learning_rate=init_learning_rate,
-            embed_dim_factor=embed_dim_factor,
-            feats_per_read=feats_per_read,
-            batch_size=batch_size,
-            read_depth=max_read_depth,
-            encoder_attn_heads=encoder_attention_heads,
-            decoder_attn_heads=decoder_attention_heads,
-            transformer_dim=dim_feedforward,
-            encoder_layers=encoder_layers,
-            decoder_layers=decoder_layers,
-            git_branch=git_repo.head.name,
-            git_target=git_repo.head.target,
-            model_param_count=model_tot_params,
-            git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
-            loss_func=str(criterion),
-            samples_per_epoch=samples_per_epoch,
-        )
-        # log command line too
-        wandb_config_params.update(cl_args)
-
-        # change working dir so wandb finds git repo info
-        current_working_dir = os.getcwd()
-        git_dir = os.path.dirname(os.path.abspath(__file__))
-        os.chdir(git_dir)
-
-        if experiment:
-            experiment.log_parameters({
-                    "config": wandb_config_params,
-                    "dir": current_working_dir,
-                    "notes": wandb_notes,
-            })
-            experiment.set_name(wandb_run_name)
-
-        # back to correct working dir
-        os.chdir(current_working_dir)
 
     if val_dir:
         logger.info(f"Using validation data in {val_dir}")
@@ -666,7 +616,49 @@ def init_count_dict():
         'mnv': defaultdict(int),
     }
 
+def set_comet_conf(model_tot_params, **kwargs):
+    """ Set various config params for logging in WandB / Comet"""
+    # get git branch info for logging
+    git_repo = Repository(os.path.abspath(__file__))
+    # what to log in wandb
+    run_config_params = dict(
+        learning_rate=kwargs.get('init_learning_rate'),
+        embed_dim_factor=kwargs.get('embed_dim_factor'),
+        feats_per_read=kwargs.get('feats_per_read'),
+        batch_size=kwargs.get('batch_size'),
+        read_depth=kwargs.get('max_read_depth'),
+        encoder_attn_heads=kwargs.get('encoder_attention_heads'),
+        decoder_attn_heads=kwargs.get('decoder_attention_heads'),
+        transformer_dim=kwargs.get('dim_feedforward'),
+        encoder_layers=kwargs.get('encoder_layers'),
+        decoder_layers=kwargs.get('decoder_layers'),
+        git_branch=git_repo.head.name,
+        git_target=git_repo.head.target,
+        model_param_count=model_tot_params,
+        git_last_commit=next(git_repo.walk(git_repo.head.target)).message,
+        samples_per_epoch=kwargs.get('samples_per_epoch'),
+        commandline=' '.join(sys.argv),
+    )
 
+    # change working dir so wandb finds git repo info
+    current_working_dir = os.getcwd()
+    git_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(git_dir)
+
+    experiment.log_parameters({
+        "config": run_config_params,
+        "dir": current_working_dir,
+    })
+    experiment.set_name(kwargs.get('run_name'))
+
+    # back to correct working dir
+    os.chdir(current_working_dir)
+
+def load_conf(conf_file, **kwargs):
+    with open(conf_file) as fh:
+        conf = yaml.safe_load(fh)
+    conf.update((k,v) for k,v in kwargs.items() if v is not None)
+    return conf
 
 def train(output_model, input_model, epochs, **kwargs):
     """
@@ -676,6 +668,12 @@ def train(output_model, input_model, epochs, **kwargs):
     :param input_model: Start training with params from input_model
     :param epochs: How many passes over training data to conduct
     """
+
+    kwargs = load_conf(kwargs.get('config'), **kwargs)
+    run_name = kwargs.get("run_name", "training_run")
+    dest = f"{run_name}_training_conf.yaml"
+    with open(dest, "w") as fh:
+        fh.write(yaml.dump(kwargs) + "\n")
 
     global DEVICE
 
@@ -701,19 +699,21 @@ def train(output_model, input_model, epochs, **kwargs):
         DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
     
     logger.info(f"Using pregenerated training data from {kwargs.get('datadir')}")
+
     dataloader = loader.PregenLoader(DEVICE,
                                      kwargs.get("datadir"),
                                      threads=kwargs.get('threads'),
                                      max_decomped_batches=kwargs.get('max_decomp_batches'),
                                      tgt_prefix="tgkmers")
 
+    model = load_model(kwargs['model'], input_model)
+    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if experiment:
+        set_comet_conf(model_tot_params, kwargs)
 
-
-    train_epochs(epochs,
+    train_epochs(model,
+                 epochs,
                  dataloader,
-                 max_read_depth=150,
-                 feats_per_read=10,
-                 statedict=input_model,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
