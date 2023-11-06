@@ -179,7 +179,7 @@ def main():
     subparser = parser.add_subparsers()
 
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
-    genparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
+
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.add_argument("-rd", "--read-depth", help="Max read depth / tensor dim", default=128, type=int)
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')
@@ -196,26 +196,23 @@ def main():
     printpileupparser.set_defaults(func=print_pileup)
 
     trainparser = subparser.add_parser("train", help="Train a model")
-    trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=100)
+    trainparser.add_argument("-c", "--config", help="Configuration yaml", required=False)
+    trainparser.add_argument("-n", "--epochs", type=int, help="Number of epochs to train for", default=None)
     trainparser.add_argument("-i", "--input-model", help="Start with parameters from given state dict")
     trainparser.add_argument("-o", "--output-model", help="Save trained state dict here", required=True)
-    trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", default=10, type=int)
-    trainparser.add_argument("-lr", "--learning-rate", help="Initial learning rate", default=0.001, type=float)
-    # trainparser.add_argument("-c", "--config", help="Training configuration yaml", required=True)
-    trainparser.add_argument("-s", "--samples-per-epoch", help="Number of samples to process before emitting stats", type=int, default=100000)
+    trainparser.add_argument("-ch", "--checkpoint-freq", help="Save model checkpoints frequency (0 to disable)", type=int)
+    trainparser.add_argument("-lr", "--learning-rate", help="Initial learning rate", default=None, type=float)
+    trainparser.add_argument("-s", "--samples-per-epoch", help="Number of samples to process before emitting stats", type=int, default=None)
     trainparser.add_argument("-d", "--datadir", help="Pregenerated data dir", default=None)
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
-    trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=4, type=int)
+    trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=None, type=int)
     trainparser.add_argument("-md", "--max-decomp-batches",
                              help="Max number batches to decompress and store in memory at once", default=4, type=int)
-    trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=64)
-    trainparser.add_argument("-da", "--data-augmentation", help="Specify data augmentation options: 'shortening', 'shuffling', 'downsampling'. You can provide multiple options. Default is None", nargs="+", default=None)
-    trainparser.add_argument("-fa", "--fraction-to-augment", help="Fraction of sample batches to augment. Needed with '--data-augmentation' option. Default is 0.25", default=0.25, type=float)
-    trainparser.add_argument("-rn", "--wandb-run-name", type=alphanumeric_no_spaces, default=None,
-                             help="Weights & Biases run name, must be alphanumeric plus '_' or '-'")
-    trainparser.add_argument("--wandb-notes", type=str, default=None,
-                             help="Weights & Biases run notes, longer description of run (like 'git commit -m')")
-    trainparser.add_argument("--loss", help="Loss function to use, use 'ce' for CrossEntropy or 'sw' for Smith-Waterman", choices=['ce', 'sw'], default='ce')
+    trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=None)
+    trainparser.add_argument("-rn", "--run-name", type=alphanumeric_no_spaces, default=None,
+                             help="Run name, must be alphanumeric plus '_' or '-'")
+    trainparser.add_argument("--notes", type=str, default=None,
+                             help="Run notes, longer description of run (like 'git commit -m')")
     trainparser.set_defaults(func=train)
 
     callparser = subparser.add_parser("call", help="Call variants")

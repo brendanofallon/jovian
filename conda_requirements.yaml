@@ -2,14 +2,6 @@ channels:
   - defaults
   - anaconda
   - conda-forge
-  - pytorch
 
 dependencies:
-- pytorch~=2.0
-- numpy
-- pandas
-- pyyaml
-- scipy
-- intervaltree
-
-  #- scikit-bio
+- scikit-bio

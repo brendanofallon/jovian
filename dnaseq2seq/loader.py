@@ -26,7 +26,6 @@ from concurrent.futures import ProcessPoolExecutor
 import io
 import functools
 
-import scipy.stats as stats
 import numpy as np
 import torch
 import torch.multiprocessing as mp
@@ -379,36 +378,6 @@ class ShufflingLoader:
                 iter += 1
             yield src, tgt, vaftgt, None, log_info
         logger.info(f"Total number of sample batches that had their reads shuffled are: {iter}")
-
-
-class DownsamplingLoader:
-    """
-    This loader downsamples the reads (dimension 2 of src) by setting entire read to 0,
-    excluding the 0th element i.e. ref read.
-    The number of reads to be downsampled is obtained from the binomial distribution
-    where each reads has a prob p=0.01 of getting dropped out.
-    This loader should be used by wrapping another loader that actually does the loading
-    For instance:
-
-        loader = DownsamplingLoader(PregenLoader(...), prob_of_read_being_dropped=0.01)
-
-    """
-    def __init__(self, wrapped_loader, prob_of_read_being_dropped, fraction_to_augment):
-        self.wrapped_loader = wrapped_loader
-        self.prob_of_read_being_dropped = prob_of_read_being_dropped
-        self.fraction_to_augment = fraction_to_augment
-
-    def iter_once(self, batch_size):
-        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
-            iter = 0
-            if np.random.rand() < self.fraction_to_augment:
-                num_reads_to_drop = stats.binom(n=src.shape[2], p=self.prob_of_read_being_dropped).rvs(src.shape[0])
-                for idx in range(src.shape[0]):
-                    read_index_to_drop = random.sample(list(range(src.shape[2])[1:]), num_reads_to_drop[idx])
-                    src[idx, :, read_index_to_drop, :] = 0
-                iter += 1
-            yield src, tgt, vaftgt, None, log_info
-        logger.info(f"Total number of sample batches that had their reads downsampled are: {iter}")
 
 
 class MultiLoader:
