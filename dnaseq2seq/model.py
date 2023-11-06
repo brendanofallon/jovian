@@ -173,11 +173,11 @@ class VarTransformer(nn.Module):
         return mem_proj
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        # mem.half()
-        # tgt.half()
-        # tgt_mask.half()
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]).half()
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]).half()
+        #mem.half()
+        #tgt.half()
+        #tgt_mask.half()
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]) # .half()
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]) # .half()
 
         # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
         # This hack just forces it to be a square again

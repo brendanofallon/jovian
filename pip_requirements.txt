@@ -8,3 +8,5 @@ intervaltree
 pyyaml
 scikit-bio
 scikit-learn
+pyyaml
+skbio
