@@ -5,9 +5,6 @@ MASTER_PORT=$2
 RUN_NAME=$3
 RUN_NOTES="$4"
 
-#VAL_DIR=/uufs/chpc.utah.edu/common/home/u0379426/storage/pregen/pregen_lcbigmap_d150_chrs21and22
-VAL_DIR=/scratch/general/vast/u0379426/pregen_lcbigmap_d150_chrs21and22
-PREGEN_DIR=/scratch/general/vast/u0379426/lcbigmap2x
 
 
 RUNCMD="jovian/dnaseq2seq/main.py train \

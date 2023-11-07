@@ -664,7 +664,7 @@ def load_conf(conf_file, **kwargs):
     return conf
 
 
-def train(output_model, input_model, epochs, **kwargs):
+def train(output_model, input_model, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
     :param config: Path to config yaml
@@ -716,7 +716,7 @@ def train(output_model, input_model, epochs, **kwargs):
         set_comet_conf(model_tot_params, **kwargs)
 
     train_epochs(model,
-                 epochs,
+                 kwargs.get('epochs'),
                  dataloader,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,

@@ -179,7 +179,7 @@ def main():
     subparser = parser.add_subparsers()
 
     genparser = subparser.add_parser("pregen", help="Pre-generate tensors from BAMs")
-
+    genparser.add_argument("-c", "--config", help="Configuration yaml", required=True)
     genparser.add_argument("-d", "--dir", help="Output directory", default=".")
     genparser.add_argument("-rd", "--read-depth", help="Max read depth / tensor dim", default=128, type=int)
     genparser.add_argument("-s", "--sim", help="Generate simulated data", action='store_true')

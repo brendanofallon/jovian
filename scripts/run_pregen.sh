@@ -8,10 +8,13 @@
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 
 
+module load gcc/11.2.0
 
 # Cant activate a conda env non-interactively, so just set the  python binary
 # to the right spot - seems to work
 PYTHON=$HOME/miniconda3/envs/py3/bin/python
+
+set -x
 
 ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/dnaseq2seq/main.py
 
