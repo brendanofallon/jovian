@@ -8,9 +8,8 @@ RUN_NOTES="$4"
 
 
 RUNCMD="jovian/dnaseq2seq/main.py train \
-    --conf $HOME/src/jovian/train_conf_50M.yaml \
+    --conf $HOME/src/jovian/train_conf_100M.yaml \
     -o ${RUN_NAME}.model \
-    --input-model /uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/d128_testconf_50M/d128_testconf_50M_epoch120.model \
     --run-name $RUN_NAME"
 
 echo "Full run cmd: $RUNCMD"
