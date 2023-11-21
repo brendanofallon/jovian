@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="master"
 
-export RUN_NAME="d128_100M_easy"
+export RUN_NAME="d128_100M_contfixemb"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME
