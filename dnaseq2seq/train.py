@@ -485,6 +485,7 @@ def load_model(modelconf, statedict):
 def train_epochs(model,
                  epochs,
                  dataloader,
+                 scheduler,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  model_dest=None,
@@ -494,13 +495,13 @@ def train_epochs(model,
                  wandb_notes="",
                  cl_args = {},
                  samples_per_epoch=10000,
+
 ):
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=init_learning_rate, betas=(0.9, 0.999))
 
     criterion = nn.NLLLoss()
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 2.0, warmup_iters=1e6, lr_decay_iters=20e6)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -715,9 +716,18 @@ def train(output_model, **kwargs):
     if experiment:
         set_comet_conf(model_tot_params, **kwargs)
 
+    init_learning_rate = kwargs.get('learning_rate', 0.0001)
+    scheduler = util.WarmupCosineLRScheduler(
+        max_lr=init_learning_rate,
+        min_lr=init_learning_rate / 2.0,
+        warmup_iters=kwargs.get('lr_warmup_iters', 1e6),
+        lr_decay_iters=kwargs.get('lr_decay_iters', 20e6),
+    )
+
     train_epochs(model,
                  kwargs.get('epochs'),
                  dataloader,
+                 scheduler=scheduler,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),

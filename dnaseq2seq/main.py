@@ -73,7 +73,6 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
     tgt_prefix = "tgkmers"
-    #vaf_prefix = "vaftgt"
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
     )
@@ -106,6 +105,9 @@ def pregen(config, **kwargs):
     batch_size = kwargs.get('batch_size', 64)
     reads_per_pileup = kwargs.get('read_depth', 150)
     samples_per_pos = kwargs.get('samples_per_pos', 2)
+    processes = kwargs.get('threads', 1)
+    jitter = kwargs.get('jitter', 0)
+
     vals_per_class = defaultdict(default_vals_per_class)
     vals_per_class.update(conf['vals_per_class'])
 
@@ -115,11 +117,10 @@ def pregen(config, **kwargs):
     if metadata_file is None:
         str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
         metadata_file = f"pregen_{str_time}.csv"
-    processes = kwargs.get('threads', 1)
 
     logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
     dataloaders = [
-            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class)
+            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class, max_jitter_bases=jitter)
         for c in conf['data']
     ]
 
@@ -186,6 +187,7 @@ def main():
     genparser.add_argument("-b", "--batch-size", help="Number of pileups to include in a single file (basically the batch size)", default=64, type=int)
     genparser.add_argument("-n", "--start-from", help="Start numbering from here", type=int, default=0)
     genparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
+    genparser.add_argument("-j", "--jitter", help="Jitter each region by at most this amount (default 0 is no jitter)", type=int, default=0)
     # genparser.add_argument("-vpc", "--vals-per-class", help="The number of instances for each variant class in a label file; it will be set automatically if not specified", type=int, default=1000)
     genparser.add_argument("-mf", "--metadata-file", help="The metadata file that records each row in the encoded tensor files and the variant from which that row is derived. The name pregen_{time}.csv will be used if not specified.")
     genparser.set_defaults(func=pregen)
