@@ -71,7 +71,7 @@ class LazyLoader:
     Useful for 'pre-gen' where we just want to iterate over everything once and save it to a file
     """
 
-    def __init__(self, bam, bed, vcf, reference, reads_per_pileup, samples_per_pos, vals_per_class):
+    def __init__(self, bam, bed, vcf, reference, reads_per_pileup, samples_per_pos, vals_per_class, max_jitter_bases):
         self.bam = bam
         self.bed = bed
         self.vcf = vcf
@@ -79,19 +79,21 @@ class LazyLoader:
         self.reads_per_pileup = reads_per_pileup
         self.samples_per_pos = samples_per_pos
         self.vals_per_class = vals_per_class
+        self.max_jitter_bases = max_jitter_bases
 
     def iter_once(self, batch_size):
         logger.info(f"Encoding tensors from {self.bam} and {self.vcf}")
         for src, tgt, vaftgt, varsinfo in encode_chunks(self.bam,
-                                          self.reference,
-                                          self.bed,
-                                          self.vcf,
-                                          batch_size,
-                                          self.reads_per_pileup,
-                                          self.samples_per_pos,
-                                          self.vals_per_class,
-                                          max_to_load=1e9):
-                yield src, tgt, vaftgt, varsinfo
+                                                        self.reference,
+                                                        self.bed,
+                                                        self.vcf,
+                                                        batch_size,
+                                                        self.reads_per_pileup,
+                                                        self.samples_per_pos,
+                                                        self.vals_per_class,
+                                                        max_to_load=1e9,
+                                                        max_jitter_bases=self.max_jitter_bases):
+            yield src, tgt, vaftgt, varsinfo
 
 
 class WeightedLoader:
@@ -503,7 +505,7 @@ def upsample_labels(bed, vals_per_class):
     return rows
 
 
-def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per_pos, vals_per_class):
+def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per_pos, vals_per_class, max_jitter_bases=0):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
     alignment (BAM) and labels csv file. This performs some class normalized by upsampling / downsampling
@@ -524,6 +526,12 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
     for region in upsampled_labels:
         chrom, start, end = region[0:3]
+
+        # Add some jitter?
+        if max_jitter_bases > 0:
+            jitter = np.random.randint(0, max_jitter_bases) - max_jitter_bases // 2
+            start, end = start + jitter, end + jitter
+
         variants = list(vcf.fetch(chrom, start, end))
         #logger.info(f"Number of variants in {chrom}:{start}-{end} : {len(variants)}")
         try:
@@ -559,7 +567,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
 
 
 
-def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, samples_per_pos, vals_per_class, max_to_load=1e9):
+def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, samples_per_pos, vals_per_class, max_to_load=1e9, max_jitter_bases=0):
     """
     Generator for creating batches of src, tgt (data and label) tensors from a CSV file
 
@@ -579,7 +587,11 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
     count = 0
     seq_len = 150
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
-    for enc, tgt, region in load_from_csv(bampath, refpath, bed, vcf, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos, vals_per_class=vals_per_class):
+    for enc, tgt, region in load_from_csv(bampath, refpath, bed, vcf,
+                                          max_reads_per_aln=max_reads_per_aln,
+                                          samples_per_pos=samples_per_pos,
+                                          vals_per_class=vals_per_class,
+                                          max_jitter_bases=max_jitter_bases):
         src, tgt = trim_pileuptensor(enc, tgt, seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
