@@ -466,9 +466,9 @@ def load_model(modelconf, statedict):
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(torch.load(statedict, map_location=DEVICE))
     
-    # logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
-    # model.fc1.requires_grad_(False)
-    # model.fc2.requires_grad_(False)
+    logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
+    model.fc1.requires_grad_(False)
+    model.fc2.requires_grad_(False)
 
     if USE_DDP:
         rank = dist.get_rank()
@@ -485,6 +485,7 @@ def load_model(modelconf, statedict):
 def train_epochs(model,
                  epochs,
                  dataloader,
+                 scheduler,
                  init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  model_dest=None,
@@ -494,13 +495,13 @@ def train_epochs(model,
                  wandb_notes="",
                  cl_args = {},
                  samples_per_epoch=10000,
+
 ):
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=init_learning_rate, betas=(0.9, 0.999))
 
     criterion = nn.NLLLoss()
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
-    scheduler = util.WarmupCosineLRScheduler(max_lr=init_learning_rate, min_lr=init_learning_rate / 2.0, warmup_iters=1e6, lr_decay_iters=20e6)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -656,13 +657,15 @@ def set_comet_conf(model_tot_params, **kwargs):
     # back to correct working dir
     os.chdir(current_working_dir)
 
+
 def load_conf(conf_file, **kwargs):
     with open(conf_file) as fh:
         conf = yaml.safe_load(fh)
     conf.update((k,v) for k,v in kwargs.items() if v is not None)
     return conf
 
-def train(output_model, input_model, epochs, **kwargs):
+
+def train(output_model, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
     :param config: Path to config yaml
@@ -708,14 +711,23 @@ def train(output_model, input_model, epochs, **kwargs):
                                      max_decomped_batches=kwargs.get('max_decomp_batches'),
                                      tgt_prefix="tgkmers")
 
-    model = load_model(kwargs['model'], input_model)
+    model = load_model(kwargs['model'], kwargs.get("input_model"))
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if experiment:
-        set_comet_conf(model_tot_params, kwargs)
+        set_comet_conf(model_tot_params, **kwargs)
+
+    init_learning_rate = kwargs.get('learning_rate', 0.0001)
+    scheduler = util.WarmupCosineLRScheduler(
+        max_lr=init_learning_rate,
+        min_lr=init_learning_rate / 2.0,
+        warmup_iters=kwargs.get('lr_warmup_iters', 1e6),
+        lr_decay_iters=kwargs.get('lr_decay_iters', 20e6),
+    )
 
     train_epochs(model,
-                 epochs,
+                 kwargs.get('epochs'),
                  dataloader,
+                 scheduler=scheduler,
                  init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
