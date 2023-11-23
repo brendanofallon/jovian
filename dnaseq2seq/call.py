@@ -416,10 +416,6 @@ def process_block(raw_regions,
                 )
             )
 
-    # We already do this in vars_hap_to_records!
-    if classifier_model:
-        for v in var_records:
-            v.qual = buildclf.predict_one_record(classifier_model, v, aln, var_freq_file)
     for var in sorted(var_records, key=lambda x: x.pos):
         vcf_out.write(str(var))
     vcf_out.flush()
