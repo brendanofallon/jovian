@@ -234,8 +234,8 @@ class PregenLoader:
         if pathpairs:
             self.pathpairs = pathpairs
         else:
-            self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix)
-            random.shuffle(self.pathpairs)
+            self.load_files()
+            
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -245,6 +245,11 @@ class PregenLoader:
         logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
+        
+    def load_files(self):
+        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix)
+        logger.info(f"Loaded {len(self.pathpairs)} from {self.datadir}")
+        random.shuffle(self.pathpairs)
 
     def retain_val_samples(self, fraction):
         """
@@ -270,7 +275,7 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        random.shuffle(self.pathpairs)
+        self.load_files() # Search for new data with every iteration ?
         src, tgt = [], []
         for i in range(0, len(self.pathpairs), self.max_decomped):
             decomp_start = datetime.now()
