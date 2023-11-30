@@ -128,6 +128,7 @@ def load_model(model_path):
                            device=DEVICE)
 
     model.load_state_dict(statedict)
+
     #model.half()
     #model = torch.compile(model)
     model.eval()
@@ -290,7 +291,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 150
+    max_read_depth = 128
     logger.info(f"Max read depth: {max_read_depth}")
     logger.info(f"Max batch size: {max_batch_size}")
 
@@ -377,6 +378,7 @@ def process_block(raw_regions,
     window_count = 0
     var_records = [] # Stores all variant records so we can sort before writing
     window_idx = -1
+    path=None # Avoid rare case with logging when there is no path set
     with torch.no_grad():
         for path in encoded_paths:
             # Load the data, parsing location + encoded data from file
@@ -420,10 +422,6 @@ def process_block(raw_regions,
                 )
             )
 
-    # We already do this in vars_hap_to_records!
-    if classifier_model:
-        for v in var_records:
-            v.qual = buildclf.predict_one_record(classifier_model, v, aln, var_freq_file)
     for var in sorted(var_records, key=lambda x: x.pos):
         vcf_out.write(str(var))
     vcf_out.flush()

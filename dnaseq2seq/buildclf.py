@@ -396,9 +396,9 @@ def _process_sample(args):
                         tpdels += 1
             elif call == 'FP':
                 alleles = list(var.samples['CALLS']['GT'])
-                if 0 in alleles:
-                    alleles.remove(0)
-                alts = tuple(var.alleles[a] for a in alleles) # Trailing comma important
+                #print(f"Looking at {str(var).strip()}, alleles are: {alleles}")
+                alts = tuple(var.alleles[a] for a in alleles if (a is not None) and a != 0 ) # Half calls like ./1 have None as an allele
+                #print(f"     parsed alts: {alts}")
                 fpvar = _find_var(var.chrom, var.pos, var.ref, alts, fpfile)
                 if fpvar is None:
                     logger.warning(f"Couldn't find FP match for find variant {var}")

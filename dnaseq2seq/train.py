@@ -394,9 +394,9 @@ def load_model(modelconf, ckpt):
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(statedict)
     
-    # logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
-    # model.fc1.requires_grad_(False)
-    # model.fc2.requires_grad_(False)
+    logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
+    model.fc1.requires_grad_(False)
+    model.fc2.requires_grad_(False)
 
     if USE_DDP:
         rank = dist.get_rank()
@@ -590,7 +590,7 @@ def load_conf(conf_file, **kwargs):
     return conf
 
 
-def train(output_model, input_model, **kwargs):
+def train(output_model, **kwargs):
     """
     Conduct a training run and save the trained parameters (statedict) to output_model
     :param config: Path to config yaml
@@ -636,7 +636,7 @@ def train(output_model, input_model, **kwargs):
                                      max_decomped_batches=kwargs.get('max_decomp_batches'),
                                      tgt_prefix="tgkmers")
 
-    model = load_model(kwargs['model'], input_model)
+    model = load_model(kwargs['model'], kwargs.get("input_model"))
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if experiment:
         set_comet_conf(model_tot_params, **kwargs)
