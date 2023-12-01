@@ -88,12 +88,12 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 def load_model(model_path):
     
     #96M params
-    encoder_attention_heads = 8
-    decoder_attention_heads = 10 
-    dim_feedforward = 512
-    encoder_layers = 10
-    decoder_layers = 10 
-    embed_dim_factor = 160 
+    # encoder_attention_heads = 8
+    # decoder_attention_heads = 10
+    # dim_feedforward = 512
+    # encoder_layers = 10
+    # decoder_layers = 10
+    # embed_dim_factor = 160
 
     #50M params
     #encoder_attention_heads = 8
@@ -103,6 +103,13 @@ def load_model(model_path):
     #decoder_layers = 6
     #embed_dim_factor = 120 
 
+    #50M 'small decoder'
+    #decoder_attention_heads = 4
+    #decoder_layers = 2
+    #dim_feedforward = 512
+    #embed_dim_factor = 120
+    #encoder_attention_heads = 10
+    #encoder_layers = 10
 
     # 35M params
     #encoder_attention_heads = 8 # was 4
@@ -112,17 +119,23 @@ def load_model(model_path):
     #decoder_layers = 4 # was 2
     #embed_dim_factor = 120 # was 100
 
-    model = VarTransformer(read_depth=128,
-                            feature_count=10,
-                            kmer_dim=util.FEATURE_DIM, # Number of possible kmers
-                            n_encoder_layers=encoder_layers,
-                            n_decoder_layers=decoder_layers,
-                            embed_dim_factor=embed_dim_factor,
-                            encoder_attention_heads=encoder_attention_heads,
-                            decoder_attention_heads=decoder_attention_heads,
-                            d_ff=dim_feedforward,
-                            device=DEVICE)
-    model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+    model_info = torch.load(model_path, map_location=DEVICE)
+    statedict = model_info['statedict']
+    modelconf = model_info['conf']
+
+    model = VarTransformer(read_depth=modelconf['max_read_depth'],
+                           feature_count=modelconf['feats_per_read'],
+                           kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
+                           n_encoder_layers=modelconf['encoder_layers'],
+                           n_decoder_layers=modelconf['decoder_layers'],
+                           embed_dim_factor=modelconf['embed_dim_factor'],
+                           encoder_attention_heads=modelconf['encoder_attention_heads'],
+                           decoder_attention_heads=modelconf['decoder_attention_heads'],
+                           d_ff=modelconf['dim_feedforward'],
+                           device=DEVICE)
+
+    model.load_state_dict(statedict)
+
     #model.half()
     #model = torch.compile(model)
     model.eval()
@@ -285,7 +298,7 @@ def call_vars_in_blocks(
 
     :return: a VCF file with called variants for the given chromosome.
     """
-    max_read_depth = 128
+    max_read_depth = 150
     logger.info(f"Max read depth: {max_read_depth}")
     logger.info(f"Max batch size: {max_batch_size}")
 

@@ -43,7 +43,7 @@ logger.addHandler(handler)
 
 
 USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
-MASTER_PROCESS = USE_DDP and os.environ.get('RANK') == '0'
+MASTER_PROCESS = (not USE_DDP) or os.environ.get('RANK') == '0'
 DEVICE = None # This is set in the 'train' method
 
 
@@ -137,85 +137,6 @@ def compute_twohap_loss(preds, tgt, criterion):
                 preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
 
     return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
-
-
-
-def train_epoch(model, optimizer, criterion, loader, batch_size):
-    """
-    Train for one epoch, which is defined by the loader but usually involves one pass over all input samples
-    :param model: Model to train
-    :param optimizer: Optimizer to update params
-    :param criterion: Loss function
-    :param loader: Provides training data
-    :param batch_size:
-    :return: Sum of losses over each batch, plus fraction of matching bases for ref and alt seq
-    """
-    model.train()
-    epoch_loss_sum = None
-    prev_epoch_loss = None
-    count = 0
-    # init time usage to zero
-    epoch_times = {}
-    start_time = datetime.now()
-
-    truncate_tgt_len = 148
-    for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader.iter_once(batch_size)):
-        if log_info:
-            decomp_time = log_info.get("decomp_time", 0.0)
-        else:
-            decomp_time = 0.0
-
-        #tgt_kmers = util.tgt_to_kmers(tgt_seq[:, :, 0:truncate_tgt_len]).float().to(DEVICE)
-        tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
-        tgt_kmers_input = tgt_kmers[:, :, :-1]
-        tgt_expected = tgt_kmer_idx[:, :, 1:]
-        #logger.info(f"tgt_kmers_input shape: {tgt_kmers_input.shape}")
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
-        times = dict(start=start_time, decomp_and_load=datetime.now(), decomp_time=decomp_time)
-        #logger.info(f"tgt_mask shape: {tgt_mask.shape}")
-
-        optimizer.zero_grad()
-        times["zero_grad"] = datetime.now()
-        seq_preds = model(src, tgt_kmers_input, tgt_mask)
-        times["forward_pass"] = datetime.now()
-
-        loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
-
-
-        times["loss"] = datetime.now()
-
-        count += 1
-        if count % 100 == 0:
-            if prev_epoch_loss:
-                lossdif = epoch_loss_sum - prev_epoch_loss
-            else:
-                lossdif = 0
-            logger.info(f"Batch {count} : epoch_loss_sum: {epoch_loss_sum:.3f} epoch loss dif: {lossdif:.3f}")
-
-        times["midmatch"] = datetime.now()
-        loss.backward()
-        times["backward_pass"] = datetime.now()
-
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Not sure what is reasonable here, but we want to prevent the gradient from getting too big
-        optimizer.step()
-        times["optimize"] = datetime.now()
-
-        if epoch_loss_sum is None:
-            epoch_loss_sum = loss.detach().item()
-        else:
-            prev_epoch_loss = epoch_loss_sum
-            epoch_loss_sum += loss.detach().item()
-        if np.isnan(epoch_loss_sum):
-            logger.warning(f"Loss is NAN!!")
-        if batch % 10 == 0:
-            logger.info(f"Batch {batch} : loss: {loss.item():.3f}")
-            
-        epoch_times = calc_time_sums(time_sums=epoch_times, **times)
-        start_time = datetime.now()  # reset timer for next batch
-
-    logger.info(f"Trained {batch+1} batches in total for epoch")
-
-    return epoch_loss_sum, epoch_times
 
 
 def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None):
@@ -392,7 +313,7 @@ def safe_compute_ppav(results0, results1, key):
 
     return ppa, ppv
 
-def load_model(modelconf, statedict):
+def load_model(modelconf, ckpt):
     # 35M model params
     # encoder_attention_heads = 8 # was 4
     # decoder_attention_heads = 4 # was 4
@@ -448,6 +369,13 @@ def load_model(modelconf, statedict):
     # encoder_layers = 2
     # decoder_layers = 2  # was 2
     # embed_dim_factor = 160  # was 100
+    statedict = None
+    if ckpt is not None:
+        ckpt = torch.load(ckpt, map_location=DEVICE)
+        statedict = ckpt['statedict']
+        if 'conf' in ckpt:
+            logger.warning(f"Found model conf AND a checkpoint with model conf - using the model params from checkpoint")
+            modelconf = ckpt['conf']
 
     model = VarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
@@ -464,11 +392,11 @@ def load_model(modelconf, statedict):
 
     if statedict is not None:
         logger.info(f"Initializing model with state dict {statedict}")
-        model.load_state_dict(torch.load(statedict, map_location=DEVICE))
+        model.load_state_dict(statedict)
     
     logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
     model.fc1.requires_grad_(False)
-    model.fc2.requires_grad_(False)
+    #model.fc2.requires_grad_(False)
 
     if USE_DDP:
         rank = dist.get_rank()
@@ -494,6 +422,7 @@ def train_epochs(model,
                  wandb_run_name=None,
                  wandb_notes="",
                  cl_args = {},
+                 xtra_checkpoint_items={},
                  samples_per_epoch=10000,
 
 ):
@@ -527,29 +456,38 @@ def train_epochs(model,
         sample_iter = iter_indefinitely(dataloader, batch_size)
         for epoch in range(epochs):
             starttime = datetime.now()
-            if samples_per_epoch > 0:
-                loss = train_n_samples(model,
-                                  optimizer,
-                                  criterion,
-                                  sample_iter,
-                                  samples_per_epoch,
-                                  scheduler)
-            else:
-                loss, _ = train_epoch(model, optimizer, criterion, dataloader, batch_size)
-
-
+            assert samples_per_epoch > 0, "Must have positive number of samples per epoch"
+            loss = train_n_samples(model,
+                              optimizer,
+                              criterion,
+                              sample_iter,
+                              samples_per_epoch,
+                              scheduler)
 
             elapsed = datetime.now() - starttime
 
-            if MASTER_PROCESS:
-                acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
-
-                ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
-                ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
-                ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
-
-                logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
-
+            # if MASTER_PROCESS:
+            #     acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
+            #
+            #     ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
+            #     ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
+            #     ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
+            #
+            #     logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
+            #     trainlogger.log({
+            #         "epoch": epoch,
+            #         "trainingloss": loss,
+            #         "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
+            #         "mean_var_count": var_count0,
+            #         "ppa_snv": ppa_snv,
+            #         "ppa_ins": ppa_ins,
+            #         "ppa_dels": ppa_dels,
+            #         "ppv_ins": ppv_ins,
+            #         "ppv_snv": ppv_snv,
+            #         "ppv_dels": ppv_dels,
+            #         "learning_rate": scheduler.get_last_lr(),
+            #         "epochtime": elapsed.total_seconds(),
+            #     })
             if experiment:
                 experiment.log_metrics({
                     "epoch": epoch,
@@ -569,29 +507,16 @@ def train_epochs(model,
                     "epochtime": elapsed.total_seconds(),
                 }, step=epoch)
 
-            if MASTER_PROCESS:
-                trainlogger.log({
-                    "epoch": epoch,
-                    "trainingloss": loss,
-                    "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
-                    "mean_var_count": var_count0,
-                    "ppa_snv": ppa_snv,
-                    "ppa_ins": ppa_ins,
-                    "ppa_dels": ppa_dels,
-                    "ppv_ins": ppv_ins,
-                    "ppv_snv": ppv_snv,
-                    "ppv_dels": ppv_dels,
-                    "learning_rate": scheduler.get_last_lr(),
-                    "epochtime": elapsed.total_seconds(),
-                })
-
-
             if MASTER_PROCESS and epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):
                 modelparts = str(model_dest).rsplit(".", maxsplit=1)
                 checkpoint_name = modelparts[0] + f"_epoch{epoch}." + modelparts[1]
                 logger.info(f"Saving model state dict to {checkpoint_name}")
                 m = model.module if (isinstance(model, nn.DataParallel) or isinstance(model, DDP)) else model
-                torch.save(m.state_dict(), checkpoint_name)
+                ckpt_data = {
+                    'model': m.state_dict(),
+                    'conf': xtra_checkpoint_items,
+                }
+                torch.save(ckpt_data, checkpoint_name)
 
         logger.info(f"Training completed after {epoch} epochs")
     except KeyboardInterrupt:
@@ -737,5 +662,6 @@ def train(output_model, **kwargs):
                  wandb_notes=kwargs.get("wandb_notes"),
                  cl_args=kwargs.get("cl_args"),
                  samples_per_epoch=kwargs.get('samples_per_epoch'),
+                 xtra_checkpoint_items=kwargs['model'],
                  )
 

@@ -280,6 +280,7 @@ class PregenLoader:
         self.load_files() # Search for new data with every iteration ?
         src, tgt = [], []
         for i in range(0, len(self.pathpairs), self.max_decomped):
+            logger.info(f"Decompressing {i}-{i+self.max_decomped} files of {len(self.pathpairs)} First is: {self.pathpairs[i]}")
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)
@@ -333,72 +334,8 @@ class PregenLoader:
                 None,
                 {"decomp_time": 0.0},
             )
+        logger.info(f"Done iterating data")
 
-
-class ShorteningLoader:
-    """
-    This loader shortens the sequence dimension (dimension 1 of src, 2 of tgt) to seq_len
-    It should be used to wrap another loader that actually does the loading
-    For instance:
-
-        loader = ShorteningLoader(PregenLoader(...), seq_len=100)
-
-    """
-    def __init__(self, wrapped_loader, seq_len, fraction_to_augment):
-        self.wrapped_loader = wrapped_loader
-        self.seq_len = seq_len
-        self.fraction_to_augment = fraction_to_augment
-
-    def iter_once(self, batch_size):
-        iter = 0
-        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
-            if np.random.rand() < self.fraction_to_augment:
-                start = src.shape[1] // 2 - self.seq_len // 2
-                end = src.shape[1] // 2 + self.seq_len // 2
-                src = src[:, start:end, :, :]
-                tgt = tgt[:, :, start:end]
-                iter += 1
-            yield src, tgt, vaftgt, None, log_info
-        logger.info(f"Total number of sample batches that had their sequence dimension shortened are: {iter}")
-
-
-class ShufflingLoader:
-    """
-    This loader shuffles the reads (dimension 2 of src), excluding the 0th element i.e. ref read.
-    It should be used to wrap another loader that actually does the loading
-    For instance:
-
-        loader = ShufflingLoader(PregenLoader(...))
-
-    """
-    def __init__(self, wrapped_loader, fraction_to_augment):
-        self.wrapped_loader = wrapped_loader
-        self.fraction_to_augment = fraction_to_augment
-
-    def iter_once(self, batch_size):
-        iter = 0
-        for src, tgt, vaftgt, _, log_info in self.wrapped_loader.iter_once(batch_size):
-            if np.random.rand() < self.fraction_to_augment:
-                src_non_ref_reads = src[:, :, 1:, :]
-                src_non_ref_reads_shuf = src_non_ref_reads[:, :, torch.randperm(src_non_ref_reads.shape[2]), :]
-                src = torch.cat((src[:, :, :1, :], src_non_ref_reads_shuf), dim=2)
-                iter += 1
-            yield src, tgt, vaftgt, None, log_info
-        logger.info(f"Total number of sample batches that had their reads shuffled are: {iter}")
-
-
-class MultiLoader:
-    """
-    Combines multiple loaders into a single loader
-    """
-
-    def __init__(self, loaders):
-        self.loaders = loaders
-
-    def iter_once(self, batch_size):
-        for loader in self.loaders:
-            for src, tgt in loader.iter_once(batch_size):
-                yield src, tgt, None, None, None
 
 
 def trim_pileuptensor(src, tgt, width):

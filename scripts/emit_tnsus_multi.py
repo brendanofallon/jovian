@@ -20,7 +20,7 @@ def parse_giab_sample(name):
         return match.group().strip("_")
     elif "NA12878" in name:
         return "HG001"
-    elif "NA24385" in name:
+    elif ("NA24385" in name) or ("GM24385" in name):
         return "HG002"
     elif "NA24149" in name:
         return "HG003"
@@ -77,7 +77,7 @@ def main(group, bams):
         "HG007": f"/scratch/general/vast/u0379426/giab_label_beds/chrsplit{group}/HG007_labels_chrs{group}.bed",
         }
 
-    with mp.Pool(24) as pool:
+    with mp.Pool(8) as pool:
         pool.map(gensus, [(SPLITBEDS, b, group) for b in bams])
 
 if __name__=="__main__":

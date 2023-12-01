@@ -1,8 +1,9 @@
 #!/bin/bash
 
 #SBATCH --account=arupbio-kp
-#SBATCH --partition=arup-kp
-#SBATCH --nodes=1
+#SBATCH --partition=arup-shared-kp
+#SBATCH --ntasks=8
+#SBATCH --mem=16G
 #SBATCH --time=3-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
