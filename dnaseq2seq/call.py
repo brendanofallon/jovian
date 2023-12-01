@@ -298,14 +298,14 @@ def call_vars_in_blocks(
             split_large_regions(read_bed_regions(bed), max_region_size=10000)
         )
     ]
-
+    model = load_model(model_path)
     regions_per_block = max(4, threads)
     start_block = 0
     while start_block < len(windows):
         logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(windows)}  {start_block / len(windows) * 100 :.2f}% done")
         process_block(windows[start_block:start_block + regions_per_block],
                       bamfile=bamfile,
-                      model_path=model_path,
+                      model=model,
                       reference_fasta=reference_fasta,
                       classifier_path=classifier_path,
                       tmpdir=tmpdir,
@@ -321,7 +321,7 @@ def call_vars_in_blocks(
 
 def process_block(raw_regions,
               bamfile,
-              model_path,
+              model,
               reference_fasta,
               classifier_path,
               tmpdir,
@@ -339,6 +339,8 @@ def process_block(raw_regions,
 
     """
     sus_start = datetime.datetime.now()
+
+    # First, find 'suspect' regions. This part is pretty fast
     cluster_positions_func = partial(
         cluster_positions_for_window,
         bamfile=bamfile,
@@ -349,11 +351,13 @@ def process_block(raw_regions,
     sus_regions = util.merge_overlapping_regions( list(itertools.chain(*sus_regions)))
     sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
     enc_start = datetime.datetime.now()
+
+    # Next, encode each suspect region and save it to disk. This is slow
     logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
     encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64, window_step=25)
     enc_elapsed = datetime.datetime.now() - enc_start
     logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
-    model = load_model(model_path)
+
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
 
