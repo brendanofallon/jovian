@@ -120,8 +120,18 @@ def load_model(model_path):
     #embed_dim_factor = 120 # was 100
 
     model_info = torch.load(model_path, map_location=DEVICE)
-    statedict = model_info['statedict']
-    modelconf = model_info['conf']
+    statedict = model_info #model_info['statedict']
+    #modelconf = model_info['conf']
+    modelconf = {
+            "max_read_depth": 150,
+            "feats_per_read": 10,
+            "decoder_layers": 10,
+            "decoder_attention_heads": 10,
+            "encoder_layers": 10,
+            "encoder_attention_heads": 8,
+            "dim_feedforward": 512,
+            "embed_dim_factor": 160,
+            }
 
     model = VarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
@@ -137,7 +147,7 @@ def load_model(model_path):
     model.load_state_dict(statedict)
 
     #model.half()
-    #model = torch.compile(model)
+    model = torch.compile(model, fullgraph=True)
     model.eval()
     model.to(DEVICE)
     return model
