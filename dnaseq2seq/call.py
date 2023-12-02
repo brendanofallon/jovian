@@ -148,7 +148,7 @@ def load_model(model_path):
 
     #model.half()
     model.eval()
-    #model.bfloat16().to(DEVICE)
+    model.to(DEVICE)
     
     model = torch.compile(model, fullgraph=True)
     

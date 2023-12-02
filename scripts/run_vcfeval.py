@@ -60,7 +60,7 @@ def find_giab(name):
 
 def run_vcfeval(bed, baseline_vcf, calls_vcf, output_mode='split'):
     dest = Path(calls_vcf).name.replace(".vcf", "").replace(".gz", "") + "_vcfevalresults"
-    cmd = f"{VCFEVAL} -t {REF} -b {baseline_vcf} -c {calls_vcf} --ref-overlap --all-records --bed-regions {bed} --evaluation-regions {bed} -o {dest} --output-mode {output_mode}"
+    cmd = f"{VCFEVAL} -t {REF} -b {baseline_vcf} -c {calls_vcf} --vcf-score-field QUAL --ref-overlap --all-records --bed-regions {bed} --evaluation-regions {bed} -o {dest} --output-mode {output_mode}"
     sys.stderr.write(f"Executing: {cmd} \n")
     subprocess.run(cmd, shell=True)
     return dest
