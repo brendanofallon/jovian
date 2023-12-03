@@ -246,8 +246,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     feats.append(vaf)
     #feats.append(mq_vaf)
-    #feats.append(pos_alt + neg_alt)
-    #feats.append(strandbias_stat)
+    feats.append(pos_alt + neg_alt)
     return np.array(feats)
 
 
@@ -270,7 +269,7 @@ def feat_names():
             "het",
             "vaf",
             #"highmq_vaf",
-            #"altreads",
+            "altreads",
           #  "strandbias_stat",
         ]
 
@@ -359,13 +358,13 @@ def _process_sample(args):
     fp_feats = []
     featstrs = []
     labels = []
-    max_tp_snvs = 5000
-    max_tp_dels = 2000
-    max_tp_ins = 2000
+    max_tp_snvs = 10000
+    max_tp_dels = 5000
+    max_tp_ins = 5000
     tpsnvs = 0
     tpins = 0
     tpdels = 0
-    tp_downsample_freq = 0.025
+    tp_downsample_freq = 0.1
     for outputfile, tp, fp in zip(varoutputs, tps, fps):
         tpfile = pysam.VariantFile(tp)
         fpfile = pysam.VariantFile(fp)

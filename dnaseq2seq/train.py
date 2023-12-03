@@ -394,8 +394,8 @@ def load_model(modelconf, ckpt):
         logger.info(f"Initializing model with state dict {statedict}")
         model.load_state_dict(statedict)
     
-    logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
-    model.fc1.requires_grad_(False)
+    #logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
+    #model.fc1.requires_grad_(False)
     #model.fc2.requires_grad_(False)
 
     if USE_DDP:
