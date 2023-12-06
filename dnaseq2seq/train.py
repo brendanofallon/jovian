@@ -127,16 +127,18 @@ def compute_twohap_loss(preds, tgt, criterion):
     """
     # Compute losses in both configurations, and use the best
     with torch.no_grad():
+        swaps = 0
         for b in range(preds.shape[0]):
             loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
                               tgt[b, :, :].flatten())
             loss2 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
                               tgt[b, torch.tensor([1, 0]), :].flatten())
 
-            if loss2 < loss1:
+            if loss2.mean() < loss1.mean():
                 preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
+                swaps += 1
 
-    return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten())
+    return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten()), swaps
 
 
 def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None):
@@ -156,7 +158,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         seq_preds = model(src, tgt_kmers_input, tgt_mask)
 
         logger.debug(f"Computing loss...")
-        loss = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+        loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
         loss.backward()
         loss_sum += loss.item()
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
@@ -164,7 +166,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         optimizer.step()
         lr_schedule.add_iters(src.shape[0])
         if batch % 10 == 0:
-            logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f}")
+            logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f} swaps: {swaps}")
         if lr_schedule and batch % 10 == 0:
             lr = lr_schedule.get_lr()
             logger.info(f"LR samples seen: {lr_schedule.iters}, learning rate: {lr_schedule.get_last_lr() :.6f}")
@@ -269,6 +271,7 @@ def calc_val_accuracy(loader, model, criterion):
         total_batches = 0
         loss_tot = 0
 
+        swap_tot = 0
         for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
             total_batches += 1
             tot_samples += src.shape[0]
@@ -278,10 +281,10 @@ def calc_val_accuracy(loader, model, criterion):
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
             j = tgt_kmer_idx.shape[-1]
             seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
-            if type(criterion) == nn.NLLLoss:
-                loss_tot += compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
-            else:
-                raise ValueError("Only cross entropy supported now")
+
+            loss, swaps = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
+            loss_tot += loss
+            swap_tot += swaps
 
             midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt_kmer_idx[:, 0, :], result_totals0)
             midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt_kmer_idx[:, 1, :], result_totals1)
@@ -296,7 +299,8 @@ def calc_val_accuracy(loader, model, criterion):
             var_counts_sum0 / tot_samples,
             var_counts_sum1 / tot_samples,
             result_totals0, result_totals1,
-            loss_tot)
+            loss_tot,
+            swap_tot)
 
 
 def safe_compute_ppav(results0, results1, key):
@@ -372,7 +376,11 @@ def load_model(modelconf, ckpt):
     statedict = None
     if ckpt is not None:
         ckpt = torch.load(ckpt, map_location=DEVICE)
-        statedict = ckpt['statedict']
+        if 'statedict' in ckpt:
+            statedict = ckpt['statedict']
+        else:
+            statedict = ckpt
+
         if 'conf' in ckpt:
             logger.warning(f"Found model conf AND a checkpoint with model conf - using the model params from checkpoint")
             modelconf = ckpt['conf']
@@ -435,7 +443,7 @@ def train_epochs(model,
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
 
-
+    swaps = 0
     trainlogger = TrainLogger(trainlogpath, [
             "epoch", "trainingloss", "val_accuracy",
             "mean_var_count", "ppa_dels", "ppa_ins", "ppa_snv",
@@ -466,28 +474,28 @@ def train_epochs(model,
 
             elapsed = datetime.now() - starttime
 
-            # if MASTER_PROCESS:
-            #     acc0, acc1, var_count0, var_count1, results0, results1, val_loss = calc_val_accuracy(val_loader, model, criterion)
-            #
-            #     ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
-            #     ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
-            #     ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
-            #
-            #     logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f}")
-            #     trainlogger.log({
-            #         "epoch": epoch,
-            #         "trainingloss": loss,
-            #         "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
-            #         "mean_var_count": var_count0,
-            #         "ppa_snv": ppa_snv,
-            #         "ppa_ins": ppa_ins,
-            #         "ppa_dels": ppa_dels,
-            #         "ppv_ins": ppv_ins,
-            #         "ppv_snv": ppv_snv,
-            #         "ppv_dels": ppv_dels,
-            #         "learning_rate": scheduler.get_last_lr(),
-            #         "epochtime": elapsed.total_seconds(),
-            #     })
+            if MASTER_PROCESS:
+                acc0, acc1, var_count0, var_count1, results0, results1, val_loss, swaps = calc_val_accuracy(val_loader, model, criterion)
+
+                ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
+                ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
+                ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
+
+                logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f} swaps: {swaps}")
+                trainlogger.log({
+                    "epoch": epoch,
+                    "trainingloss": loss,
+                    "val_accuracy": acc0.item() if isinstance(acc0, torch.Tensor) else acc0,
+                    "mean_var_count": var_count0,
+                    "ppa_snv": ppa_snv,
+                    "ppa_ins": ppa_ins,
+                    "ppa_dels": ppa_dels,
+                    "ppv_ins": ppv_ins,
+                    "ppv_snv": ppv_snv,
+                    "ppv_dels": ppv_dels,
+                    "learning_rate": scheduler.get_last_lr(),
+                    "epochtime": elapsed.total_seconds(),
+                })
             if experiment:
                 experiment.log_metrics({
                     "epoch": epoch,
@@ -504,6 +512,7 @@ def train_epochs(model,
                     "accuracy/ppv ins": ppv_ins,
                     "accuracy/ppv snv": ppv_snv,
                     "learning_rate": scheduler.get_last_lr(),
+                    "hap_swaps": swaps,
                     "epochtime": elapsed.total_seconds(),
                 }, step=epoch)
 
