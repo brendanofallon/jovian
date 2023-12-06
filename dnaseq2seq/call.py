@@ -765,10 +765,10 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    window_start = int(start - 0.7 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
+    readwindow = bam.ReadWindow(aln, chrom, start - 150, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     returned_count = 0
     while window_start <= (end - 0.2 * window_size):

@@ -460,7 +460,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     preds = clf.predict_proba(feat_test)[:,1]
     threshold = 0.1
     ppv, ppa, fscore, support = precision_recall_fscore_support(lab_test, preds > threshold)
-    print("Metrics at threshold : {threshold}")
+    print(f"Metrics at threshold : {threshold}")
     print(f"PPA : {ppa[1] :.5f}")
     print(f"PPV : {ppv[1] :.5f}")
     print(f"F1 : {fscore[1] :.5f}")
