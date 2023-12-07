@@ -376,8 +376,8 @@ def load_model(modelconf, ckpt):
     statedict = None
     if ckpt is not None:
         ckpt = torch.load(ckpt, map_location=DEVICE)
-        if 'statedict' in ckpt:
-            statedict = ckpt['statedict']
+        if 'model' in ckpt:
+            statedict = ckpt['model']
         else:
             statedict = ckpt
 

@@ -120,7 +120,7 @@ def load_model(model_path):
     #embed_dim_factor = 120 # was 100
 
     model_info = torch.load(model_path, map_location=DEVICE)
-    statedict = model_info #model_info['statedict']
+    statedict = model_info #model_info['model']
     #modelconf = model_info['conf']
     modelconf = {
             "max_read_depth": 150,
