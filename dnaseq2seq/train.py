@@ -399,7 +399,7 @@ def load_model(modelconf, ckpt):
     logger.info(f"Creating model with {model_tot_params} trainable params")
 
     if statedict is not None:
-        logger.info(f"Initializing model with state dict {statedict}")
+        logger.info(f"Initializing model weights from state dict")
         model.load_state_dict(statedict)
     
     #logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
