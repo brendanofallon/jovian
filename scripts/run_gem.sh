@@ -26,7 +26,7 @@ GEM=$HOME/miniconda3/envs/py3/bin/gem-mapper
 
 #gem-indexer --input /uufs/chpc.utah.edu/common/home/u0379426/arup-storage3/Reference/Data/B37/GATKBundle/2.8_subset_arup_v0.1/human_g1k_v37_decoy_phiXAdaptr.fasta
 
-$GEM --index /scratch/general/vast/u0379426/human_g1k_v37_decoy_phiXAdaptr.gem -1 $FQ1 -2 $FQ2 -t 24 -r "@RG\tID:sample\tPL:ILLUMINA\tLB:sample\tSM:sample" | \
+$GEM --index /scratch/general/vast/u0379426/human_g1k_v37_decoy_phiXAdaptr.gem -1 $FQ1 -2 $FQ2 -t 36 -r "@RG\tID:sample\tPL:ILLUMINA\tLB:sample\tSM:sample" | \
     samtools sort --reference /scratch/general/vast/u0379426/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz -@ 8 | \
     samtools view -C --reference /scratch/general/vast/u0379426/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz -@ 8 -h -o $3 
 
