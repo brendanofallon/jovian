@@ -544,6 +544,7 @@ if __name__ == "__main__":
                     level=logging.INFO)
 
     main()
+
     # for a,b in zip("ABC", "ABCDEF"):
     #     print(f"{a},{b}")
     # print(pysam.__version__)
