@@ -525,6 +525,7 @@ def train_epochs(model,
                 ckpt_data = {
                     'model': m.state_dict(),
                     'conf': xtra_checkpoint_items,
+                    'opt': optimizer.state_dict(),
                 }
                 torch.save(ckpt_data, checkpoint_name)
 

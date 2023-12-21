@@ -45,9 +45,9 @@ def find_giab(name):
         return GIAB_DATA['na24631_bed'], GIAB_DATA['na24631_vcf']
     elif ("GM24385" in name) or ("HG002" in name) or ("385_" in name):
         return GIAB_DATA['na24385_bed'], GIAB_DATA['na24385_vcf']
-    elif "HG003" in name:
+    elif "HG003" in name or ("NIST_003" in name) :
         return GIAB_DATA['hg003_bed'], GIAB_DATA['hg003_vcf']
-    elif "HG004" in name:
+    elif "HG004" in name or ("NIST_004" in name):
         return GIAB_DATA['hg004_bed'], GIAB_DATA['hg004_vcf']
     elif "HG005" in name:
         return GIAB_DATA['hg005_bed'], GIAB_DATA['hg005_vcf']

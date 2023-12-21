@@ -11,6 +11,7 @@ import multiprocessing as mp
 #from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
+import xgboost
 from xgboost import XGBClassifier
 from functools import lru_cache
 import logging
@@ -336,8 +337,13 @@ def save_model(mdl, path):
 
 def load_model(path):
     logger.info(f"Loading model from {path}")
-    with open(path, 'rb') as fh:
-        return pickle.load(fh)
+    if str(path).endswith(".json") or str(path).endswith(".xgb"):
+        bst = xgboost.Booster()
+        bst.load_model(path)
+        return bst
+    else:
+        with open(path, 'rb') as fh:
+            return pickle.load(fh)
 
 def _find_var(chrom, pos, ref, alts, vcf):
     assert type(alts) == tuple, "alts must be a tuple"
