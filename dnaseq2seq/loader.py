@@ -280,7 +280,7 @@ class PregenLoader:
         self.load_files() # Search for new data with every iteration ?
         src, tgt = [], []
         for i in range(0, len(self.pathpairs), self.max_decomped):
-            logger.info(f"Decompressing {i}-{i+self.max_decomped} files of {len(self.pathpairs)} First is: {self.pathpairs[i]}")
+            logger.info(f"Decompressing {i}-{i+self.max_decomped} files of {len(self.pathpairs)}")
             decomp_start = datetime.now()
             paths = self.pathpairs[i:i+self.max_decomped]
             decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)

@@ -120,8 +120,18 @@ def load_model(model_path):
     #embed_dim_factor = 120 # was 100
 
     model_info = torch.load(model_path, map_location=DEVICE)
-    statedict = model_info['statedict']
+    statedict = model_info['model']
     modelconf = model_info['conf']
+    #modelconf = {
+    #        "max_read_depth": 150,
+    #        "feats_per_read": 10,
+    #        "decoder_layers": 10,
+   #         "decoder_attention_heads": 10,
+   #         "encoder_layers": 10,
+   #         "encoder_attention_heads": 8,
+   #         "dim_feedforward": 512,
+   #         "embed_dim_factor": 160,
+   #         }
 
     model = VarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
@@ -137,9 +147,11 @@ def load_model(model_path):
     model.load_state_dict(statedict)
 
     #model.half()
-    #model = torch.compile(model)
     model.eval()
     model.to(DEVICE)
+    
+    model = torch.compile(model, fullgraph=True)
+    
     return model
 
 
@@ -632,7 +644,7 @@ def vars_hap_to_records(
     # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
-    min_merge_qual = 0.05
+    min_merge_qual = 0.00005
 
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
@@ -715,7 +727,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
-    #encoded_reads = encoded_reads.half()
+    #encoded_reads = encoded_reads.bfloat16()
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
     calledvars = []
@@ -767,10 +779,10 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.5 * window_size)  # We start with regions a bit upstream of the focal / target region
+    window_start = int(start - 0.7 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, start - 100, end + window_size)
+    readwindow = bam.ReadWindow(aln, chrom, start - 150, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     returned_count = 0
     while window_start <= (end - 0.2 * window_size):

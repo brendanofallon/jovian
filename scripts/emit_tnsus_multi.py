@@ -18,6 +18,12 @@ def parse_giab_sample(name):
     match = re.search(r'HG00[0-7]_', name)
     if match:
         return match.group().strip("_")
+    elif "NIST_002" in name:
+        return "HG002"
+    elif "NIST_003" in name:
+        return "HG003"
+    elif "NIST_004" in name:
+        return "HG004"
     elif "NA12878" in name:
         return "HG001"
     elif ("NA24385" in name) or ("GM24385" in name):

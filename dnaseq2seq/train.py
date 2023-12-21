@@ -376,8 +376,8 @@ def load_model(modelconf, ckpt):
     statedict = None
     if ckpt is not None:
         ckpt = torch.load(ckpt, map_location=DEVICE)
-        if 'statedict' in ckpt:
-            statedict = ckpt['statedict']
+        if 'model' in ckpt:
+            statedict = ckpt['model']
         else:
             statedict = ckpt
 
@@ -399,11 +399,11 @@ def load_model(modelconf, ckpt):
     logger.info(f"Creating model with {model_tot_params} trainable params")
 
     if statedict is not None:
-        logger.info(f"Initializing model with state dict {statedict}")
+        logger.info(f"Initializing model weights from state dict")
         model.load_state_dict(statedict)
     
-    logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
-    model.fc1.requires_grad_(False)
+    #logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
+    #model.fc1.requires_grad_(False)
     #model.fc2.requires_grad_(False)
 
     if USE_DDP:
@@ -496,6 +496,7 @@ def train_epochs(model,
                     "learning_rate": scheduler.get_last_lr(),
                     "epochtime": elapsed.total_seconds(),
                 })
+            
             if experiment:
                 experiment.log_metrics({
                     "epoch": epoch,

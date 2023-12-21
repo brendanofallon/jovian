@@ -11,6 +11,7 @@ import multiprocessing as mp
 #from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
+import xgboost
 from xgboost import XGBClassifier
 from functools import lru_cache
 import logging
@@ -246,8 +247,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     feats.append(vaf)
     #feats.append(mq_vaf)
-    #feats.append(pos_alt + neg_alt)
-    #feats.append(strandbias_stat)
+    feats.append(pos_alt + neg_alt)
     return np.array(feats)
 
 
@@ -270,7 +270,7 @@ def feat_names():
             "het",
             "vaf",
             #"highmq_vaf",
-            #"altreads",
+            "altreads",
           #  "strandbias_stat",
         ]
 
@@ -337,8 +337,13 @@ def save_model(mdl, path):
 
 def load_model(path):
     logger.info(f"Loading model from {path}")
-    with open(path, 'rb') as fh:
-        return pickle.load(fh)
+    if str(path).endswith(".json") or str(path).endswith(".xgb"):
+        bst = xgboost.Booster()
+        bst.load_model(path)
+        return bst
+    else:
+        with open(path, 'rb') as fh:
+            return pickle.load(fh)
 
 def _find_var(chrom, pos, ref, alts, vcf):
     assert type(alts) == tuple, "alts must be a tuple"
@@ -359,13 +364,13 @@ def _process_sample(args):
     fp_feats = []
     featstrs = []
     labels = []
-    max_tp_snvs = 5000
-    max_tp_dels = 2000
-    max_tp_ins = 2000
+    max_tp_snvs = 10000
+    max_tp_dels = 5000
+    max_tp_ins = 5000
     tpsnvs = 0
     tpins = 0
     tpdels = 0
-    tp_downsample_freq = 0.025
+    tp_downsample_freq = 0.1
     for outputfile, tp, fp in zip(varoutputs, tps, fps):
         tpfile = pysam.VariantFile(tp)
         fpfile = pysam.VariantFile(fp)
@@ -461,7 +466,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     preds = clf.predict_proba(feat_test)[:,1]
     threshold = 0.1
     ppv, ppa, fscore, support = precision_recall_fscore_support(lab_test, preds > threshold)
-    print("Metrics at threshold : {threshold}")
+    print(f"Metrics at threshold : {threshold}")
     print(f"PPA : {ppa[1] :.5f}")
     print(f"PPV : {ppv[1] :.5f}")
     print(f"F1 : {fscore[1] :.5f}")
