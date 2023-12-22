@@ -23,6 +23,9 @@ import numpy as np
 import torch
 from torch import nn
 import torch.distributed as dist
+from torch.cuda.amp import GradScaler
+import torch.cuda.amp as amp
+
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -147,6 +150,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
     samples_seen = 0
     loss_sum = 0
     model.train()
+    scaler = GradScaler()
     start = time.perf_counter()
     samples_perf = 0
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
@@ -158,15 +162,19 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
-        seq_preds = model(src, tgt_kmers_input, tgt_mask)
 
-        logger.debug(f"Computing loss...")
-        loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
-        loss.backward()
+        with amp.autocast(enabled=False): # dtype is bfloat16 by default
+            seq_preds = model(src, tgt_kmers_input, tgt_mask)
+
+            logger.debug(f"Computing loss...")
+            loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+
+        scaler.scale(loss).backward()
         loss_sum += loss.item()
         torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         logger.debug("Stepping optimizer...")
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         lr_schedule.add_iters(src.shape[0])
         samples_perf += src.shape[0]
         if batch % 10 == 0:
@@ -414,7 +422,10 @@ def load_model(modelconf, ckpt):
     #logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
     #model.fc1.requires_grad_(False)
     #model.fc2.requires_grad_(False)
-
+    
+    logger.info("Compiling model...")
+    model = torch.compile(model)
+    
     if USE_DDP:
         rank = dist.get_rank()
         device_id = rank % torch.cuda.device_count()
