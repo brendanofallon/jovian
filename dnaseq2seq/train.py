@@ -93,32 +93,6 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
-def calc_time_sums(
-        time_sums={},
-        decomp_time=0.0,
-        start=None,
-        decomp_and_load=None,
-        zero_grad=None,
-        forward_pass=None,
-        loss=None,
-        midmatch=None,
-        backward_pass=None,
-        optimize=None,
-):
-    load_time = (decomp_and_load - start).total_seconds() - decomp_time
-    return dict(
-        decomp_time = decomp_time + time_sums.get("decomp_time", 0.0),
-        load_time = load_time + time_sums.get("load_time", 0.0),
-        batch_count= 1 + time_sums.get("batch_count", 0),
-        batch_time=(optimize - start).total_seconds() + time_sums.get("batch_time", 0.0),
-        zero_grad_time=(zero_grad - decomp_and_load).total_seconds() + time_sums.get("zero_grad_time", 0.0),
-        forward_pass_time=(forward_pass - zero_grad).total_seconds() + time_sums.get("forward_pass_time", 0.0),
-        loss_time=(loss - forward_pass).total_seconds() + time_sums.get("loss_time", 0.0),
-        midmatch_time=(midmatch - loss).total_seconds() + time_sums.get("midmatch_time", 0.0),
-        backward_pass_time=(backward_pass - midmatch).total_seconds() + time_sums.get("backward_pass_time", 0.0),
-        optimize_time=(optimize - backward_pass).total_seconds() + time_sums.get("optimize_time", 0.0),
-        train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
-    )
 
 def compute_twohap_loss(preds, tgt, criterion):
     """

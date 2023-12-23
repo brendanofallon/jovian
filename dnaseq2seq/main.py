@@ -75,7 +75,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     tgt_prefix = "tgkmers"
     metafile = tempfile.NamedTemporaryFile(
         mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
-    )
+    )a
     logger.info(f"Saving tensors from {dataloader.bam} to {output_dir}/ with uid: {uid}")
     for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
@@ -83,7 +83,7 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
         logger.info(f"Src dtype is {src.dtype}")
 
         # For debugging on only!
-        #uid = Path(dataloader.bam).name.replace(".cram", "")
+        uid = Path(dataloader.bam).name.replace(".cram", "")
 
         for data, prefix in zip([src, tgt_kmers],
                                 [src_prefix, tgt_prefix]):
