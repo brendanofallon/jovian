@@ -883,3 +883,8 @@ def merge_genotypes(genos):
     return allvars0, allvars1
 
 
+if __name__=="__main__":
+    bam = "/Users/brendanofallon/data/WGS/99702111878_NA12878_1ug.cram"
+    ref = "/Users/brendanofallon/data/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
+    for s in gen_suspicious_spots(bam, '1', 11226900, 11227359, ref):
+        print(s)

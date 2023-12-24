@@ -8,7 +8,7 @@ import pysam
 import pickle
 #import sklearn
 import multiprocessing as mp
-#from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
 import xgboost
@@ -499,9 +499,14 @@ def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
     """
     feats = var_feats(var_rec, aln, var_freq_file)
     logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
-    prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
-    logger.debug(f"Prediction for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {prediction}")
-    return prediction[0, 1]
+    if isinstance(loaded_model, RandomForestClassifier):
+        prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
+        return prediction[0, 1]
+    else:
+        prediction = loaded_model.predict(xgboost.DMatrix(feats[np.newaxis, ...]))
+        logger.info(f"Prediction: {prediction}")
+        return prediction
+
 
 
 def train(conf, output, **kwargs):
