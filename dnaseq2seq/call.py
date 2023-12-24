@@ -383,74 +383,88 @@ def process_block(raw_regions,
     enc_elapsed = datetime.datetime.now() - enc_start
     logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
 
+    # Now call variants over the encoded regions
     aln = pysam.AlignmentFile(bamfile)
     reference = pysam.FastaFile(reference_fasta)
-
     if var_freq_file:
         var_freq_file = pysam.VariantFile(var_freq_file)
     classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
 
+    var_records = call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf_template, var_freq_file, max_batch_size)
+
+    # Write the variant records to the VCF file
+    for var in sorted(var_records, key=lambda x: x.pos):
+        vcf_out.write(str(var))
+    vcf_out.flush()
+
+
+@torch.no_grad()
+def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf_template, var_freq_file, max_batch_size):
+    """
+    Call variants from the encoded regions and return them as a list of variant records suitable for writing to a VCF file
+    No more than max_batch_size are processed in a single batch
+    """
     # Accumulate regions until we have at least this many
     min_samples_callbatch = 96
-    
+
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
-    call_start = datetime.datetime.now()
     batch_count = 0
+    call_start = datetime.datetime.now()
     window_count = 0
-    var_records = [] # Stores all variant records so we can sort before writing
+    var_records = []  # Stores all variant records so we can sort before writing
     window_idx = -1
-    path=None # Avoid rare case with logging when there is no path set
-    with torch.no_grad():
-        for path in encoded_paths:
-            # Load the data, parsing location + encoded data from file
-            data = torch.load(path, map_location='cpu')
-            chrom, start, end = data['region']
-            window_idx = int(data['window_idx'])
-            batch_encoded.append(data['encoded_pileup'])
-            batch_start_pos.extend(data['start_positions'])
-            batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
-            os.unlink(path)
-            window_count += len(batch_start_pos)
-            if len(batch_start_pos) > min_samples_callbatch:
-                logger.debug(f"Calling variants on window {window_idx} path: {path}")
-                batch_count += 1
-                if len(batch_encoded) > 1:
-                    allencoded = torch.concat(batch_encoded, dim=0)
-                else:
-                    allencoded = batch_encoded[0]
-                hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
-                var_records.extend(
-                    vars_hap_to_records(
-                        chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-                    )
-                )
-                batch_encoded = []
-                batch_start_pos = []
-                batch_regions = []
+    path = None  # Avoid rare case with logging when there is no path set
 
-        # Write last few
-        logger.debug(f"Calling variants on window {window_idx} path: {path}")
-        if len(batch_start_pos):
+    for path in encoded_paths:
+        # Load the data, parsing location + encoded data from file
+        data = torch.load(path, map_location='cpu')
+        chrom, start, end = data['region']
+        window_idx = int(data['window_idx'])
+        batch_encoded.append(data['encoded_pileup'])
+        batch_start_pos.extend(data['start_positions'])
+        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+        os.unlink(path)
+        window_count += len(batch_start_pos)
+        if len(batch_start_pos) > min_samples_callbatch:
+            logger.debug(f"Calling variants on window {window_idx} path: {path}")
             batch_count += 1
             if len(batch_encoded) > 1:
                 allencoded = torch.concat(batch_encoded, dim=0)
             else:
                 allencoded = batch_encoded[0]
-            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
+                                        max_batch_size)
             var_records.extend(
                 vars_hap_to_records(
                     chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
                 )
             )
+            batch_encoded = []
+            batch_start_pos = []
+            batch_regions = []
 
-    for var in sorted(var_records, key=lambda x: x.pos):
-        vcf_out.write(str(var))
-    vcf_out.flush()
+    # Write last few
+    logger.debug(f"Calling variants on window {window_idx} path: {path}")
+    if len(batch_start_pos):
+        batch_count += 1
+        if len(batch_encoded) > 1:
+            allencoded = torch.concat(batch_encoded, dim=0)
+        else:
+            allencoded = batch_encoded[0]
+        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+        var_records.extend(
+            vars_hap_to_records(
+                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+            )
+        )
+
     call_elapsed = datetime.datetime.now() - call_start
-    logger.info(f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds")
-
+    logger.info(
+        f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds"
+    )
+    return var_records
 
 
 def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size, window_step):
@@ -488,7 +502,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
     return result_paths
 
 
-def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, window_size, min_reads, batch_size, window_step):
+def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, window_size, min_reads, batch_size, window_step):
     """
     Encode the reads in the given region and save the data along with the region and start offsets to a file
     and return the absolute path of the file
@@ -520,7 +534,7 @@ def encode_and_save_region(bamfile, refpath, tmpdir, region, max_read_depth, win
         'start_positions': all_starts,
         'window_idx': window_idx,
     }
-    dest = Path(tmpdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
+    dest = Path(destdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
     logger.debug(f"Saving data as {dest.absolute()}")
     torch.save(data, dest)
     return dest.absolute()
@@ -869,3 +883,8 @@ def merge_genotypes(genos):
     return allvars0, allvars1
 
 
+if __name__=="__main__":
+    bam = "/Users/brendanofallon/data/WGS/99702111878_NA12878_1ug.cram"
+    ref = "/Users/brendanofallon/data/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
+    for s in gen_suspicious_spots(bam, '1', 11226900, 11227359, ref):
+        print(s)
