@@ -96,32 +96,6 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
-def calc_time_sums(
-        time_sums={},
-        decomp_time=0.0,
-        start=None,
-        decomp_and_load=None,
-        zero_grad=None,
-        forward_pass=None,
-        loss=None,
-        midmatch=None,
-        backward_pass=None,
-        optimize=None,
-):
-    load_time = (decomp_and_load - start).total_seconds() - decomp_time
-    return dict(
-        decomp_time = decomp_time + time_sums.get("decomp_time", 0.0),
-        load_time = load_time + time_sums.get("load_time", 0.0),
-        batch_count= 1 + time_sums.get("batch_count", 0),
-        batch_time=(optimize - start).total_seconds() + time_sums.get("batch_time", 0.0),
-        zero_grad_time=(zero_grad - decomp_and_load).total_seconds() + time_sums.get("zero_grad_time", 0.0),
-        forward_pass_time=(forward_pass - zero_grad).total_seconds() + time_sums.get("forward_pass_time", 0.0),
-        loss_time=(loss - forward_pass).total_seconds() + time_sums.get("loss_time", 0.0),
-        midmatch_time=(midmatch - loss).total_seconds() + time_sums.get("midmatch_time", 0.0),
-        backward_pass_time=(backward_pass - midmatch).total_seconds() + time_sums.get("backward_pass_time", 0.0),
-        optimize_time=(optimize - backward_pass).total_seconds() + time_sums.get("optimize_time", 0.0),
-        train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
-    )
 
 def compute_twohap_loss(preds, tgt, criterion):
     """
@@ -392,7 +366,6 @@ def load_model(modelconf, ckpt):
     # embed_dim_factor = 160  # was 100
     statedict = None
     if ckpt is not None:
-        ckpt = torch.load(ckpt, map_location=DEVICE)
         if 'model' in ckpt:
             statedict = ckpt['model']
         else:
@@ -439,26 +412,20 @@ def load_model(modelconf, ckpt):
     return model
 
 def train_epochs(model,
+                 optimizer,
                  epochs,
                  dataloader,
                  scheduler,
-                 init_learning_rate=0.0025,
                  checkpoint_freq=0,
                  model_dest=None,
                  val_dir=None,
                  batch_size=64,
-                 wandb_run_name=None,
-                 wandb_notes="",
-                 cl_args = {},
                  xtra_checkpoint_items={},
                  samples_per_epoch=10000,
-
 ):
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=init_learning_rate, betas=(0.9, 0.999))
 
     criterion = nn.NLLLoss()
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.995)
 
     trainlogpath = str(model_dest).replace(".model", "").replace(".pt", "") + "_train.log"
     logger.info(f"Training log data will be saved at {trainlogpath}")
@@ -667,10 +634,25 @@ def train(output_model, **kwargs):
                                      max_decomped_batches=kwargs.get('max_decomp_batches'),
                                      tgt_prefix="tgkmers")
 
-    model = load_model(kwargs['model'], kwargs.get("input_model"))
+    if kwargs.get('input_model'):
+        ckpt = torch.load(kwargs.get("input_model"), map_location=DEVICE)
+    else:
+        ckpt = None
+    model = load_model(kwargs['model'], ckpt)
+
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Model total parameter count: {model_tot_params}")
     if experiment:
         set_comet_conf(model_tot_params, **kwargs)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=kwargs.get('learning_rate', 0.001),
+        betas=(0.9, 0.999)
+    )
+    if ckpt is not None and ckpt.get('opt') is not None:
+        logger.info("Loading optimizer state dict from checkpoint")
+        optimizer.load_state_dict(ckpt.get('opt'))
 
     init_learning_rate = kwargs.get('learning_rate', 0.0001)
     scheduler = util.WarmupCosineLRScheduler(
@@ -681,17 +663,14 @@ def train(output_model, **kwargs):
     )
 
     train_epochs(model,
+                 optimizer,
                  kwargs.get('epochs'),
                  dataloader,
                  scheduler=scheduler,
-                 init_learning_rate=kwargs.get('learning_rate', 0.001),
                  model_dest=output_model,
                  checkpoint_freq=kwargs.get('checkpoint_freq', 10),
                  val_dir=kwargs.get('val_dir'),
                  batch_size=kwargs.get("batch_size"),
-                 wandb_run_name=kwargs.get("wandb_run_name"),
-                 wandb_notes=kwargs.get("wandb_notes"),
-                 cl_args=kwargs.get("cl_args"),
                  samples_per_epoch=kwargs.get('samples_per_epoch'),
                  xtra_checkpoint_items=kwargs['model'],
                  )
