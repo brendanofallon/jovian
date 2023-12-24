@@ -12,6 +12,7 @@ If not, see <https://www.gnu.org/licenses/>.
 import logging
 import sys
 from collections import defaultdict
+import time
 
 import yaml
 from datetime import datetime
@@ -146,6 +147,8 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
     samples_seen = 0
     loss_sum = 0
     model.train()
+    start = time.perf_counter()
+    samples_perf = 0
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
         logger.debug("Got batch from loader...")
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
@@ -165,8 +168,14 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         logger.debug("Stepping optimizer...")
         optimizer.step()
         lr_schedule.add_iters(src.shape[0])
+        samples_perf += src.shape[0]
         if batch % 10 == 0:
-            logger.info(f"Batch {batch}, samples {samples_seen},  loss: {loss.item():.3f} swaps: {swaps}")
+            elapsed = time.perf_counter() - start
+            samples_per_sec = samples_perf / elapsed
+            logger.info(f"Batch {batch}  samples: {samples_seen}   loss: {loss.item():.3f}   swaps: {swaps}   samples/sec: {samples_per_sec :.2f}")
+            start = time.perf_counter()
+            samples_perf = 0
+
         if lr_schedule and batch % 10 == 0:
             lr = lr_schedule.get_lr()
             logger.info(f"LR samples seen: {lr_schedule.iters}, learning rate: {lr_schedule.get_last_lr() :.6f}")
