@@ -476,7 +476,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
         encode_and_save_region,
         bamfile=bamfile,
         refpath=reference_fasta,
-        tmpdir=tmpdir,
+        destdir=tmpdir,
         max_read_depth=max_read_depth,
         window_size=window_size,
         min_reads=5,
