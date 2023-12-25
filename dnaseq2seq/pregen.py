@@ -75,7 +75,7 @@ def parse_rows_classes(bed):
             start = int(row[1])
             end = int(row[2])
             clz = row[3]
-            rows.append((chrom, start, end))
+            rows.append((chrom, start, end, clz))
             if clz in classes:
                 idx = classes[clz]
             else:
@@ -164,6 +164,8 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
     for region in upsampled_labels:
         chrom, start, end = region[0:3]
+        rowlabel = region[3]
+        row_is_tn = rowlabel.strip().startswith("tn-") # Indicator for whether this row contains any variants
 
         # Add some jitter?
         if max_jitter_bases > 0:
@@ -197,7 +199,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
                     # the start of the region.. raising an exception just causes this region to be skipped
                     raise ValueError(f"src shape {encoded.shape} doesn't match haplotype shape {tgt_haps.shape}, skipping")
 
-                yield encoded, tgt_haps, region
+                yield encoded, tgt_haps, region, row_is_tn
 
         except Exception as ex:
             logger.warning(f"Error encoding position {chrom}:{start}-{end} for bam: {bampath}, skipping it: {ex}")
@@ -219,40 +221,40 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
     """
     allsrc = []
     alltgt = []
-    alltgtvaf = []
+    allrowtn = []
     varsinfo = []
     count = 0
     seq_len = 150
     logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
-    for enc, tgt, region in load_from_csv(bampath, refpath, bed, vcf,
+    for enc, tgt, region, tnlabel in load_from_csv(bampath, refpath, bed, vcf,
                                           max_reads_per_aln=max_reads_per_aln,
                                           samples_per_pos=samples_per_pos,
                                           vals_per_class=vals_per_class,
                                           max_jitter_bases=max_jitter_bases):
         src, tgt = trim_pileuptensor(enc, tgt, seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
+        allrowtn.append(tnlabel)
         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
         assert tgt.shape[-1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[-1]} but should be {seq_len}"
         allsrc.append(src)
         alltgt.append(tgt)
 
         count += 1
-        #if count % 1 == 0:
-        #    logger.info(f"Loaded {count} tensors from {bampath}")
+
         if count == max_to_load:
             #logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(allrowtn), varsinfo
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(allrowtn), varsinfo
             allsrc = []
             alltgt = []
-            alltgtvaf = []
+            allrowtn = []
             varsinfo = []
 
     if len(allsrc):
-        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(alltgtvaf), varsinfo
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(allrowtn), varsinfo
 
     logger.info(f"Done loading {count} tensors from {bampath}")
 

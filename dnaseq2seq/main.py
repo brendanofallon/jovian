@@ -73,11 +73,10 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
     tgt_prefix = "tgkmers"
-    metafile = tempfile.NamedTemporaryFile(
-        mode="wt", delete=False, prefix="pregen_", dir=".", suffix=".txt"
-    )
+    tn_prefix = "tntgt"
+
     logger.info(f"Saving tensors from {dataloader.bam} to {output_dir}/ with uid: {uid}")
-    for i, (src, tgt, vaftgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+    for i, (src, tgt, tntgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
         logger.info(f"Src dtype is {src.dtype}")
@@ -85,19 +84,11 @@ def pregen_one_sample(dataloader, batch_size, output_dir):
         # For debugging on only!
         #uid = Path(dataloader.bam).name.replace(".cram", "")
 
-        for data, prefix in zip([src, tgt_kmers],
-                                [src_prefix, tgt_prefix]):
+        for data, prefix in zip([src, tgt_kmers, tntgt],
+                                [src_prefix, tgt_prefix, tn_prefix]):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
-        for idx, varinfo in enumerate(varsinfo):
-            meta_str = "\t".join([
-                f"{idx}", f"{uid}-{i}", "\t".join(varinfo), dataloader.csv
-            ])
-            print(meta_str, file=metafile)
-        metafile.flush()
 
-    metafile.close()
-    return metafile.name
 
 
 def pregen(config, **kwargs):
@@ -117,10 +108,6 @@ def pregen(config, **kwargs):
 
     logger.info(f"Full config: {conf}")
     output_dir = Path(kwargs.get('dir'))
-    metadata_file = kwargs.get("metadata_file", None)
-    if metadata_file is None:
-        str_time = datetime.now().strftime("%Y_%d_%m_%H_%M_%S")
-        metadata_file = f"pregen_{str_time}.csv"
 
     logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
     dataloaders = [
@@ -131,21 +118,18 @@ def pregen(config, **kwargs):
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
 
-    meta_headers = ["item", "uid", "chrom", "pos", "ref", "alt", "vaf", "label"]
-    with open(metadata_file, "wb") as metafh:
-        metafh.write(("\t".join(meta_headers) + "\n").encode())
-        if processes == 1:
+    if processes == 1:
+        for dl in dataloaders:
+            pregen_one_sample(dl, batch_size, output_dir)
+
+    else:
+        futures = []
+        with ProcessPoolExecutor(max_workers=processes) as executor:
             for dl in dataloaders:
-                sample_metafile = pregen_one_sample(dl, batch_size, output_dir)
-                util.concat_metafile(sample_metafile, metafh)
-        else:
-            futures = []
-            with ProcessPoolExecutor(max_workers=processes) as executor:
-                for dl in dataloaders:
-                    futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
-            for fut in futures:
-                sample_metafile = fut.result()
-                util.concat_metafile(sample_metafile, metafh)
+                futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
+        for fut in futures:
+            fut.result()
+
 
 
 def print_pileup(path, idx, target=None, **kwargs):
