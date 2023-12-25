@@ -555,10 +555,10 @@ if __name__ == "__main__":
                     datefmt='%m-%d %H:%M:%S',
                     level=logging.INFO)
 
-    # main()
+    main()
 
-    aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
-    vcf = pysam.VariantFile("test.vcf")
-    var = next(vcf)
-    x = bamfeats(var, aln)
-    print(x)
+    #aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    #vcf = pysam.VariantFile("test.vcf")
+    #var = next(vcf)
+    #x = bamfeats(var, aln)
+   # print(x)
