@@ -131,7 +131,7 @@ def cigop_at_offset(read, offset):
     for cigop, length in read.cigartuples:
         if offset <= length:
             return cigop, length
-        else:
+        elif cigop != CigarOperator.BAM_CINS.value: # Insertions dont count against ref bases so dont subtract them
             offset -= length
     return -1, -1
 
@@ -508,7 +508,6 @@ def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
         prediction = loaded_model.predict(xgboost.DMatrix(feats[np.newaxis, ...]))
         logger.info(f"Prediction: {prediction}")
         return prediction
-
 
 
 def train(conf, output, **kwargs):
