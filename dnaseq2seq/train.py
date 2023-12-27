@@ -374,6 +374,11 @@ def load_model(modelconf, ckpt):
     if ckpt is not None:
         if 'model' in ckpt:
             statedict = ckpt['model']
+            new_state_dict = {}
+            for key in statedict.keys():
+                new_key = key.replace('_orig_mod.', '')
+                new_state_dict[new_key] = statedict[key]
+            statedict = new_state_dict
         else:
             statedict = ckpt
 

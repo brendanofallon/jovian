@@ -122,6 +122,12 @@ def load_model(model_path):
     model_info = torch.load(model_path, map_location=DEVICE)
     statedict = model_info['model']
     modelconf = model_info['conf']
+    new_state_dict = {}
+    for key in statedict.keys():
+      new_key = key.replace('_orig_mod.', '')
+      new_state_dict[new_key] = statedict[key]
+    statedict = new_state_dict
+
     #modelconf = {
     #        "max_read_depth": 150,
     #        "feats_per_read": 10,
