@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="master"
 
-export RUN_NAME="100M_s28_cont_moretnsus"
+export RUN_NAME="200M_bigenc_cont3_lolr"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME

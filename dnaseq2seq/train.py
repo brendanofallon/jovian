@@ -119,12 +119,14 @@ def compute_twohap_loss(preds, tgt, criterion):
     return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten()), swaps
 
 
-def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None):
-
+def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None, enable_amp=False):
+    """
+    Train until we've seen more than 'num_samples' from the loader, then return the loss
+    """
     samples_seen = 0
     loss_sum = 0
     model.train()
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=enable_amp)
     start = time.perf_counter()
     samples_perf = 0
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
@@ -137,7 +139,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         optimizer.zero_grad()
         logger.debug("Forward pass...")
 
-        with amp.autocast(): # dtype is bfloat16 by default
+        with amp.autocast(enabled=enable_amp): # dtype is bfloat16 by default
             seq_preds = model(src, tgt_kmers_input, tgt_mask)
 
             logger.debug(f"Computing loss...")
@@ -146,6 +148,11 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         scaler.scale(loss).backward()
         loss_sum += loss.item()
         #torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        
+        # May not play nice with AMP? Dont clip gradients if we're using AMP
+        if not enable_amp:
+            torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        
         logger.debug("Stepping optimizer...")
         scaler.step(optimizer)
         scaler.update()
@@ -368,6 +375,11 @@ def load_model(modelconf, ckpt):
     if ckpt is not None:
         if 'model' in ckpt:
             statedict = ckpt['model']
+            new_state_dict = {}
+            for key in statedict.keys():
+                new_key = key.replace('_orig_mod.', '')
+                new_state_dict[new_key] = statedict[key]
+            statedict = new_state_dict
         else:
             statedict = ckpt
 
@@ -657,7 +669,7 @@ def train(output_model, **kwargs):
     init_learning_rate = kwargs.get('learning_rate', 0.0001)
     scheduler = util.WarmupCosineLRScheduler(
         max_lr=init_learning_rate,
-        min_lr=init_learning_rate / 2.0,
+        min_lr=init_learning_rate / 5.0,
         warmup_iters=kwargs.get('lr_warmup_iters', 1e6),
         lr_decay_iters=kwargs.get('lr_decay_iters', 20e6),
     )

@@ -23,6 +23,7 @@ import tempfile
 from datetime import datetime
 import re
 import torch
+import sklearn
 
 from concurrent.futures.process import ProcessPoolExecutor
 import argparse
@@ -164,6 +165,7 @@ def alphanumeric_no_spaces(name):
 def main():
     logger.debug("Turning on DEBUG log level")
     logger.info(f"PyTorch version: {torch.__version__}")
+    logger.info(f"Scikit-learn version: {sklearn.__version__}")
     parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
 
