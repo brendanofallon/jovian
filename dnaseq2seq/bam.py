@@ -65,19 +65,20 @@ class ReadCache:
 
 class ReadWindow:
 
-    def __init__(self, aln, chrom, start, end):
+    def __init__(self, aln, chrom, start, end, min_mq=-1):
         self.aln = aln
         self.start = start
         self.end = end
         self.margin_size = 150 # Should be about a read length
         self.chrom = chrom
+        self.min_mq = min_mq
         self.cache = ReadCache()  # Cache for encoded reads
         self.bypos = self._fill() # Maps read start positions to actual reads
 
     def _fill(self):
         bypos = defaultdict(list)
         for i, read in enumerate(self.aln.fetch(self.chrom, self.start - self.margin_size, self.end)):
-            if read is not None:
+            if read is not None and read.mapping_quality > self.min_mq:
                 bypos[alnstart(read)].append(read)
         return bypos
 

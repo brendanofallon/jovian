@@ -668,7 +668,7 @@ def train(output_model, **kwargs):
     init_learning_rate = kwargs.get('learning_rate', 0.0001)
     scheduler = util.WarmupCosineLRScheduler(
         max_lr=init_learning_rate,
-        min_lr=init_learning_rate / 2.0,
+        min_lr=init_learning_rate / 5.0,
         warmup_iters=kwargs.get('lr_warmup_iters', 1e6),
         lr_decay_iters=kwargs.get('lr_decay_iters', 20e6),
     )

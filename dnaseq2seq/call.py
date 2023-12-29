@@ -650,7 +650,7 @@ def vars_hap_to_records(
     # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
-    min_merge_qual = 0.00005
+    min_merge_qual = 0.001
 
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
