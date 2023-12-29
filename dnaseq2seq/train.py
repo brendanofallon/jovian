@@ -137,7 +137,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         optimizer.zero_grad()
         logger.debug("Forward pass...")
 
-        with amp.autocast(enabled=False): # dtype is bfloat16 by default
+        with amp.autocast(): # dtype is bfloat16 by default
             seq_preds = model(src, tgt_kmers_input, tgt_mask)
 
             logger.debug(f"Computing loss...")
@@ -145,7 +145,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         scaler.scale(loss).backward()
         loss_sum += loss.item()
-        torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        #torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         logger.debug("Stepping optimizer...")
         scaler.step(optimizer)
         scaler.update()
