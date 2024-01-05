@@ -38,12 +38,13 @@ def randchars(n=6):
     return "".join(random.choices(string.digits + string.ascii_letters, k=n))
 
 
+
 def find_giab(name):
     if ("NA12878" in name) or ("878_" in name):
         return GIAB_DATA['na12878_bed'], GIAB_DATA['na12878_vcf']
     elif "GM24631" in name:
         return GIAB_DATA['na24631_bed'], GIAB_DATA['na24631_vcf']
-    elif ("GM24385" in name) or ("HG002" in name) or ("385_" in name):
+    elif ("24385" in name) or ("HG002" in name) or ("385_" in name):
         return GIAB_DATA['na24385_bed'], GIAB_DATA['na24385_vcf']
     elif "HG003" in name or ("NIST_003" in name) :
         return GIAB_DATA['hg003_bed'], GIAB_DATA['hg003_vcf']
@@ -51,9 +52,9 @@ def find_giab(name):
         return GIAB_DATA['hg004_bed'], GIAB_DATA['hg004_vcf']
     elif "HG005" in name:
         return GIAB_DATA['hg005_bed'], GIAB_DATA['hg005_vcf']
-    elif "HG006" in name:
+    elif "HG006" in name or "NA24694" in name:
         return GIAB_DATA['hg006_bed'], GIAB_DATA['hg006_vcf']
-    elif "HG007" in name:
+    elif "HG007" in name or "NA24695":
         return GIAB_DATA['hg007_bed'], GIAB_DATA['hg007_vcf']
     raise ValueError(f"Couldn't find a match for input file {name}")
 

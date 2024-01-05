@@ -23,6 +23,9 @@ import numpy as np
 import torch
 from torch import nn
 import torch.distributed as dist
+from torch.cuda.amp import GradScaler
+import torch.cuda.amp as amp
+
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -93,32 +96,6 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
-def calc_time_sums(
-        time_sums={},
-        decomp_time=0.0,
-        start=None,
-        decomp_and_load=None,
-        zero_grad=None,
-        forward_pass=None,
-        loss=None,
-        midmatch=None,
-        backward_pass=None,
-        optimize=None,
-):
-    load_time = (decomp_and_load - start).total_seconds() - decomp_time
-    return dict(
-        decomp_time = decomp_time + time_sums.get("decomp_time", 0.0),
-        load_time = load_time + time_sums.get("load_time", 0.0),
-        batch_count= 1 + time_sums.get("batch_count", 0),
-        batch_time=(optimize - start).total_seconds() + time_sums.get("batch_time", 0.0),
-        zero_grad_time=(zero_grad - decomp_and_load).total_seconds() + time_sums.get("zero_grad_time", 0.0),
-        forward_pass_time=(forward_pass - zero_grad).total_seconds() + time_sums.get("forward_pass_time", 0.0),
-        loss_time=(loss - forward_pass).total_seconds() + time_sums.get("loss_time", 0.0),
-        midmatch_time=(midmatch - loss).total_seconds() + time_sums.get("midmatch_time", 0.0),
-        backward_pass_time=(backward_pass - midmatch).total_seconds() + time_sums.get("backward_pass_time", 0.0),
-        optimize_time=(optimize - backward_pass).total_seconds() + time_sums.get("optimize_time", 0.0),
-        train_time=(optimize - zero_grad).total_seconds() + time_sums.get("train_time", 0.0)
-    )
 
 def compute_twohap_loss(preds, tgt, criterion):
     """
@@ -142,11 +119,14 @@ def compute_twohap_loss(preds, tgt, criterion):
     return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten()), swaps
 
 
-def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None):
-
+def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_schedule=None, enable_amp=False):
+    """
+    Train until we've seen more than 'num_samples' from the loader, then return the loss
+    """
     samples_seen = 0
     loss_sum = 0
     model.train()
+    scaler = GradScaler(enabled=enable_amp)
     start = time.perf_counter()
     samples_perf = 0
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
@@ -158,15 +138,24 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
-        seq_preds = model(src, tgt_kmers_input, tgt_mask)
 
-        logger.debug(f"Computing loss...")
-        loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
-        loss.backward()
+        with amp.autocast(enabled=enable_amp): # dtype is bfloat16 by default
+            seq_preds = model(src, tgt_kmers_input, tgt_mask)
+
+            logger.debug(f"Computing loss...")
+            loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+
+        scaler.scale(loss).backward()
         loss_sum += loss.item()
-        torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        #torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        
+        # May not play nice with AMP? Dont clip gradients if we're using AMP
+        if not enable_amp:
+            torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
+        
         logger.debug("Stepping optimizer...")
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         lr_schedule.add_iters(src.shape[0])
         samples_perf += src.shape[0]
         if batch % 10 == 0:
@@ -386,6 +375,11 @@ def load_model(modelconf, ckpt):
     if ckpt is not None:
         if 'model' in ckpt:
             statedict = ckpt['model']
+            new_state_dict = {}
+            for key in statedict.keys():
+                new_key = key.replace('_orig_mod.', '')
+                new_state_dict[new_key] = statedict[key]
+            statedict = new_state_dict
         else:
             statedict = ckpt
 
@@ -413,7 +407,10 @@ def load_model(modelconf, ckpt):
     #logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
     #model.fc1.requires_grad_(False)
     #model.fc2.requires_grad_(False)
-
+    
+    logger.info("Compiling model...")
+    model = torch.compile(model)
+    
     if USE_DDP:
         rank = dist.get_rank()
         device_id = rank % torch.cuda.device_count()
@@ -672,7 +669,7 @@ def train(output_model, **kwargs):
     init_learning_rate = kwargs.get('learning_rate', 0.0001)
     scheduler = util.WarmupCosineLRScheduler(
         max_lr=init_learning_rate,
-        min_lr=init_learning_rate / 2.0,
+        min_lr=init_learning_rate / 5.0,
         warmup_iters=kwargs.get('lr_warmup_iters', 1e6),
         lr_decay_iters=kwargs.get('lr_decay_iters', 20e6),
     )

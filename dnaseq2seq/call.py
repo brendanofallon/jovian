@@ -122,6 +122,12 @@ def load_model(model_path):
     model_info = torch.load(model_path, map_location=DEVICE)
     statedict = model_info['model']
     modelconf = model_info['conf']
+    new_state_dict = {}
+    for key in statedict.keys():
+      new_key = key.replace('_orig_mod.', '')
+      new_state_dict[new_key] = statedict[key]
+    statedict = new_state_dict
+
     #modelconf = {
     #        "max_read_depth": 150,
     #        "feats_per_read": 10,
@@ -476,7 +482,7 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
         encode_and_save_region,
         bamfile=bamfile,
         refpath=reference_fasta,
-        tmpdir=tmpdir,
+        destdir=tmpdir,
         max_read_depth=max_read_depth,
         window_size=window_size,
         min_reads=5,
@@ -644,7 +650,7 @@ def vars_hap_to_records(
     # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
-    min_merge_qual = 0.00005
+    min_merge_qual = 0.001
 
     vcf_vars = vcf.vcf_vars(
         vars_hap0=vars_hap0,
@@ -693,7 +699,7 @@ def vars_hap_to_records(
     return merged
 
 
-def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
+def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=True):
     """
     Predict the sequence for the encoded reads, but dont submit more than 'max_batch_size' samples
     at once
@@ -704,7 +710,8 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
     
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
-        preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+        with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
+            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
                                             n_output_toks=n_output_toks, device=DEVICE)
         if seq_preds is None:
             seq_preds = preds
@@ -728,6 +735,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
     #encoded_reads = encoded_reads.bfloat16()
+
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
     calledvars = []

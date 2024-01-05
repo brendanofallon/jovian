@@ -131,7 +131,7 @@ def cigop_at_offset(read, offset):
     for cigop, length in read.cigartuples:
         if offset <= length:
             return cigop, length
-        else:
+        elif cigop != CigarOperator.BAM_CINS.value: # Insertions dont count against ref bases so dont subtract them
             offset -= length
     return -1, -1
 
@@ -169,7 +169,17 @@ def read_support(read, offset, ref, alt):
         else:
             return SUPPORTS_REF
     else:
-        raise ValueError("Cant handle multinucleotide vars yet (ref={}, alt={})".format(ref, alt))
+        # Multinucleotide var - look to see if the X bases match ref or alt, where X is min length of ref, alt
+        # Since we trim matches bases on ref and alt this seems OK
+        bases = read.query_sequence[offset:offset + min(len(ref), len(alt))]
+        if bases == ref:
+            return SUPPORTS_REF
+        elif bases == alt:
+            return SUPPORTS_ALT
+        else:
+            return SUPPORTS_OTHER
+
+
 
 
 def bamfeats(var, aln):
@@ -217,18 +227,10 @@ def bamfeats(var, aln):
 def var_feats(var, aln, var_freq_file):
     feats = []
     amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
-    if pos_ref + neg_ref + pos_alt + neg_alt > 0:
-        vaf = (pos_alt + neg_alt) / (pos_ref + neg_ref + pos_alt + neg_alt)
+    if amreads > 0:
+        vaf = (pos_alt + neg_alt) / amreads
     else:
-        vaf = 0.0
-
-    #if (highmq_ref + highmq_alt) > 0:
-    #    mq_vaf = (highmq_alt) / (highmq_alt + highmq_ref)
-    #else:
-    #    mq_vaf = 0.0
-  
-    # Fisher exact test for strand bias
-    #strandbias_stat = stats.fisher_exact([[pos_alt, neg_alt], [pos_ref, neg_ref]], alternative='two-sided')[1]
+        vaf = -1.0 # In some important / complex cases we can't find any reads, and setting vaf = -1 flags these?
 
     feats.append(var.qual)
     feats.append(len(var.ref))
@@ -246,7 +248,7 @@ def var_feats(var, aln, var_freq_file):
     #feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     feats.append(vaf)
-    #feats.append(mq_vaf)
+    feats.append(amreads)
     feats.append(pos_alt + neg_alt)
     return np.array(feats)
 
@@ -269,7 +271,7 @@ def feat_names():
             #"af",
             "het",
             "vaf",
-            #"highmq_vaf",
+            "vafreads",
             "altreads",
           #  "strandbias_stat",
         ]
@@ -508,7 +510,6 @@ def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
         return prediction
 
 
-
 def train(conf, output, **kwargs):
     logger.info(f"Loading configuration from {conf}")
     conf = yaml.safe_load(open(conf).read())
@@ -555,11 +556,8 @@ if __name__ == "__main__":
 
     main()
 
-    # for a,b in zip("ABC", "ABCDEF"):
-    #     print(f"{a},{b}")
-    # print(pysam.__version__)
-    # aln = pysam.AlignmentFile("/Volumes/Share/genomics/WGS/99702111878_NA12878_1ug_chr22.bam")
-    # vcf = pysam.VariantFile("/Volumes/Share/genomics/variantcalling/test.vcf")
-    # var = next(vcf)
-    # x = bamfeats(var, aln)
-    # print(x)
+    #aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    #vcf = pysam.VariantFile("test.vcf")
+    #var = next(vcf)
+    #x = bamfeats(var, aln)
+   # print(x)

@@ -2,7 +2,7 @@
 
 #SBATCH --account=arupbio-kp
 #SBATCH --partition=arup-shared-kp
-#SBATCH --ntasks=8
+#SBATCH --ntasks=20
 #SBATCH --mem=16G
 #SBATCH --time=3-0
 #SBATCH --mail-type=END,FAIL

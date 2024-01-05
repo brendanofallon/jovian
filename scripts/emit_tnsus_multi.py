@@ -47,7 +47,7 @@ def gensus(args):
     giab = parse_giab_sample(bampath)
     prefix = Path(bampath).name.replace(".cram", "")
     input_bed = SPLITBEDS[giab]
-    dest = f"/uufs/chpc.utah.edu/common/home/u0379426/vast/giab_label_beds/{prefix}_labeltnsus_chr{group}.bed"
+    dest = f"/uufs/chpc.utah.edu/common/home/u0379426/vast/giab_label_beds/{prefix}_labelmapsusfix_chr{group}.bed"
     print(f"BAM: {bampath} giab: {giab} prefix: {prefix} input bed: {input_bed}  dest: {dest}")
     reference_path = os.getenv("REF_GENOME")
     ofh = open(dest, "w")
@@ -58,7 +58,7 @@ def gensus(args):
         window_end = int(toks[2])
         region_type = toks[3]
 
-        if region_type == "tn" and random.random() < 0.5:
+        if region_type == "tn-map" or (region_type == "tn" and random.random() < 0.5): # Important update 12/2023 - add tn-map as a region to generate sus labels for, since many, many FPs come from tn-map areas
             pos = list(call.cluster_positions(
                 call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
             ))
@@ -83,7 +83,7 @@ def main(group, bams):
         "HG007": f"/scratch/general/vast/u0379426/giab_label_beds/chrsplit{group}/HG007_labels_chrs{group}.bed",
         }
 
-    with mp.Pool(8) as pool:
+    with mp.Pool(20) as pool:
         pool.map(gensus, [(SPLITBEDS, b, group) for b in bams])
 
 if __name__=="__main__":
