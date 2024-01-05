@@ -147,6 +147,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
 
         scaler.scale(loss).backward()
         loss_sum += loss.item()
+        #torch.nn.utils.clip_grad_norm_(model.parameters(),  1.0)
         
         # May not play nice with AMP? Dont clip gradients if we're using AMP
         if not enable_amp:

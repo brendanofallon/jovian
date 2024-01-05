@@ -735,6 +735,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
     #encoded_reads = encoded_reads.bfloat16()
+
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
     calledvars = []
