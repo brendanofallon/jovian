@@ -166,9 +166,9 @@ class VarTransformer(nn.Module):
     def encode(self, src):
         #src.bfloat16()
         src = self.elu(self.fc1(src))
-        src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
+        src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         mem = self.encoder(src)
         mem_proj = self.converter(mem)
         return mem_proj
