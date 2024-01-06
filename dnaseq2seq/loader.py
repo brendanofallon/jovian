@@ -86,34 +86,9 @@ class LazyLoader:
             yield src, tgt, vaftgt, varsinfo
 
 
-class WeightedLoader:
-    """
-    A fancier loader that has a sampling weight associated with each element
-    Elements with higher weights get sampled more frequently
-    """
-
-    def __init__(self, src, tgt, weights, device):
-        assert len(weights) == src.shape[0]
-        assert src.shape[0] == tgt.shape[0]
-        self.src = src
-        self.tgt = tgt
-        weights = np.array(weights)
-        self.weights = weights / weights.sum()
-        self.device = device
-
-    def __len__(self):
-        return self.src.shape[0]
-
-    def iter_once(self, batch_size):
-        iterations = self.src.shape[0] // batch_size
-        count = 0
-        while count < iterations:
-            count += 1
-            idx = np.random.choice(range(self.src.shape[0]), size=batch_size, replace=True, p=self.weights)
-            yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
-
 
 def decomp_single(path):
+    """ Load an lz4 compressed pytorch file into main memory """
     with open(path, 'rb') as fh:
         return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
 
@@ -206,14 +181,13 @@ def decomp_profile(paths, threads):
     return result
 
 
-
 def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
     """
     Iterate the data (pathpairs, which is a list of tuples of (src tensors, target tensors), decompressing sets
     of the data in parallel using 'threads' threads. Yield (src, tgt, None, None, None) values (the Nones are used
     for additional labels or debugging)
     """
-    src, tgt = [], []
+    src, tgt, tntgt = [], [], []
     for i in range(0, len(pathpairs), max_decomped):
         logger.info(f"Decompressing {i}-{i + max_decomped} files of {len(pathpairs)}")
         decomp_start = datetime.now()
@@ -222,9 +196,10 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
         decomp_end = datetime.now()
         decomp_time = (decomp_end - decomp_start).total_seconds()
 
-        for j in range(0, len(decomped), 2):
+        for j in range(0, len(decomped), 3):
             src.append(decomped[j])
             tgt.append(decomped[j + 1])
+            tntgt.append(decomped[j + 2])
 
         total_size = sum([s.shape[0] for s in src])
         if total_size < batch_size:
@@ -234,6 +209,7 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
         # Make a big tensor.
         src_t = torch.cat(src, dim=0)
         tgt_t = torch.cat(tgt, dim=0)
+        tntgt_t = torch.cat(tntgt, dim=0)
 
         nbatch = total_size // batch_size
         remain = total_size % batch_size
@@ -245,7 +221,7 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
             yield (
                 src_t[start:end].to(device).float(),
                 tgt_t[start:end].to(device).long(),
-                None,  # vaftgt_t[start:end].to(self.device),
+                tntgt_t[start:end].to(device),
                 None,
                 {"decomp_time": decomp_time},
             )
@@ -255,44 +231,32 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
             # The remaining data points will be in next batch.
             src = [src_t[nbatch * batch_size:]]
             tgt = [tgt_t[nbatch * batch_size:]]
+            tntgt = [tntgt_t[nbatch * batch_size:]]
         else:
-            src, tgt = [], []
+            src, tgt, tntgt = [], [], []
 
     if len(src) > 0:
         # We need to yield the last batch.
         yield (
             torch.cat(src, dim=0).to(device).float(),
             torch.cat(tgt, dim=0).to(device).long(),
-            None,
+            torch.cat(tntgt, dim=0).to(device),
             None,
             {"decomp_time": 0.0},
         )
     logger.info(f"Done iterating data")
 
-def load_files(datadir, src_prefix="src", tgt_prefix=""):
-    pathpairs = util.find_files(datadir, src_prefix, tgt_prefix)
+
+def load_files(datadir, src_prefix, tgt_prefix, tntgt_prefix):
+    pathpairs = util.find_files(datadir, src_prefix, tgt_prefix, tntgt_prefix)
     logger.info(f"Loaded {len(pathpairs)} from {datadir}")
     random.shuffle(pathpairs)
     return pathpairs
 
-class CurriculumLoader:
-
-    def __init__(self, device, datadirs, switchpoints, threads, max_decomped_batches=10):
-        self.device = device
-        self.datadirs = datadirs
-        self.switchpoints = switchpoints
-        self.threads = threads
-
-
-    def iter_once(self, batch_size):
-        self.load_files()  # Search for new data with every iteration ?
-        for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
-            yield result
-
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
+    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", tntgt_prefix="tntgt", pathpairs=None):
         """
         Create a new loader that reads tensors from a 'pre-gen' directory
         :param device: torch.device
@@ -305,13 +269,15 @@ class PregenLoader:
         self.datadir = Path(datadir) if datadir else None
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
+        self.tntgt_prefix = tntgt_prefix
         if pathpairs and datadir:
             raise ValueError(f"Both datadir and pathpairs specified for PregenLoader - please choose just one")
         if pathpairs:
             self.pathpairs = pathpairs
         else:
-            self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix)
-            
+            self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix, self.tntgt_prefix)
+
+        self.cls_token = torch.tensor([1,0,1,0,1,0,1,0,1,0]) # Must have shape equal to
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
@@ -321,7 +287,6 @@ class PregenLoader:
         logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
-
 
     def retain_val_samples(self, fraction):
         """
@@ -346,40 +311,17 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix) # Search for new data with every iteration ?
+        self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix, self.tntgt_prefix) # Search for new data with every iteration ?
         for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
+
+            if self.cls_token is not None:
+                src, *_ = result
+                assert self.cls_token.shape[-1] == src.shape[-1], f"CLS token must have last shape equal to last dimension of SRC "
+                c1 = self.cls_token.view(1, 1, 1, self.cls_token.shape[0])
+                c2 = c1.expand(src.shape[0], 1, src.shape[2], -1)
+                src = torch.concat((c2, src), dim=1)
+                result = (src, *_)
+
             yield result
-
-
-
-
-# def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
-#     allsrc = []
-#     alltgt = []
-#     count = 0
-#     seq_len = 150
-#     logger.info(f"Creating new data loader from {bampath}")
-#     counter = defaultdict(int)
-#     classes = []
-#     for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
-#         status, vtype = row.status, row.vtype
-#         label_class = "-".join((status, vtype))
-#         classes.append(label_class)
-#         counter[label_class] += 1
-#         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
-#         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
-#         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
-#         allsrc.append(src)
-#         alltgt.append(tgt)
-#         count += 1
-#         if count % 100 == 0:
-#             logger.info(f"Loaded {count} tensors from {csv}")
-#         if count == max_to_load:
-#             logger.info(f"Stopping tensor load after {max_to_load}")
-#             break
-#     logger.info(f"Loaded {count} tensors from {csv}")
-#     logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
-#     weights = np.array([1.0 / counter[c] for c in classes])
-#     return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
 
 

@@ -129,8 +129,8 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
     scaler = GradScaler(enabled=enable_amp)
     start = time.perf_counter()
     samples_perf = 0
-    for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
-        logger.debug("Got batch from loader...")
+    for batch, (src, tgt_kmers, tntgt, altmask, log_info) in enumerate(loader_iter):
+        logger.debug(f"Got batch from loader..., src has shape: {src.shape}")
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
@@ -140,7 +140,9 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         logger.debug("Forward pass...")
 
         with amp.autocast(enabled=enable_amp): # dtype is bfloat16 by default
-            seq_preds = model(src, tgt_kmers_input, tgt_mask)
+            # seq_preds = model(src, tgt_kmers_input, tgt_mask)
+            enc = model.encode(src)
+            seq_preds = model.decode(enc, tgt_kmers_input, tgt_mask)
 
             logger.debug(f"Computing loss...")
             loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
@@ -244,7 +246,6 @@ def eval_prediction(refseqstr, altseq, predictions, counts):
             counts[vartype]['fp'] += 1
 
     return counts
-
 
 
 def calc_val_accuracy(loader, model, criterion):
@@ -642,8 +643,8 @@ def train(output_model, **kwargs):
 
     dataloader = loader.PregenLoader(DEVICE,
                                      kwargs.get("datadir"),
-                                     threads=kwargs.get('threads'),
-                                     max_decomped_batches=kwargs.get('max_decomp_batches'),
+                                     threads=kwargs.get('threads', 1),
+                                     max_decomped_batches=kwargs.get('max_decomp_batches', 4),
                                      tgt_prefix="tgkmers")
 
     if kwargs.get('input_model'):

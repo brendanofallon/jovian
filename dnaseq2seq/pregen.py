@@ -215,7 +215,7 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
     :param csv: Path to labels CSV file
     :param chunk_size: Number of samples / instances to include in one generated tensor
     :param max_reads_per_aln: Max read depth per tensor (defines index 2 of tensor)
-    :param samples_per_pos: Randomly resample reads this many times, max, per position
+    :param samples_per_pos: Randomly resample positions this many times, max, per position
     :param vals_per_class:
     :returns : Generator of src, tgt tensor tuples
     """

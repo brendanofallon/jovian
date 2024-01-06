@@ -13,9 +13,6 @@ logger = logging.getLogger(__name__)
 
 FEATURE_NUM=10
 
-#EMPTY_TENSOR = torch.zeros(10)
-
-
 
 class LowReadCountException(Exception):
     """
