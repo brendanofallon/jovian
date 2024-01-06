@@ -125,7 +125,10 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
     """
     samples_seen = 0
     loss_sum = 0
+    tn_loss_sum = 0
     model.train()
+    tn_loss_criterion = torch.nn.BCEWithLogitsLoss()
+    tn_loss_factor = 0.5
     scaler = GradScaler(enabled=enable_amp)
     start = time.perf_counter()
     samples_perf = 0
@@ -134,18 +137,20 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
         tgt_kmers_input = tgt_kmers[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
+        tntgt = tntgt.float()
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
 
         with amp.autocast(enabled=enable_amp): # dtype is bfloat16 by default
-            # seq_preds = model(src, tgt_kmers_input, tgt_mask)
-            enc = model.encode(src)
-            seq_preds = model.decode(enc, tgt_kmers_input, tgt_mask)
+            seq_preds, tn_preds = model(src, tgt_kmers_input, tgt_mask)
 
             logger.debug(f"Computing loss...")
             loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+            tn_loss = tn_loss_criterion(tn_preds.squeeze(), tntgt)
+            tn_loss_sum += tn_loss.item()
+            loss = loss + tn_loss_factor * tn_loss
 
         scaler.scale(loss).backward()
         loss_sum += loss.item()
@@ -163,7 +168,7 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
         if batch % 10 == 0:
             elapsed = time.perf_counter() - start
             samples_per_sec = samples_perf / elapsed
-            logger.info(f"Batch {batch}  samples: {samples_seen}   loss: {loss.item():.3f}   swaps: {swaps}   samples/sec: {samples_per_sec :.2f}")
+            logger.info(f"Batch {batch}  samples: {samples_seen}  total loss: {loss.item():.3f} tn loss: {tn_loss.item() :.3f}  swaps: {swaps}   samples/sec: {samples_per_sec :.2f}")
             start = time.perf_counter()
             samples_perf = 0
 
@@ -258,6 +263,7 @@ def calc_val_accuracy(loader, model, criterion):
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
     model.eval()
+    tn_criterion = torch.nn.BCEWithLogitsLoss()
     with torch.no_grad():
         match_sum0 = 0
         match_sum1 = 0
@@ -269,14 +275,15 @@ def calc_val_accuracy(loader, model, criterion):
         tot_samples = 0
         total_batches = 0
         loss_tot = 0
+        tn_loss = 0
 
         swap_tot = 0
-        for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
+        for src, tgt_kmers, tntgt, *_ in loader.iter_once(64):
             total_batches += 1
             tot_samples += src.shape[0]
-            seq_preds, probs = util.predict_sequence(src, model, n_output_toks=37, device=DEVICE) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
+            seq_preds, probs, tn_logits = util.predict_sequence(src, model, n_output_toks=37, device=DEVICE) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
+            tn_loss += tn_criterion(tn_logits.squeeze(), tntgt.float())
 
-            #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
             j = tgt_kmer_idx.shape[-1]
             seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
@@ -299,7 +306,8 @@ def calc_val_accuracy(loader, model, criterion):
             var_counts_sum1 / tot_samples,
             result_totals0, result_totals1,
             loss_tot,
-            swap_tot)
+            swap_tot,
+            tn_loss)
 
 
 def safe_compute_ppav(results0, results1, key):
@@ -409,8 +417,8 @@ def load_model(modelconf, ckpt):
     #model.fc1.requires_grad_(False)
     #model.fc2.requires_grad_(False)
     
-    logger.info("Compiling model...")
-    model = torch.compile(model)
+    #logger.info("Compiling model...")
+    #model = torch.compile(model)
     
     if USE_DDP:
         rank = dist.get_rank()
@@ -447,7 +455,7 @@ def train_epochs(model,
     trainlogger = TrainLogger(trainlogpath, [
             "epoch", "trainingloss", "val_accuracy",
             "mean_var_count", "ppa_dels", "ppa_ins", "ppa_snv",
-            "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime",
+            "ppv_dels", "ppv_ins", "ppv_snv", "learning_rate", "epochtime", "tn_loss",
     ])
 
 
@@ -475,13 +483,13 @@ def train_epochs(model,
             elapsed = datetime.now() - starttime
 
             if MASTER_PROCESS:
-                acc0, acc1, var_count0, var_count1, results0, results1, val_loss, swaps = calc_val_accuracy(val_loader, model, criterion)
+                acc0, acc1, var_count0, var_count1, results0, results1, val_loss, swaps, tn_loss = calc_val_accuracy(val_loader, model, criterion)
 
                 ppa_dels, ppv_dels = safe_compute_ppav(results0, results1, 'del')
                 ppa_ins, ppv_ins = safe_compute_ppav(results0, results1, 'ins')
                 ppa_snv, ppv_snv = safe_compute_ppav(results0, results1, 'snv')
 
-                logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f} swaps: {swaps}")
+                logger.info(f"Epoch {epoch} Secs: {elapsed.total_seconds():.2f} lr: {scheduler.get_last_lr():.5f} loss: {loss:.4f} val acc: {acc0:.3f} / {acc1:.3f}  ppa: {ppa_snv:.3f} / {ppa_ins:.3f} / {ppa_dels:.3f}  ppv: {ppv_snv:.3f} / {ppv_ins:.3f} / {ppv_dels:.3f} swaps: {swaps} tn_loss: {tn_loss :.3f}")
                 trainlogger.log({
                     "epoch": epoch,
                     "trainingloss": loss,
@@ -494,6 +502,7 @@ def train_epochs(model,
                     "ppv_snv": ppv_snv,
                     "ppv_dels": ppv_dels,
                     "learning_rate": scheduler.get_last_lr(),
+                    "tn_loss": tn_loss.item() if isinstance(tn_loss, torch.Tensor) else tn_loss,
                     "epochtime": elapsed.total_seconds(),
                 })
             
@@ -515,6 +524,7 @@ def train_epochs(model,
                     "learning_rate": scheduler.get_last_lr(),
                     "hap_swaps": swaps,
                     "epochtime": elapsed.total_seconds(),
+                    "tn_loss": tn_loss,
                 }, step=epoch)
 
             if MASTER_PROCESS and epoch > -1 and checkpoint_freq > 0 and (epoch % checkpoint_freq == 0):

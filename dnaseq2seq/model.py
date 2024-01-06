@@ -141,7 +141,11 @@ class VarTransformer(nn.Module):
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
         self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim, batch_first=True, max_len=500).to(self.device)
 
+        # The outputs of the transformer encoders have dim self.embed_dim of course, but they are
+        # then passed through the converter to have dim self.kmer_dim, and this happens in the 'encode'
+        # step
         self.tn_cls_head = nn.Linear(self.embed_dim, 1)
+
         encoder_layers = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
             nhead=encoder_attention_heads,
@@ -164,21 +168,17 @@ class VarTransformer(nn.Module):
         self.elu = torch.nn.ELU()
 
     def encode(self, src):
-        #src.bfloat16()
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
         mem = self.encoder(src)
-        mem_proj = self.converter(mem)
-        return mem_proj
+        return mem
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        #mem.bfloat16()
-        #tgt.bfloat16()
-        #tgt_mask.bfloat16()
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]) #.bfloat16()
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]) #.bfloat16()
+        mem = self.converter(mem) # Conver from encoding embed_dim to kmer_dim
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
 
         # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
         # This hack just forces it to be a square again
@@ -194,5 +194,8 @@ class VarTransformer(nn.Module):
     def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None):
         mem = self.encode(src)
         result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
-        return result
+
+        tn_prediction = self.tn_cls_head(mem[:, 0, :])
+
+        return result, tn_prediction
 

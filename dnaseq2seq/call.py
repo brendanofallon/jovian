@@ -711,7 +711,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
-            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+            preds, prbs, tn_logits = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
                                             n_output_toks=n_output_toks, device=DEVICE)
         if seq_preds is None:
             seq_preds = preds
