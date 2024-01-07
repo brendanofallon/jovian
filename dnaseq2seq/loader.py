@@ -277,7 +277,7 @@ class PregenLoader:
         else:
             self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix, self.tntgt_prefix)
 
-        self.cls_token = torch.tensor([1,0,1,0,1,0,1,0,1,0]).to(devive) # Must have shape equal to
+        self.cls_token = torch.tensor([1,0,1,0,1,0,1,0,1,0]).to(device) # Must have shape equal to
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
