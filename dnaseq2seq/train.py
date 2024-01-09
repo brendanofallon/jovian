@@ -285,7 +285,7 @@ def calc_val_accuracy(loader, model, criterion):
             tn_loss += tn_criterion(tn_logits.squeeze(), tntgt.float())
 
             for i in range(tntgt.shape[0]):
-                tl = tn_logits.squeeze()
+                tl = torch.sigmoid(tn_logits.squeeze())
                 print(f"{tl[i].item() :.4f}\t{tntgt[i].item()}")
 
 
