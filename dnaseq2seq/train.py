@@ -325,61 +325,13 @@ def safe_compute_ppav(results0, results1, key):
     return ppa, ppv
 
 def load_model(modelconf, ckpt):
-    # 35M model params
-    # encoder_attention_heads = 8 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 6
-    # decoder_layers = 4 # was 2
-    # embed_dim_factor = 100 # was 100
+    """
+    Create a model using the specified modelconf and try to load weights from the ckpt arg, if given
+    If the checkpoint data contains conf information (all newer models do), it will override whatever conf is provided in
+    modelconf
 
-    # 50M model params
-    # encoder_attention_heads = 8 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 8
-    # decoder_layers = 6 # was 2
-    # embed_dim_factor = 120 # was 100
-
-    # Wider model
-    # encoder_attention_heads = 4 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 1024
-    # encoder_layers = 6
-    # decoder_layers = 6 # was 2
-    # embed_dim_factor = 200 # was 100
-
-    # 100M params
-    # encoder_attention_heads = 8  # was 4
-    # decoder_attention_heads = 10  # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 10
-    # decoder_layers = 10  # was 2
-    # embed_dim_factor = 160  # was 100
-
-    # 200M params
-    # encoder_attention_heads = 12 # was 4
-    # decoder_attention_heads = 13 # Must evenly divide 260
-    # dim_feedforward = 1024
-    # encoder_layers = 10
-    # decoder_layers = 10 # was 2
-    # embed_dim_factor = 160 # was 100
-
-    # More layers but less model dim
-    # encoder_attention_heads = 10 # was 4
-    # decoder_attention_heads = 10 # Must evenly divide 260
-    # dim_feedforward = 1024
-    # encoder_layers = 14
-    # decoder_layers = 14 # was 2
-    # embed_dim_factor = 160 # was 100
-
-    # Small, for testing params
-    # encoder_attention_heads = 2  # was 4
-    # decoder_attention_heads = 2  # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 2
-    # decoder_layers = 2  # was 2
-    # embed_dim_factor = 160  # was 100
+    returns: PyTorch nn.Module, possibly wrapped in a DistributedDataParallel wrapper
+    """
     statedict = None
     if ckpt is not None:
         if 'model' in ckpt:
@@ -406,12 +358,20 @@ def load_model(modelconf, ckpt):
                            decoder_attention_heads=modelconf['decoder_attention_heads'],
                            d_ff=modelconf['dim_feedforward'],
                            device=DEVICE)
-    model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info(f"Creating model with {model_tot_params} trainable params")
+    model_tot_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Creating model with {model_tot_params} total params")
 
     if statedict is not None:
         logger.info(f"Initializing model weights from state dict")
-        model.load_state_dict(statedict)
+        model.load_state_dict(statedict, strict=False) # strict=False means ignore missing keys
+
+    # FREEZE all layers, enable training only of the new classifier
+    logger.warning(f"Freezing all layers, training the CLS head ONLY!")
+    for param in model.parameters():
+        param.requires_grad_(False)
+
+    for param in model.tn_cls_head.parameters():
+        param.requires_grad_(True)
     
     #logger.info("Turning OFF gradient computation for fc1 and fc2 embedding layers")
     #model.fc1.requires_grad_(False)
@@ -419,7 +379,10 @@ def load_model(modelconf, ckpt):
     
     #logger.info("Compiling model...")
     #model = torch.compile(model)
-    
+
+    model_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Model has {model_trainable_params} trainable params")
+
     if USE_DDP:
         rank = dist.get_rank()
         device_id = rank % torch.cuda.device_count()
@@ -673,9 +636,11 @@ def train(output_model, **kwargs):
         lr=kwargs.get('learning_rate', 0.001),
         betas=(0.9, 0.999)
     )
+
     if ckpt is not None and ckpt.get('opt') is not None:
-        logger.info("Loading optimizer state dict from checkpoint")
-        optimizer.load_state_dict(ckpt.get('opt'))
+        logger.warning(f"NOT loading optimizer state! Performing CLS head training only!")
+        # logger.info("Loading optimizer state dict from checkpoint")
+        # optimizer.load_state_dict(ckpt.get('opt'))
 
     init_learning_rate = kwargs.get('learning_rate', 0.0001)
     scheduler = util.WarmupCosineLRScheduler(
