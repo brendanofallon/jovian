@@ -286,7 +286,7 @@ def calc_val_accuracy(loader, model, criterion):
 
             for i in range(tntgt.shape[0]):
                 tl = tn_logits.squeeze()
-                print(f"{tl[i].item() :.4f}\t{tngt[i].item()}")
+                print(f"{tl[i].item() :.4f}\t{tntgt[i].item()}")
 
 
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
