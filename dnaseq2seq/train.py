@@ -284,11 +284,6 @@ def calc_val_accuracy(loader, model, criterion):
             seq_preds, probs, tn_logits = util.predict_sequence(src, model, n_output_toks=37, device=DEVICE) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
             tn_loss += tn_criterion(tn_logits.squeeze(), tntgt.float())
 
-            for i in range(tntgt.shape[0]):
-                tl = torch.sigmoid(tn_logits.squeeze())
-                print(f"{tl[i].item() :.4f}\t{tntgt[i].item()}")
-
-
             tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
             j = tgt_kmer_idx.shape[-1]
             seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
