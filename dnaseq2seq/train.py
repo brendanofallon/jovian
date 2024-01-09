@@ -284,7 +284,7 @@ def calc_val_accuracy(loader, model, criterion):
             seq_preds, probs, tn_logits = util.predict_sequence(src, model, n_output_toks=37, device=DEVICE) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
             tn_loss += tn_criterion(tn_logits.squeeze(), tntgt.float())
 
-            for i in range(tngt.shape[0]):
+            for i in range(tntgt.shape[0]):
                 tl = tn_logits.squeeze()
                 print(f"{tl[i].item() :.4f}\t{tngt[i].item()}")
 
