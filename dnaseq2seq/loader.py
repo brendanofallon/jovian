@@ -86,32 +86,6 @@ class LazyLoader:
             yield src, tgt, vaftgt, varsinfo
 
 
-class WeightedLoader:
-    """
-    A fancier loader that has a sampling weight associated with each element
-    Elements with higher weights get sampled more frequently
-    """
-
-    def __init__(self, src, tgt, weights, device):
-        assert len(weights) == src.shape[0]
-        assert src.shape[0] == tgt.shape[0]
-        self.src = src
-        self.tgt = tgt
-        weights = np.array(weights)
-        self.weights = weights / weights.sum()
-        self.device = device
-
-    def __len__(self):
-        return self.src.shape[0]
-
-    def iter_once(self, batch_size):
-        iterations = self.src.shape[0] // batch_size
-        count = 0
-        while count < iterations:
-            count += 1
-            idx = np.random.choice(range(self.src.shape[0]), size=batch_size, replace=True, p=self.weights)
-            yield self.src[idx, :, :, :].to(self.device), self.tgt[idx, :, :].to(self.device)
-
 
 def decomp_single(path):
     with open(path, 'rb') as fh:
