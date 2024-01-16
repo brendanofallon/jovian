@@ -699,7 +699,7 @@ def vars_hap_to_records(
     return merged
 
 
-def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
+def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=True):
     """
     Predict the sequence for the encoded reads, but dont submit more than 'max_batch_size' samples
     at once
@@ -710,7 +710,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size):
     
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
-        with torch.amp.autocast(device_type='cuda'):
+        with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
             preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
                                             n_output_toks=n_output_toks, device=DEVICE)
         if seq_preds is None:
