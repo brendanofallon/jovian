@@ -206,6 +206,90 @@ def decomp_profile(paths, threads):
     return result
 
 
+
+def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
+    """
+    Iterate the data (pathpairs, which is a list of tuples of (src tensors, target tensors), decompressing sets
+    of the data in parallel using 'threads' threads. Yield (src, tgt, None, None, None) values (the Nones are used
+    for additional labels or debugging)
+    """
+    src, tgt = [], []
+    for i in range(0, len(pathpairs), max_decomped):
+        logger.info(f"Decompressing {i}-{i + max_decomped} files of {len(pathpairs)}")
+        decomp_start = datetime.now()
+        paths = pathpairs[i:i + max_decomped]
+        decomped = decompress_multi_map(chain.from_iterable(paths), threads)
+        decomp_end = datetime.now()
+        decomp_time = (decomp_end - decomp_start).total_seconds()
+
+        for j in range(0, len(decomped), 2):
+            src.append(decomped[j])
+            tgt.append(decomped[j + 1])
+
+        total_size = sum([s.shape[0] for s in src])
+        if total_size < batch_size:
+            # We need to decompress more data to make a batch
+            continue
+
+        # Make a big tensor.
+        src_t = torch.cat(src, dim=0)
+        tgt_t = torch.cat(tgt, dim=0)
+
+        nbatch = total_size // batch_size
+        remain = total_size % batch_size
+
+        # Slice the big tensors for batches
+        for n in range(0, nbatch):
+            start = n * batch_size
+            end = (n + 1) * batch_size
+            yield (
+                src_t[start:end].to(device).float(),
+                tgt_t[start:end].to(device).long(),
+                None,  # vaftgt_t[start:end].to(self.device),
+                None,
+                {"decomp_time": decomp_time},
+            )
+            decomp_time = 0.0
+
+        if remain:
+            # The remaining data points will be in next batch.
+            src = [src_t[nbatch * batch_size:]]
+            tgt = [tgt_t[nbatch * batch_size:]]
+        else:
+            src, tgt = [], []
+
+    if len(src) > 0:
+        # We need to yield the last batch.
+        yield (
+            torch.cat(src, dim=0).to(device).float(),
+            torch.cat(tgt, dim=0).to(device).long(),
+            None,
+            None,
+            {"decomp_time": 0.0},
+        )
+    logger.info(f"Done iterating data")
+
+def load_files(datadir, src_prefix="src", tgt_prefix=""):
+    pathpairs = util.find_files(datadir, src_prefix, tgt_prefix)
+    logger.info(f"Loaded {len(pathpairs)} from {datadir}")
+    random.shuffle(pathpairs)
+    return pathpairs
+
+class CurriculumLoader:
+
+    def __init__(self, device, datadirs, switchpoints, threads, max_decomped_batches=10):
+        self.device = device
+        self.datadirs = datadirs
+        self.switchpoints = switchpoints
+        self.threads = threads
+
+
+    def iter_once(self, batch_size):
+        self.load_files()  # Search for new data with every iteration ?
+        for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
+            yield result
+
+
 class PregenLoader:
 
     def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
@@ -226,7 +310,7 @@ class PregenLoader:
         if pathpairs:
             self.pathpairs = pathpairs
         else:
-            self.load_files()
+            self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix)
             
         self.threads = threads
         self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
@@ -237,11 +321,7 @@ class PregenLoader:
         logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
-        
-    def load_files(self):
-        self.pathpairs = util.find_files(self.datadir, self.src_prefix, self.tgt_prefix)
-        logger.info(f"Loaded {len(self.pathpairs)} from {self.datadir}")
-        random.shuffle(self.pathpairs)
+
 
     def retain_val_samples(self, fraction):
         """
@@ -258,7 +338,6 @@ class PregenLoader:
         logger.info(f"Number of batches left for training: {len(self.pathpairs)}")
         return val_samples
 
-
     def iter_once(self, batch_size):
         """
         Make one pass over the training data, in this case all of the files in the 'data dir'
@@ -267,64 +346,9 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        self.load_files() # Search for new data with every iteration ?
-        src, tgt = [], []
-        for i in range(0, len(self.pathpairs), self.max_decomped):
-            logger.info(f"Decompressing {i}-{i+self.max_decomped} files of {len(self.pathpairs)}")
-            decomp_start = datetime.now()
-            paths = self.pathpairs[i:i+self.max_decomped]
-            decomped = decompress_multi_map(chain.from_iterable(paths), self.threads)
-            decomp_end = datetime.now()
-            decomp_time = (decomp_end - decomp_start).total_seconds()
-
-            for j in range(0, len(decomped), 2):
-                src.append(decomped[j])
-                tgt.append(decomped[j+1])
-
-            total_size = sum([s.shape[0] for s in src])
-            if total_size < batch_size:
-                # We need to decompress more data to make a batch
-                continue
-
-            # Make a big tensor.
-            src_t = torch.cat(src, dim=0)
-            tgt_t = torch.cat(tgt, dim=0)
-
-            nbatch = total_size // batch_size
-            remain = total_size % batch_size
-
-            # Slice the big tensors for batches
-            for n in range(0, nbatch):
-                start = n * batch_size
-                end = (n + 1) * batch_size
-                yield (
-                    src_t[start:end].to(self.device).float(),
-                    tgt_t[start:end].to(self.device).long(),
-                    None, #vaftgt_t[start:end].to(self.device), 
-                    None,
-                    {"decomp_time": decomp_time},
-                )
-                decomp_time = 0.0
-
-
-            if remain:
-                # The remaining data points will be in next batch. 
-                src = [src_t[nbatch * batch_size:]]
-                tgt = [tgt_t[nbatch * batch_size:]]
-            else:
-                src, tgt = [], []
-
-
-        if len(src) > 0:
-            # We need to yield the last batch.
-            yield (
-                torch.cat(src, dim=0).to(self.device).float(),
-                torch.cat(tgt, dim=0).to(self.device).long(),
-                None, 
-                None,
-                {"decomp_time": 0.0},
-            )
-        logger.info(f"Done iterating data")
+        self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix) # Search for new data with every iteration ?
+        for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
+            yield result
 
 
 
