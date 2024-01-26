@@ -199,7 +199,7 @@ def main():
     trainparser.add_argument("-vd", "--val-dir", help="Pregenerated data for validation", default=None)
     trainparser.add_argument("-t", "--threads", help="Max number of threads to use for decompression (torch may use more)", default=None, type=int)
     trainparser.add_argument("-md", "--max-decomp-batches",
-                             help="Max number batches to decompress and store in memory at once", default=None, type=int)
+                             help="Max number batches to decompress and store in memory at once", default=4, type=int)
     trainparser.add_argument("-b", "--batch-size", help="The batch size, default is 64", type=int, default=None)
     trainparser.add_argument("-rn", "--run-name", type=alphanumeric_no_spaces, default=None,
                              help="Run name, must be alphanumeric plus '_' or '-'")
