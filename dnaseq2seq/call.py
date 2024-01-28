@@ -639,6 +639,46 @@ def merge_overlaps(overlaps, min_qual):
     result.extend(sorted(overlaps, key=lambda x: x.pos))
     return result
 
+def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100):
+    allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[0])
+
+    all_vcf_vars = []
+    group0 = defaultdict(list)
+    group1 = defaultdict(list)
+    prevpos = -1000
+    for k in allkeys:
+        if k[0] - prevpos > minimum_safe_distance:
+            vcf_vars = vcf.vcf_vars(
+                vars_hap0=group0,
+                vars_hap1=group1,
+                chrom=chrom,
+                aln=aln,
+                reference=reference
+            )
+            all_vcf_vars.extend(vcf_vars)
+
+            group0 = defaultdict(list)
+            group1 = defaultdict(list)
+            if k in vars_hap0:
+                group0[k].extend(vars_hap0[k])
+            if k in vars_hap1:
+                group1[k].extend(vars_hap1[k])
+            prevpos = k[0]
+        else:
+            if k in vars_hap0:
+                group0[k].extend(vars_hap0[k])
+            if k in vars_hap1:
+                group1[k].extend(vars_hap1[k])
+
+    vcf_vars = vcf.vcf_vars(
+        vars_hap0=group0,
+        vars_hap1=group1,
+        chrom=chrom,
+        aln=aln,
+        reference=reference
+    )
+    all_vcf_vars.extend(vcf_vars)
+    return all_vcf_vars
 
 def vars_hap_to_records(
     chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
@@ -650,16 +690,17 @@ def vars_hap_to_records(
     # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
-    min_merge_qual = 0.001
+    min_merge_qual = 0.01
 
-    vcf_vars = vcf.vcf_vars(
-        vars_hap0=vars_hap0,
-        vars_hap1=vars_hap1,
-        chrom=chrom,
-        window_idx=window_idx,
-        aln=aln,
-        reference=reference
-    )
+    # vcf_vars = vcf.vcf_vars(
+    #     vars_hap0=vars_hap0,
+    #     vars_hap1=vars_hap1,
+    #     chrom=chrom,
+    #     aln=aln,
+    #     reference=reference
+    # )
+
+    vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100)
 
     # covert variants to pysam vcf records
     vcf_records = [
