@@ -61,7 +61,6 @@ class VcfVar:
     phased: bool
     phase_set: int
     haplotype: int
-    window_idx: int
     window_var_count: int
     window_cis_vars: int
     window_trans_vars: int
@@ -276,12 +275,12 @@ def var_depth(var, chrom, aln):
     return count
 
 
-def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=30):
+def vcf_vars(vars_hap0, vars_hap1, chrom, aln, reference, mindepth=30):
     """
     From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
     This creates VcfVar objects, which are almost like pysam.VariantRecord objects but not quite
-    :param vars_hap0:
-    :param vars_hap1:
+    :param vars_hap0: Dict of (pos, ref, alt) -> Variants on hap 0
+    :param vars_hap1: Dict of (pos, ref, alt) -> Variants on hap 1
     :param chrom:
     :param window_idx: simple index of sequential call windows
     :param aln: bam AlignmentFile
@@ -291,7 +290,9 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
 
     # index vars by (pos, ref, alt) to make dealing with homozygous easier
     vcfvars_hap0 = {}
-    for var in vars_hap0:
+    allkeys = list(set(list(vars_hap0.keys()) + list(vars_hap1.keys())))
+    phase_set = min(v[0] for v in allkeys) if len(allkeys) > 1 else None
+    for var in vars_hap0.keys():
         depth = var_depth(var, chrom, aln)
         vcfvars_hap0[var] = VcfVar(
             chrom=chrom,
@@ -303,9 +304,8 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             filter=[],
             depth=depth,
             phased=False,  # default for now
-            phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var in window for now
+            phase_set=phase_set,  # default to first var in window for now
             haplotype=0,  # defalt vars_hap0 to haplotype 0 for now
-            window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=min(v.var_count for v in vars_hap0[var]),
             window_trans_vars=len(vars_hap1),
@@ -319,7 +319,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         )
 
     vcfvars_hap1 = {}
-    for var in vars_hap1:
+    for var in vars_hap1.keys():
         logger.debug(f"Computing {var}")
         depth = var_depth(var, chrom, aln)
         vcfvars_hap1[var] = VcfVar(
@@ -332,9 +332,8 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
             filter=[],
             depth=depth,
             phased=False,  # default value for now
-            phase_set=min(v[0] for v in (list(vars_hap0.keys()) + list(vars_hap1.keys()))),  # default to first var position in window
+            phase_set=phase_set,  # default to first var position in window
             haplotype=1,  # defalt vars_hap1 to haplotype 1 for now
-            window_idx=window_idx,
             window_var_count=len(set(vars_hap0.keys()) | set(vars_hap1.keys())),
             window_cis_vars=min(v.var_count for v in vars_hap1[var]),
             window_trans_vars=len(vars_hap0),
@@ -348,7 +347,7 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, window_idx, aln, reference, mindepth=3
         )
 
     # check for homozygous vars
-    homs = list(set(vcfvars_hap0) & set(vcfvars_hap1))
+    homs = list(set(vcfvars_hap0.keys()) & set(vcfvars_hap1.keys()))
     for var in homs:
         # modify hap0 var info
         vcfvars_hap0[var].qual = (vcfvars_hap0[var].qual + vcfvars_hap1[var].qual) / 2  # Mean of each call??
@@ -446,11 +445,9 @@ def create_vcf_header(sample_name="sample", lowcov=30, cmdline=None):
                                    ('Description', 'Genotype')])
     vcfh.add_meta('FORMAT', items=[('ID', "DP"), ('Number', 1), ('Type', 'Integer'),
                                    ('Description', 'Bam depth at variant start position')])
-    vcfh.add_meta('FORMAT', items=[('ID', "PS"), ('Number', 1), ('Type', 'Integer'),
+    vcfh.add_meta('FORMAT', items=[('ID', "PS"), ('Number', "."), ('Type', 'Integer'),
                                    ('Description', 'Phase set equal to POS of first record in phased set')])
     # INFO items
-    vcfh.add_meta('INFO', items=[('ID', "WIN_IDX"), ('Number', "."), ('Type', 'Integer'),
-                                 ('Description', 'In which window(s) was the variant called')])
     vcfh.add_meta('INFO', items=[('ID', "WIN_VAR_COUNT"), ('Number', "."), ('Type', 'Integer'),
                                  ('Description', 'Total variants called in same window(s)')])
     vcfh.add_meta('INFO', items=[('ID', "WIN_CIS_COUNT"), ('Number', "."), ('Type', 'Integer'),
@@ -508,7 +505,6 @@ def create_vcf_rec(var, vcf_file):
     r.samples['sample']['DP'] = var.depth
     r.samples['sample']['PS'] = var.phase_set
     # Set INFO values
-    r.info['WIN_IDX'] = var.window_idx
     r.info['WIN_VAR_COUNT'] = var.window_var_count
     r.info['WIN_CIS_COUNT'] = var.window_cis_vars
     r.info['WIN_TRANS_COUNT'] = var.window_trans_vars
@@ -535,6 +531,3 @@ def vars_to_vcf(vcf_file, variants):
         vcf_file.write(r)
 
 
-if __name__=="__main__":
-    aln = align_sequences("ACTGACTG", "ACGACTG")
-    print(aln)
