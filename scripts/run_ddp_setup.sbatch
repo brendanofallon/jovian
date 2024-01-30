@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="pos_encoding_ablation"
 
-export RUN_NAME="50M_pos_abl_again"
+export RUN_NAME="50M_pos_abl_fixlrsched"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME
