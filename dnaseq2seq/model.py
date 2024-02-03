@@ -137,8 +137,7 @@ class VarTransformer(nn.Module):
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
         self.fc2 = nn.Linear(self.read_depth * self.fc1_hidden, self.embed_dim)
 
-        self.converter1 = nn.Linear(self.embed_dim, self.kmer_dim)
-        self.converter2 = nn.Linear(self.embed_dim, self.kmer_dim)
+        self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
         self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim, batch_first=True, max_len=500).to(self.device)
 
@@ -158,7 +157,8 @@ class VarTransformer(nn.Module):
             dropout=p_dropout,
             batch_first=True,
             activation='gelu')
-        self.decoder = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+        self.decoder0 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
+        self.decoder1 = nn.TransformerDecoder(decoder_layers, num_layers=n_decoder_layers)
         self.softmax = nn.LogSoftmax(dim=-1)
         self.elu = torch.nn.ELU()
 
@@ -171,8 +171,7 @@ class VarTransformer(nn.Module):
         return mem
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        mem_proj1 = self.converter1(mem)
-        mem_proj2 = self.converter2(mem)
+        mem_proj = self.converter1(mem)
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
 
@@ -181,8 +180,8 @@ class VarTransformer(nn.Module):
         if tgt_mask.shape[0] != tgt_mask.shape[1]:
             tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
             #logger.info(f"Forcing tgt mask shapre to be {tgt_mask.shape}, input enc shape is: {mem.shape}")
-        h0 = self.decoder(tgt0, mem_proj1, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
-        h1 = self.decoder(tgt1, mem_proj2, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        h0 = self.decoder0(tgt0, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        h1 = self.decoder1(tgt1, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h0 = self.softmax(h0)
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)
