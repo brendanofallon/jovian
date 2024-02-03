@@ -171,7 +171,7 @@ class VarTransformer(nn.Module):
         return mem
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        mem_proj = self.converter1(mem)
+        mem_proj = self.converter(mem)
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
 
