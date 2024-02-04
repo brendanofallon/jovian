@@ -5,8 +5,8 @@
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --ntasks-per-node=2
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=14-0
@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="pos_encoding_ablation"
 
-export RUN_NAME="50M_1dposenc_nodropout"
+export RUN_NAME="100M_posenc_abl_cont"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME
