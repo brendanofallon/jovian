@@ -358,17 +358,22 @@ def predict_sequence(src, model, n_output_toks, device):
     probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
     mem = model.encode(src)
     encode = time.perf_counter()
+    diffs = torch.zeros(src.shape[0], 2, 1).float().to(device)
+    # TODO does it make sense to generate a few extra output tokens to improve the SW alignment? Maybe this would be a good
+    # idea for repetitive regions
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         new_probs, tophit = torch.max(new_preds, dim=-1)
-        p = torch.nn.functional.one_hot(tophit, num_classes=260)
+        tk = torch.topk(new_preds, k=2)
+        diffs = torch.concat( (diffs, tk.values[:, :, :, 1] - tk.values[:, :, :, 0]), dim=-1)
+        p = torch.nn.functional.one_hot(tophit, num_classes=FEATURE_DIM)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
     encode_elapsed = encode - start
     decode_elapsed = time.perf_counter() - encode
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
-    return predictions[:, :, 1:, :], probs[:, :, 1:]
+    return predictions[:, :, 1:, :], diffs[:, :, 1:]
 
 
 class WarmupCosineLRScheduler:
