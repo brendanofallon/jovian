@@ -1,11 +1,10 @@
 
-## NGS Variant detection with Transformers
+## NGS Variant detection with Generative AI
 
 This repo contains code for detecting variants from next-generation sequencing data (BAM / CRAM files)
  via sequence-to-sequence modeling. The input sequence is a list of pileup columns, and the output is two
 predicted haplotypes, from which variants can be easily parsed. With this approach, there's not a need for
-any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or decisions about variant 
-quality cutoffs, kmer-sizes, etc. The approach allows for true end-to-end deep learning
+any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, no hand-tuned cutoffs for mapping quality or base quality. The approach allows for true end-to-end deep learning
 for variant detection.
 
 
@@ -13,6 +12,12 @@ Please refer to [the preprint](https://www.biorxiv.org/content/10.1101/2022.09.1
 
 
 ### Installation
+
+The easiest way to get started is by using cloning the docker repo
+
+     docker pull arupngs/jenever 
+
+
 
 Just navigate to the repository directory and 
 

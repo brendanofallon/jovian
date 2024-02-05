@@ -366,7 +366,7 @@ def predict_sequence(src, model, n_output_toks, device):
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         new_probs, tophit = torch.max(new_preds, dim=-1)
         tk = torch.topk(new_preds, k=2)
-        diffs = torch.concat( (diffs, tk.values[:, :, :, 1] - tk.values[:, :, :, 0]), dim=-1)
+        diffs = torch.concat( (diffs, torch.log( torch.exp(tk.values[:, :, :, 0]) - torch.exp(tk.values[:, :, :, 1]))), dim=-1)
         p = torch.nn.functional.one_hot(tophit, num_classes=FEATURE_DIM)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
