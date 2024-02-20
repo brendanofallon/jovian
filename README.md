@@ -8,8 +8,11 @@ any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or deci
 quality cutoffs, kmer-sizes, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
+#### A note on earlier versions
 
-Please refer to [the preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for more details
+An earlier version of this tool, called Jovian, was made available in 2022 (see [preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for details).
+Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
+The current version which uses autoregressive decoders to generate haplotypes, is called Jenever. 
 
 
 ### Installation
@@ -43,7 +46,6 @@ requires a path to a population database VCF (such as Gnomad). To run with a cla
 just add the following args to the command line:
 
     -c /path/to/classifier.model
-    -f /path/to/population/frequency/vcf
 
 
 Calling does not utilize a GPU (running forward passes of the model 
