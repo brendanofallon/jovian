@@ -163,29 +163,25 @@ class VarTransformer(nn.Module):
         self.elu = torch.nn.ELU()
 
     def encode(self, src):
-        #src.bfloat16()
         src = self.elu(self.fc1(src))
         src = self.pos_encoder(src)  # For 2D encoding we have to do this before flattening, right?
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
         mem = self.encoder(src)
-        mem_proj = self.converter(mem)
-        return mem_proj
+        return mem
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        #mem.bfloat16()
-        #tgt.bfloat16()
-        #tgt_mask.bfloat16()
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :]) #.bfloat16()
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :]) #.bfloat16()
+        mem_proj = self.converter(mem)
+        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
+        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
 
         # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
         # This hack just forces it to be a square again
         if tgt_mask.shape[0] != tgt_mask.shape[1]:
             tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
             #logger.info(f"Forcing tgt mask shapre to be {tgt_mask.shape}, input enc shape is: {mem.shape}")
-        h0 = self.decoder0(tgt0, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
-        h1 = self.decoder1(tgt1, mem, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        h0 = self.decoder0(tgt0, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        h1 = self.decoder1(tgt1, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h0 = self.softmax(h0)
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)

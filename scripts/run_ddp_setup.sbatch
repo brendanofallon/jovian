@@ -4,7 +4,7 @@
 
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=2
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="master"
 
-export RUN_NAME="100M_s28_rpt"
+export RUN_NAME="200M_notncls"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME
