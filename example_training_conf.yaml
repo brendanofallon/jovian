@@ -1,0 +1,33 @@
+
+batch_size: 325
+samples_per_epoch: 500000    # Report val stats after training for processing this many regions
+checkpoint_freq: 2   # Save model checkpoints at this frequency
+
+
+learning_rate: 0.00005  # Max LR after warmup
+min_learning_rate: 0.000001  # LR will slowly decay to this value
+lr_warmup_iters: 2500000
+lr_decay_iters:  40000000
+
+
+# input_model: "/path/to/model/checkpoint.pt"   To resume training from a saved checkpoint
+
+epochs: 100
+
+val_dir: "/path/to/pregen/data/for/validation/"
+datadir: "/path/to/pregen/training/data/"
+
+
+max_decomp_batches: 8 # Max number of batches to decompress at once, values close to the number of threads make sense
+threads: 8
+
+# Model size params, below values were used for 100M model
+model:
+  decoder_layers: 10
+  decoder_attention_heads: 10
+  encoder_layers: 10
+  encoder_attention_heads: 8
+  dim_feedforward: 512
+  embed_dim_factor: 160 # AKA model 'depth', model dim is this * attn_heads
+  max_read_depth: 150  # Must match what was used for training data generation
+  feats_per_read: 10
