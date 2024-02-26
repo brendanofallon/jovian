@@ -12,7 +12,7 @@ for variant detection.
 
 An earlier version of this tool, called Jovian, was made available in 2022 (see [preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for details).
 Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
-The current version which uses autoregressive decoders to generate haplotypes, is called Jenever. 
+The current version which uses autoregressive decoders to generate haplotypes is called Jenever. 
 
 
 ### Installation
@@ -29,7 +29,7 @@ in the main project directory
 
 ### Calling variants
 
-Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basically calling command looks like: 
+Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basical calling command looks like: 
 
     dnaseq2seq/main.py call -r <reference genome fasta> 
       --threads <number of threads to use> 
@@ -45,16 +45,15 @@ In general performance is somewhere near 15MB (megabases) per hour, depending on
 generation procedure, the number of threads and batch size, and the GPU speed. 
 
 
-
 ### Training a new model
 
 
 #### Creating training from labelled BAMs (pregen)
 
-Training requires converting pileups (regions of BAM files) into tensors, but that process takes a long 
-time so it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
-training runs. This is called "pregen" (for pre-generation of training data). The pregenerated training 
-tensors and 'labels' (true alt sequences) are stored in a single directory. To create pregenerated training 
+Training requires converting pileups (regions of BAM files) into tensors. Because that process is very slow 
+it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
+training runs. This is called `pregen` (for pre-generation of training data). The pregenerated training 
+tensors and 'labels' (true alt sequences, stored a k-mer indices) are stored in a single directory. To create pregenerated training 
 data, run
 
     ./main.py pregen --threads <thread count> 
@@ -122,4 +121,4 @@ In order to generate well-calibrated quality scores, it's necessary to train a s
       - sample2_truepositives.vcf
 
 
-To generate the classifier, run the dnaseq2seq/builddclf.py tool 
+To generate the classifier, run the `dnaseq2seq/builddclf.py` tool with the `train` argument and the path to the configuration file as an option. 
