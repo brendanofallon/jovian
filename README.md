@@ -45,10 +45,10 @@ Calling variants requires an alignment file in bam / cram format, a model file, 
 
 #### Creating training from labelled BAMs (`pregen`)
 
-Training requires converting pileups (regions of BAM files) into tensors, but that process takes a long 
-time so it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
+Training requires converting pileups (regions of BAM files) into tensors. Because that process is very slow 
+it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
 training runs. This is called `pregen` (for pre-generation of training data). The pregenerated training 
-tensors and 'labels' (true alt sequences) are stored in a single directory. To create pregenerated training 
+tensors and 'labels' (true alt sequences, stored a k-mer indices) are stored in a single directory. To create pregenerated training 
 data, run
 
     ./main.py pregen --threads <thread count> 
@@ -120,4 +120,4 @@ In order to generate well-calibrated quality scores, it's necessary to train a s
       - sample2_truepositives.vcf
 
 
-To generate the classifier, run the dnaseq2seq/builddclf.py tool 
+To generate the classifier, run the `dnaseq2seq/builddclf.py` tool with the `train` argument and the path to the configuration file as an option. 
