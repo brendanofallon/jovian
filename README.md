@@ -12,7 +12,7 @@ for variant detection.
 
 An earlier version of this tool, called Jovian, was made available in 2022 (see [preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for details).
 Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
-The current version which uses autoregressive decoders to generate haplotypes, is called Jenever. 
+The current version which uses autoregressive decoders to generate haplotypes is called Jenever. 
 
 
 ### Installation
@@ -29,27 +29,15 @@ in the main project directory
 
 ### Calling variants
 
-Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basically calling command looks like: 
+Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basical calling command looks like: 
 
     dnaseq2seq/main.py call -r <reference genome fasta> 
-      --threads <number of threads to use> 
+      --threads <number of cpu threads to use> 
       -m /path/to/model
+      -c /path/to/classifier/model
       --bed /path/to/BED formatted/file 
       --bam /BAM or CRAM file 
       -v output.vcf
-
-Running the model with the command above will generate variant calls _without_ well
-calibrated quality scores, which will likely have high sensitivity but poor precision 
-(i.e. lots of false positive calls). Adding a 'classifier' model allows Jovian to 
-compute meaning quality scores which greatly improve precision. The classifier also
-requires a path to a population database VCF (such as Gnomad). To run with a classifier
-just add the following args to the command line:
-
-    -c /path/to/classifier.model
-
-
-Calling does not utilize a GPU (running forward passes of the model 
-accounts for only a small fraction of the total runtime).
 
 
 ### Training a new model
