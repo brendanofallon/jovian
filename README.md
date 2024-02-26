@@ -33,33 +33,27 @@ Calling variants requires an alignment file in bam / cram format, a model file, 
 
     dnaseq2seq/main.py call -r <reference genome fasta> 
       --threads <number of threads to use> 
-      -m /path/to/model
-      --bed /path/to/BED formatted/file 
-      --bam /BAM or CRAM file 
+      -m /path/to/model.pt      
+      --bed /path/to/BED file 
+      --bam /BAM or CRAM file
+      -c /path/to/classifier.model
       -v output.vcf
 
-Running the model with the command above will generate variant calls _without_ well
-calibrated quality scores, which will likely have high sensitivity but poor precision 
-(i.e. lots of false positive calls). Adding a 'classifier' model allows Jovian to 
-compute meaning quality scores which greatly improve precision. The classifier also
-requires a path to a population database VCF (such as Gnomad). To run with a classifier
-just add the following args to the command line:
+The above command will call germline variants in the regions defined by the BED file and write them as a standard VCF file.
+Runtimes are long and a GPU is required for tolerable performance when more than a few small regions are being called. 
+In general performance is somewhere near 15MB (megabases) per hour, depending on how many regions trigger the
+generation procedure, the number of threads and batch size, and the GPU speed. 
 
-    -c /path/to/classifier.model
-
-
-Calling does not utilize a GPU (running forward passes of the model 
-accounts for only a small fraction of the total runtime).
 
 
 ### Training a new model
 
 
-#### Creating training from labelled BAMs (`pregen`)
+#### Creating training from labelled BAMs (pregen)
 
 Training requires converting pileups (regions of BAM files) into tensors, but that process takes a long 
 time so it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
-training runs. This is called `pregen` (for pre-generation of training data). The pregenerated training 
+training runs. This is called "pregen" (for pre-generation of training data). The pregenerated training 
 tensors and 'labels' (true alt sequences) are stored in a single directory. To create pregenerated training 
 data, run
 
@@ -99,13 +93,9 @@ in 'vals_per_class' from the configuration file.
 
 To train a new model, run a command similar to
 
-    dnaseq2seq/main.py train -c conf.yaml 
-      -d <pregen_data_directory>
-      -n <number of epochs>
-      --checkpoint-freq <model checkpointing frequency>
-      --learning-rate 0.0001
-      --batch-size 512 
-      -o output.model
+    dnaseq2seq/main.py train -c training_conf.yaml --run-name my_new_run
+
+
 
 
 It's possible to continue training from a checkpoint by providing an input model with the
