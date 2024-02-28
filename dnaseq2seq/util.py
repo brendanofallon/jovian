@@ -19,8 +19,6 @@ from torch.nn.parallel import DistributedDataParallel
 
 logger = logging.getLogger(__name__)
 
-
-
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
