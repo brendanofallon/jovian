@@ -1,8 +1,0 @@
-reference: "/uufs/chpc.utah.edu/common/home/arup-storage3/Reference/Data/B37/GATKBundle/2.8_subset_arup_v0.1/human_g1k_v37_decoy_phiXAdaptr.fasta"
-
-data_augmentation: 
-   - shortening
-   - shuffling
-   - downsampling
-
-fraction_to_augment: 0.20

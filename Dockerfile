@@ -12,11 +12,6 @@ RUN apt-get update && apt-get -y install gcc
 
 USER $DEFAULT_USERNAME
 
-
-#RUN curl -O https://repo.anaconda.com/miniconda/Miniconda3-py38_4.12.0-Linux-x86_64.sh
-#RUN chmod u+x Miniconda3-py38_4.12.0-Linux-x86_64.sh
-#RUN ./Miniconda3-py38_4.12.0-Linux-x86_64.sh -b
-
 ENV PATH $PATH:$HOME/.local/bin
 
 COPY pip_requirements.txt .
