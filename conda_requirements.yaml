@@ -1,7 +1,0 @@
-channels:
-  - defaults
-  - anaconda
-  - conda-forge
-
-dependencies:
-- scikit-bio
