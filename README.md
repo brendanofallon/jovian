@@ -19,17 +19,24 @@ The current version which uses autoregressive decoders to generate haplotypes is
 
 #### Requirements
 
-You'll need a linux / unix compatible system (MacOS is fine) with python >= 3.10 installed. 
+You'll need a linux / unix compatible system (MacOS is fine) with python >= 3.10 and pip installed. 
 
-Just navigate to the repository directory and 
+To install jenever, clone this repository, navigate to the repository directory, and enter: 
 
     pip install  .
 
+on the command line. All dependencies should be automatically installed. 
 
+It's a good idea to install in a separate conda environment or python virtualenv if possible, but not required unless there are dependency conflicts. 
 
+#### Obtaining model weights
 
-You can also create a docker image with the Dockerfile, with a simple `docker build .`
-in the main project directory
+Model weights are stored using [git lfs](https://git-lfs.com/), under the `models/` directory. If you don't have `git lfs` installed, the weights files will appear as small stub files with references to the actual weights objects. If you install `git lfs` after you've already cloned the repo, run
+
+    git lfs fetch
+
+to actually download the weights.
+
 
 
 ### Calling variants
@@ -38,7 +45,7 @@ Calling variants requires an alignment file in bam / cram format, a model file, 
 
     dnaseq2seq/main.py call -r <reference genome fasta> 
       --threads <number of threads to use> 
-      -m /path/to/model.pt      
+      -m /path/to/model
       --bed /path/to/BED file 
       --bam /BAM or CRAM file
       -c /path/to/classifier.model

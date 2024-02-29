@@ -63,7 +63,7 @@ setup(
     package_dir={"dnaseq2seq": "dnaseq2seq"},
     package_data={
         "dnaseq2seq": ["test/resources/*", ],
-        "": ["*.yaml", "*.tsv", "*.txt"],
+        "": ["*v.yaml", "*.tsv", "*.txt"],
     },  # TODO add test documents with schema samples
     include_package_data=True,
     url="https://github.com/ARUP-NGS/jenever",
@@ -71,7 +71,7 @@ setup(
     install_requires=requires,
     entry_points="""
         [console_scripts]
-        jnv=dnaseq2seq.main:main""",  # {alias}={module}:{function}  #
+        jenever=dnaseq2seq.main:main""",  # {alias}={module}:{function}  #
     scripts=[
         "dnaseq2seq/main.py",
     ],
