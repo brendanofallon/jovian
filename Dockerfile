@@ -24,13 +24,13 @@ ENV PYTHONPATH $PYTHONPATH:/opt/conda/lib/python3.10/:
 ENV PATH $PATH:$HOME/.local/bin
 
 
-COPY 100M_s28_cont_mapsus_lolr2_epoch2.model $APPDIR/jenever_model.pt
-COPY s28ce40_bamfix.model $APPDIR/classifier.model
+COPY models/100M_s28_cont_mapsus_lolr2_epoch2.model $APPDIR/100M_s28_cont_mapsus_lolr2_epoch2.model
+COPY models/s28ce40_bamfix.model $APPDIR/s28ce40_bamfix.model
 
-ENV JENEVER_MODEL=jenever_model.pt
-ENV JENEVER_CLASSIFIER=classifier.model
+ENV JENEVER_MODEL=100M_s28_cont_mapsus_lolr2_epoch2.model
+ENV JENEVER_CLASSIFIER=s28ce40_bamfix.model
 
-COPY . $APPDIR
+COPY dnaseq2seq $APPDIR
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 RUN python $APPDIR/dnaseq2seq/main.py -h
