@@ -48,7 +48,7 @@ generation procedure, the number of threads and batch size, and the GPU speed.
 ### Training a new model
 
 
-#### Creating training from labelled BAMs (pregen)
+#### Creating training data from labelled BAMs (pregen)
 
 Training requires converting pileups (regions of BAM files) into tensors. Because that process is very slow 
 it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
@@ -60,7 +60,8 @@ data, run
       -c <conf.yaml> 
       -d /path/to/output/directory
 
-Depending on how may BAMs and how many labeled instances there are, this can take a really long time.
+Depending on how may BAMs and how many labeled instances there are, this can take a really long time. Pregen for the full training data set in the 
+paper took approximately 10 days of 24-core time (240 core-days or 5760 core-hours).
 
 The configuration file `conf.yaml` must have a path to the reference genome, the number of examples to 
 choose from each region type, and a list of BAMs + labels, like this:

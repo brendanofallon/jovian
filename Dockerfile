@@ -5,19 +5,34 @@ ENV DEFAULT_USERNAME=user
 RUN useradd $DEFAULT_USERNAME --create-home --user-group
 ENV HOME /home/$DEFAULT_USERNAME
 
+ENV APPDIR /jenever
+
 WORKDIR $HOME
 
+RUN apt-get update && apt-get -y install gcc vim coreutils
 
-RUN apt-get update && apt-get -y install gcc
+RUN conda install -c conda-forge scikit-bio
+
+COPY pip_requirements.txt .
+RUN /opt/conda/bin/pip install -r pip_requirements.txt
 
 USER $DEFAULT_USERNAME
 
+
+ENV PYTHONPATH $PYTHONPATH:/opt/conda/lib/python3.10/:
+
 ENV PATH $PATH:$HOME/.local/bin
 
-COPY pip_requirements.txt .
-RUN pip install -r pip_requirements.txt
 
-COPY . $HOME/dnaseq2seq
+COPY 100M_s28_cont_mapsus_lolr2_epoch2.model $APPDIR/jenever_model.pt
+COPY s28ce40_bamfix.model $APPDIR/classifier.model
 
-RUN python dnaseq2seq/dnaseq2seq/main.py -h
-ENTRYPOINT ["python", "dnaseq2seq/dnaseq2seq/main.py"]
+ENV JENEVER_MODEL=jenever_model.pt
+ENV JENEVER_CLASSIFIER=classifier.model
+
+COPY . $APPDIR
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+
+RUN python $APPDIR/dnaseq2seq/main.py -h
+#ENTRYPOINT ["ls", "-lhrst"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
