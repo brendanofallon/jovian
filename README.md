@@ -17,11 +17,16 @@ The current version which uses autoregressive decoders to generate haplotypes is
 
 ### Installation
 
+#### Requirements
+
+You'll need a linux / unix compatible system (MacOS is fine) with python >= 3.10 installed. 
+
 Just navigate to the repository directory and 
 
     pip install  .
 
-You'll need both conda (anaconda or miniconda) and pip installed.
+
+
 
 You can also create a docker image with the Dockerfile, with a simple `docker build .`
 in the main project directory

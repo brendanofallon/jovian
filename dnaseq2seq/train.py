@@ -9,7 +9,6 @@ from datetime import datetime
 import os
 from pygit2 import Repository
 
-import numpy as np
 import torch
 from torch import nn
 import torch.distributed as dist
@@ -19,10 +18,10 @@ import torch.cuda.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
-import vcf
-import loader
-import util
-from model import VarTransformer
+import dnaseq2seq.vcf
+import dnaseq2seq.loader
+import dnaseq2seq.util
+from dnaseq2seq.model import VarTransformer
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
 formatter = logging.Formatter(LOG_FORMAT)

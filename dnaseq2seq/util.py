@@ -403,11 +403,3 @@ class WarmupCosineLRScheduler:
             lr = self.min_lr + coeff * (self.max_lr - self.min_lr)
         self.last_lr = lr
         return lr
-
-
-
-if __name__=="__main__":
-    w = WarmupCosineLRScheduler(0.001, 0.01, 1000, 2000)
-    for i in range(2500):
-            w.set_iters(i)
-            print(f"{i} : {w.get_lr() :.6f} last lr: {w.get_last_lr() :.6f}")

@@ -57,7 +57,7 @@ def parse_version():
 
 
 setup(
-    name="dnaseq2seq",
+    name="jenever",
     version=parse_version(),
     packages=packages,
     package_dir={"dnaseq2seq": "dnaseq2seq"},
@@ -66,16 +66,19 @@ setup(
         "": ["*.yaml", "*.tsv", "*.txt"],
     },  # TODO add test documents with schema samples
     include_package_data=True,
-    url="",
+    url="https://github.com/ARUP-NGS/jenever",
     license="",
     install_requires=requires,
+    entry_points="""
+        [console_scripts]
+        jnv=dnaseq2seq.main:main""",  # {alias}={module}:{function}  #
     scripts=[
         "dnaseq2seq/main.py",
     ],
     cmdclass={"install": DNAseq2seqInstallCommand},
     tests_require=["pytest"],
-    author="",
-    author_email="",
+    author="Brendan O'Fallon",
+    author_email="brendan.ofallon@aruplab.com",
     description="Variant caller using Transformers",
 )
 

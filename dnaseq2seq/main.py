@@ -8,8 +8,6 @@ from collections import defaultdict
 from pathlib import Path
 from string import ascii_letters, digits
 import lz4.frame
-import tempfile
-from datetime import datetime
 import re
 import torch
 import sklearn
@@ -18,18 +16,19 @@ from concurrent.futures.process import ProcessPoolExecutor
 import argparse
 import yaml
 
-import util
-import loader
+# Hack so to make dev easier,
+sys.path.append(str(Path(__file__).parent))
+import util as util
+import loader as loader
 from train import train
 from call import call
-
 
 logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
                     level=os.environ.get('JV_LOGLEVEL', logging.INFO),
                     handlers=[
                         logging.StreamHandler(),  # Output logs to stdout
-                    ]) # handlers=[RichHandler()])
+                    ])
 
 logger = logging.getLogger(__name__)
 
