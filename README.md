@@ -1,11 +1,12 @@
 
-## NGS Variant detection with Transformers
+## NGS Variant detection with Generative Haplotype Prediction
 
 This repo contains code for detecting variants from next-generation sequencing data (BAM / CRAM files)
- via sequence-to-sequence modeling. The input sequence is a list of pileup columns, and the output is two
-predicted haplotypes, from which variants can be easily parsed. With this approach, there's not a need for
-any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or decisions about variant 
-quality cutoffs, kmer-sizes, etc. The approach allows for true end-to-end deep learning
+ via generative haplotype prediction (see our [preprint](https://www.biorxiv.org/content/10.1101/2024.02.27.582327v1)).
+Our model uses a deep transformer network to 'generate' haplotypes in the same manner as a modern Large Language Model (LLM), but instead of
+word tokens, our model generates DNA sequence k-mers for both haplotypes. With this approach, there's not a need for
+any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or decisions about mapping quality
+quality cutoffs, read counts, allele frequencies, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
 #### A note on earlier versions
