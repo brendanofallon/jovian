@@ -483,8 +483,10 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
 
     futures = []
     result_paths = []
+    logger.debug(f"Creating process pool with {len(regions)} regions")
     with concurrent.futures.ProcessPoolExecutor(max_workers=n_threads) as pool:
         for chrom, window_idx, start, end in regions:
+            logger.debug(f"Submitting region {chrom}: {start}-{end}")
             fut = pool.submit(encode_func, region=(chrom, window_idx, int(start), int(end)))
             futures.append(fut)
 
@@ -507,6 +509,7 @@ def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, wi
     Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
     """
     chrom, window_idx, start, end = region
+    logger.debug(f"Entering func for region {chrom}:{start}-{end} idx: {window_idx}")
     aln = pysam.AlignmentFile(bamfile, reference_filename=refpath)
     reference = pysam.FastaFile(refpath)
     all_encoded = []
@@ -604,9 +607,9 @@ def merge_multialts(v0, v1):
         return longer
 
 
-
 def het(rec):
     return rec.samples[0]['GT'] == (0,1) or rec.samples[0]['GT'] == (1,0)
+
 
 def merge_overlaps(overlaps, min_qual):
     """
@@ -682,14 +685,6 @@ def vars_hap_to_records(
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
-
-    # vcf_vars = vcf.vcf_vars(
-    #     vars_hap0=vars_hap0,
-    #     vars_hap1=vars_hap1,
-    #     chrom=chrom,
-    #     aln=aln,
-    #     reference=reference
-    # )
 
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100)
 
