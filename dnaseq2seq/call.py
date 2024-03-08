@@ -199,7 +199,7 @@ def cluster_positions(poslist, maxdist=100):
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
-    Generate a list of ranges containing a list of posistions from the given window
+    Generate a list of ranges containing a list of positions from the given window
     returns: list of (chrom, index, start, end) tuples
     """
     chrom, window_idx, window_start, window_end = window
@@ -633,6 +633,7 @@ def merge_overlaps(overlaps, min_qual):
     result.extend(sorted(overlaps, key=lambda x: x.pos))
     return result
 
+
 def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100):
     allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[0])
 
@@ -675,10 +676,11 @@ def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_saf
     return all_vcf_vars
 
 def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
+    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file=None
 ):
     """
     Convert variant haplotype objects to variant records
+    Performs merging of overlapping variants and collection o phase groups
     """
 
     # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
@@ -696,7 +698,6 @@ def vars_hap_to_records(
 
     if not vcf_records:
         return []
-
 
     for rec in vcf_records:
         if rec.ref == rec.alts[0]:
@@ -836,7 +837,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
             )
         window_start += window_step
         if len(batch) >= batch_size:
-            encodedreads = torch.stack(batch, dim=0).cpu().float()
+            encodedreads = torch.stack(batch, dim=0).cpu()
             returned_count += 1
             yield encodedreads, batch_offsets
             batch = []
@@ -844,7 +845,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
 
     # Last few
     if batch:
-        encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
+        encodedreads = torch.stack(batch, dim=0).cpu() # Keep encoded tensors on cpu for now
         returned_count += 1
         yield encodedreads, batch_offsets
 
