@@ -58,9 +58,8 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     }
     return data
 
-def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath):
-    max_read_depth = 150
-    window_size = 150
+
+def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, max_read_depth=150, window_size=150):
     min_reads = 5
     batch_size = 4
     window_step = 25
@@ -74,7 +73,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             break
         else:
 
-            logger.info(f"Encoding region {region}")
+            logger.debug(f"Encoding region {region}")
             data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
             encoded_region_count += 1
             if data is not None:
@@ -91,7 +90,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
     No more than max_batch_size are processed in a single batch
     """
     # Accumulate regions until we have at least this many
-    min_samples_callbatch = 96
+    min_samples_callbatch = 256
 
     batch_encoded = []
     batch_start_pos = []
@@ -162,11 +161,11 @@ def accumulate_regions_and_call(modelpath: str,
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
-    max_datas = 4
+    max_datas = 24
     while True:
         data = inputq.get()
         if data is not None:
-            logger.info(f"Model proc found a non-empty item with region {data['region']}")
+
             datas.append(data)
 
         if data is None or len(datas) > max_datas:
