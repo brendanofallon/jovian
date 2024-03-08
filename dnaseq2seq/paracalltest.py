@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
-                    level=os.environ.get('JV_LOGLEVEL', logging.DEBUG),
+                    level=os.environ.get('JV_LOGLEVEL', logging.INFO),
                     handlers=[
                         logging.StreamHandler(),  # Output logs to stdout
                     ])
@@ -58,6 +58,7 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     }
     return data
 
+
 def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath):
     max_read_depth = 150
     window_size = 150
@@ -74,7 +75,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             break
         else:
 
-            logger.info(f"Encoding region {region}")
+            logger.debug(f"Encoding region {region}")
             data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
             encoded_region_count += 1
             if data is not None:
@@ -91,7 +92,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
     No more than max_batch_size are processed in a single batch
     """
     # Accumulate regions until we have at least this many
-    min_samples_callbatch = 96
+    min_samples_callbatch = 256
 
     batch_encoded = []
     batch_start_pos = []
@@ -115,6 +116,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
             else:
                 allencoded = batch_encoded[0]
             allencoded = allencoded.float()
+            logger.info(f"Calling for block of size {allencoded.shape[0]}")
             hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
                                         max_batch_size)
             var_records.extend(
@@ -132,6 +134,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
         else:
             allencoded = batch_encoded[0]
         allencoded = allencoded.float()
+        logger.info(f"Calling for block of size {allencoded.shape[0]}")
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
         var_records.extend(
             vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
@@ -162,11 +165,11 @@ def accumulate_regions_and_call(modelpath: str,
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
-    max_datas = 4
+    max_datas = 24
     while True:
         data = inputq.get()
         if data is not None:
-            logger.info(f"Model proc found a non-empty item with region {data['region']}")
+            logger.debug(f"Model proc found a non-empty item with region {data['region']}")
             datas.append(data)
 
         if data is None or len(datas) > max_datas:
@@ -203,10 +206,9 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
         for r in sus_regions:
             sus_region_count += 1
             sus_region_bp += r[-1] - r[-2]
-            logger.info(f"Putting region {r} into reqion q")
             regionq.put(r)
 
-        if idx % 1 == 0:
+        if idx % 100 == 0:
             logger.info(f"Read {region_count} raw regions with suspect regions: {sus_region_count} tot bp: {sus_region_bp} ")
 
     logger.info("Done generating sus regions")
@@ -220,21 +222,22 @@ def main():
     modelpath = "models/100M_s28_cont_mapsus_lolr2_epoch2.model"
     classifierpath = "models/s28ce40_bamfix.model"
 
-    bampath = "/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram"
-    refpath = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
+    #bampath = "/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram"
+    bampath = "/data1/brendan/bams/99702111878_NA12878_S89.cram"
+    #refpath = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
+    refpath = "/data1/brendan/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
 
-    max_batch_size = 2
+    max_batch_size = 128
 
     inputbed = "test.bed"
 
 
-
     regions_queue = mp.Queue(maxsize=1024) # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue = mp.Queue(maxsize=8) # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue = mp.Queue(maxsize=16) # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     #vcfrecs_queue = mp.Queue() # Holds VCF records generated in accumulate_regions_and_call, consumed by main process
 
 
-    n_region_workers = 4
+    n_region_workers = 16
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, inputbed, bampath, refpath, n_region_workers))
@@ -253,19 +256,16 @@ def main():
     model_proc.start()
 
 
-    # Since each process stops processing after it gets a stop token we should only need to submit
-    # n_procs of these to shut down all Processes
-    # for i in range(n_region_workers):
-    #     regions_queue.put("stop")
 
-    print(f"Joining and terminating all processes")
     region_finder.join()
+    logger.info("Done loading regions")
 
     for p in region_workers:
         p.join()
+    logger.info("Done generating input tensors")
 
     model_proc.join()
-    print("And we're done")
+    logger.info("Done calling variants")
 
 if __name__=="__main__":
     main()
