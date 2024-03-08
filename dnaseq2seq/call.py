@@ -1,5 +1,4 @@
 
-import concurrent.futures
 import os
 import time
 
@@ -144,7 +143,6 @@ def load_model(model_path):
 
     model.load_state_dict(statedict)
 
-    #model.half()
     model.eval()
     model.to(DEVICE)
     
@@ -236,6 +234,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param vcf_out:
     :param clf_model_path:
     """
+    mp.set_start_method('spawn')
     start_time = time.perf_counter()
     tmpdir_root = Path(kwargs.get("temp_dir"))
     threads = kwargs.get('threads', 1)
@@ -279,7 +278,7 @@ def call_vars_in_parallel(
     bampath, bed, refpath, model_path, classifier_path, threads, max_batch_size, vcf_out, vcf_header_extras,
 ):
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue = mp.Queue(maxsize=8)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue = mp.Queue(maxsize=threads * 100)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
@@ -293,7 +292,7 @@ def call_vars_in_parallel(
         p.start()
 
     model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras))
+                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads))
     model_proc.start()
 
     region_finder.join()
@@ -301,9 +300,11 @@ def call_vars_in_parallel(
 
     for p in region_workers:
         p.join()
-    logger.info("Done generating input tensors")
+    logger.info("Region workers are done")
+
     model_proc.join()
     logger.info("All done")
+
 
 
 def find_regions(regionq, inputbed, bampath, refpath, n_signals):
@@ -331,7 +332,6 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
         for r in sus_regions:
             sus_region_count += 1
             sus_region_bp += r[-1] - r[-2]
-            logger.info(f"Putting region {r} into reqion q")
             regionq.put(r)
 
         if idx % 1 == 0:
@@ -394,12 +394,15 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
         else:
             logger.debug(f"Encoding region {region}")
             data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
+            data['encoded_pileup'].share_memory_()
             encoded_region_count += 1
             if data is not None:
                 output_queue.put(data)
             else:
                 logger.warning(f"Whoa, got back None from encode_region")
 
+    logger.debug("Region worker will wait a bit to shut down....")
+    time.sleep(10)
     logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
@@ -470,7 +473,8 @@ def accumulate_regions_and_call(modelpath: str,
                                 classifier_path,
                                 max_batch_size: int,
                                 vcf_out_path: str,
-                                header_extras: str):
+                                header_extras: str,
+                                n_region_workers: int):
 
     model = load_model(modelpath)
     model.eval()
@@ -487,11 +491,20 @@ def accumulate_regions_and_call(modelpath: str,
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
-    max_datas = 24
+    
+    # Not sure what the optimum is here - we accumulate tensors until we have at least this many, then process them in batches
+    # If this number is too large, we will wait for too long before submitting the next batch to the GPU
+    # If its to small, then we end up sending lots of tiny little batches to the GPU, which also isn't efficient
+    max_datas = n_region_workers * 2
+    n_finished_workers = 0
     while True:
-        data = inputq.get()
+        try:
+            data = inputq.get()
+        except FileNotFoundError as ex:
+            logger.warning("Got a FNF error polling tensor input queue, ignoring it...")
+            continue
+
         if data is not None:
-            logger.info(f"Model proc found a non-empty item with region {data['region']}")
             datas.append(data)
 
         if data is None or len(datas) > max_datas:
@@ -504,17 +517,22 @@ def accumulate_regions_and_call(modelpath: str,
             datas = []
 
         if data is None:
-            logger.info("Found data stop token, no submitting any more region tensors for calling")
+            n_finished_workers += 1
+            logger.debug(f"Found a stop token, have {n_finished_workers} of {n_region_workers} are done")
+
+        if n_finished_workers == n_region_workers:
+            logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
+
     vcf_out.close()
     logger.info("Calling worker is exiting")
-
 
 
 def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
     """
 
     """
+    logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     subbatch_idx = np.zeros(len(dists), dtype=int)
 
