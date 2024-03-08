@@ -59,9 +59,7 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     return data
 
 
-def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath):
-    max_read_depth = 150
-    window_size = 150
+def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, max_read_depth=150, window_size=150):
     min_reads = 5
     batch_size = 4
     window_step = 25
@@ -169,7 +167,6 @@ def accumulate_regions_and_call(modelpath: str,
     while True:
         data = inputq.get()
         if data is not None:
-            logger.debug(f"Model proc found a non-empty item with region {data['region']}")
             datas.append(data)
 
         if data is None or len(datas) > max_datas:

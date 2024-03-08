@@ -31,6 +31,7 @@ DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_availa
 import warnings
 warnings.filterwarnings(action='ignore')
 
+REGION_STOP_TOKEN = "stop"
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
@@ -246,41 +247,24 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         for idev in range(torch.cuda.device_count()):
             logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
 
-    var_freq_file = kwargs.get('freq_file')
-    if var_freq_file:
-        logger.info(f"Loading variant pop frequency file from {var_freq_file}")
-    else:
-        logger.info(f"No variant frequency file specified, this might not work depending on the classifier requirements")
-
-    tmpdir = tmpdir_root / f"jv_tmpdata_{randchars()}"
-    logger.info(f"Saving temp data in {tmpdir}")
-    os.makedirs(tmpdir, exist_ok=False)
-
     logger.info(f"The model will be loaded from path {model_path}")
 
-    vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=kwargs.get('cmdline'))
-    vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
-    vcf_out_fh = open(vcf_out, mode='w')
-    logger.info(f"Writing variants to {Path(vcf_out).absolute()}")
-    vcf_out_fh.write(str(vcf_header))
+    vcf_header_extras = kwargs.get('cmdline')
 
-    call_vars_in_blocks(
-        bamfile=bam,
+
+    call_vars_in_parallel(
+        bampath=bam,
         bed=bed,
-        reference_fasta=reference_fasta,
+        refpath=reference_fasta,
         model_path=model_path,
         classifier_path=classifier_path,
         threads=threads,
-        tmpdir=tmpdir,
         max_batch_size=max_batch_size,
-        var_freq_file=var_freq_file,
-        vcf_out=vcf_out_fh,
-        vcf_template=vcf_template,
+        vcf_out=vcf_out,
+        vcf_header_extras=vcf_header_extras,
     )
 
-    vcf_out_fh.close()
     logger.info(f"All variants saved to {vcf_out}")
-    tmpdir.rmdir()
     end_time = time.perf_counter()
     elapsed_seconds = end_time - start_time
     if elapsed_seconds > 3600:
@@ -291,230 +275,87 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
 
 
-def call_vars_in_blocks(
-    bamfile, bed, reference_fasta, model_path, classifier_path, threads, tmpdir, max_batch_size, var_freq_file, vcf_out, vcf_template,
+def call_vars_in_parallel(
+    bampath, bed, refpath, model_path, classifier_path, threads, max_batch_size, vcf_out, vcf_header_extras,
 ):
+    regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
+    tensors_queue = mp.Queue(maxsize=8)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+
+    # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
+    region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
+    region_finder.start()
+
+    region_workers = [mp.Process(target=generate_tensors,
+                                 args=(regions_queue, tensors_queue, bampath, refpath))
+                      for _ in range(threads)]
+
+    for p in region_workers:
+        p.start()
+
+    model_proc = mp.Process(target=accumulate_regions_and_call,
+                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras))
+    model_proc.start()
+
+    region_finder.join()
+    logger.info("Done finding regions")
+
+    for p in region_workers:
+        p.join()
+    logger.info("Done generating input tensors")
+    model_proc.join()
+    logger.info("All done")
+
+
+def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     """
-    Split the input BED file into chunks and call variants in each chunk sequentially
-    :param chrom: the chromosome name
-    :param bamfile: the alignment file
-    :param bed: the BED file for the given chromosome
-    :param reference_fasta: the reference file
-    :param model_path: the path to model
-    :param classifier_path: the path to classifier
-    :param threads: the number of CPUs to use
-    :param tmpdir: a temporary directory
-
-    :return: a VCF file with called variants for the given chromosome.
+    Read the input BED formatted file and merge / split the regions into big chunks
+    Then finc regions that may contain a variant, and add all of these
+    to the region_queue
     """
-    max_read_depth = 150
-    logger.info(f"Max read depth: {max_read_depth}")
-    logger.info(f"Max batch size: {max_batch_size}")
+    region_count = 0
+    tot_size_bp = 0
+    sus_region_bp = 0
+    sus_region_count = 0
+    for idx, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(inputbed), max_region_size=10000)):
+        region_count += 1
+        tot_size_bp += window_end - window_start
 
-    # Iterate over the input BED file, splitting larger regions into chunks
-    # of at most 'max_region_size'
-    logger.info(f"Creating windows from {bed}")
-    windows = [
-        (chrom, window_idx, window_start, window_end) 
-        for window_idx, (chrom, window_start, window_end) in enumerate(
-            split_large_regions(read_bed_regions(bed), max_region_size=10000)
-        )
-    ]
-    model = load_model(model_path)
-    regions_per_block = max(4, threads)
-    start_block = 0
-    while start_block < len(windows):
-        logger.info(f"Processing block {start_block}-{start_block + regions_per_block} of {len(windows)}  {start_block / len(windows) * 100 :.2f}% done")
-        process_block(windows[start_block:start_block + regions_per_block],
-                      bamfile=bamfile,
-                      model=model,
-                      reference_fasta=reference_fasta,
-                      classifier_path=classifier_path,
-                      tmpdir=tmpdir,
-                      threads=threads,
-                      max_read_depth=max_read_depth,
-                      window_size=150,
-                      vcf_out=vcf_out,
-                      vcf_template=vcf_template,
-                      max_batch_size=max_batch_size,
-                      var_freq_file=var_freq_file)
-        start_block += regions_per_block
-
-
-def process_block(raw_regions,
-              bamfile,
-              model,
-              reference_fasta,
-              classifier_path,
-              tmpdir,
-              threads,
-              max_read_depth,
-              window_size,
-              vcf_out,
-              vcf_template,
-              max_batch_size,
-              var_freq_file=None):
-    """
-    For each region in the given list of regions, generate input tensors and then call variants on that data
-    Input tensor generation is done in parallel and the result tensors are saved to disk in 'tmpdir'
-    Calling is done on the main thread and loads the tensors one at a time from disk
-
-    """
-    sus_start = datetime.datetime.now()
-
-    # First, find 'suspect' regions. This part is pretty fast
-    cluster_positions_func = partial(
-        cluster_positions_for_window,
-        bamfile=bamfile,
-        reference_fasta=reference_fasta,
-        maxdist=100,
-    )
-    sus_regions = mp.Pool(threads).map(cluster_positions_func, raw_regions)
-    sus_regions = util.merge_overlapping_regions( list(itertools.chain(*sus_regions)))
-    sus_tot_bp = sum(r[3] - r[2] for r in sus_regions)
-    enc_start = datetime.datetime.now()
-
-    # Next, encode each suspect region and save it to disk. This is slow
-    logger.info(f"Found {len(sus_regions)} suspicious regions with {sus_tot_bp}bp in {(enc_start - sus_start).total_seconds() :.3f} seconds")
-    encoded_paths = encode_regions(bamfile, reference_fasta, sus_regions, tmpdir, threads, max_read_depth, window_size, batch_size=64, window_step=25)
-    enc_elapsed = datetime.datetime.now() - enc_start
-    logger.info(f"Encoded {len(encoded_paths)} regions in {enc_elapsed.total_seconds() :.2f}")
-
-    # Now call variants over the encoded regions
-    aln = pysam.AlignmentFile(bamfile)
-    reference = pysam.FastaFile(reference_fasta)
-    if var_freq_file:
-        var_freq_file = pysam.VariantFile(var_freq_file)
-    classifier_model = buildclf.load_model(classifier_path) if classifier_path else None
-
-    var_records = call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf_template, var_freq_file, max_batch_size)
-
-    # Write the variant records to the VCF file
-    for var in sorted(var_records, key=lambda x: x.pos):
-        vcf_out.write(str(var))
-    vcf_out.flush()
-
-
-@torch.no_grad()
-def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf_template, var_freq_file, max_batch_size):
-    """
-    Call variants from the encoded regions and return them as a list of variant records suitable for writing to a VCF file
-    No more than max_batch_size are processed in a single batch
-    """
-    # Accumulate regions until we have at least this many
-    min_samples_callbatch = 96
-
-    batch_encoded = []
-    batch_start_pos = []
-    batch_regions = []
-    batch_count = 0
-    call_start = datetime.datetime.now()
-    window_count = 0
-    var_records = []  # Stores all variant records so we can sort before writing
-    window_idx = -1
-    path = None  # Avoid rare case with logging when there is no path set
-
-    for path in encoded_paths:
-        # Load the data, parsing location + encoded data from file
-        data = torch.load(path, map_location='cpu')
-        chrom, start, end = data['region']
-        window_idx = int(data['window_idx'])
-        batch_encoded.append(data['encoded_pileup'])
-        batch_start_pos.extend(data['start_positions'])
-        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
-        os.unlink(path)
-        window_count += len(batch_start_pos)
-        if len(batch_start_pos) > min_samples_callbatch:
-            logger.debug(f"Calling variants on window {window_idx} path: {path}")
-            batch_count += 1
-            if len(batch_encoded) > 1:
-                allencoded = torch.concat(batch_encoded, dim=0)
-            else:
-                allencoded = batch_encoded[0]
-            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
-                                        max_batch_size)
-            var_records.extend(
-                vars_hap_to_records(
-                    chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-                )
-            )
-            batch_encoded = []
-            batch_start_pos = []
-            batch_regions = []
-
-    # Write last few
-    logger.debug(f"Calling variants on window {window_idx} path: {path}")
-    if len(batch_start_pos):
-        batch_count += 1
-        if len(batch_encoded) > 1:
-            allencoded = torch.concat(batch_encoded, dim=0)
-        else:
-            allencoded = batch_encoded[0]
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
-        var_records.extend(
-            vars_hap_to_records(
-                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-            )
+        sus_regions = cluster_positions_for_window(
+            (chrom, idx, window_start, window_end),
+            bamfile=bampath,
+            reference_fasta=refpath,
+            maxdist=100,
         )
 
-    call_elapsed = datetime.datetime.now() - call_start
-    logger.info(
-        f"Called variants in {window_count} windows over {batch_count} batches from {len(encoded_paths)} paths in {call_elapsed.total_seconds() :.2f} seconds"
-    )
-    return var_records
+        sus_regions = util.merge_overlapping_regions(sus_regions)
+        for r in sus_regions:
+            sus_region_count += 1
+            sus_region_bp += r[-1] - r[-2]
+            logger.info(f"Putting region {r} into reqion q")
+            regionq.put(r)
+
+        if idx % 1 == 0:
+            logger.info(f"Read {region_count} raw regions with suspect regions: {sus_region_count} tot bp: {sus_region_bp} ")
+
+    logger.info("Done generating sus regions")
+    for i in range(n_signals):
+        regionq.put(REGION_STOP_TOKEN)
 
 
-def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_read_depth, window_size, batch_size, window_step):
-    """
-    Encode and save all the regions in the regions list in parallel, and return the list of files to the saved data
-    """
-    torch.set_num_threads(1) # Required to avoid deadlocks when creating tensors
-    encode_func = partial(
-        encode_and_save_region,
-        bamfile=bamfile,
-        refpath=reference_fasta,
-        destdir=tmpdir,
-        max_read_depth=max_read_depth,
-        window_size=window_size,
-        min_reads=5,
-        batch_size=batch_size,
-        window_step=window_step,
-    )
-
-    futures = []
-    result_paths = []
-    logger.debug(f"Creating process pool with {len(regions)} regions")
-    with concurrent.futures.ProcessPoolExecutor(max_workers=n_threads) as pool:
-        for chrom, window_idx, start, end in regions:
-            logger.debug(f"Submitting region {chrom}: {start}-{end}")
-            fut = pool.submit(encode_func, region=(chrom, window_idx, int(start), int(end)))
-            futures.append(fut)
-
-        for fut in futures:
-            result = fut.result(timeout=300) # Timeout in 5 mins - typical time for encoding is 1-3 seconds
-            if result is not None:
-                result_paths.append(result)
-            else:
-                logger.error("Weird, found an empty result object, ignoring it... but this could mean missed variant calls")
-
-    torch.set_num_threads(n_threads)
-    return result_paths
-
-
-def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, window_size, min_reads, batch_size, window_step):
+def encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size, window_step):
     """
     Encode the reads in the given region and save the data along with the region and start offsets to a file
     and return the absolute path of the file
 
     Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
     """
-    chrom, window_idx, start, end = region
-    logger.debug(f"Entering func for region {chrom}:{start}-{end} idx: {window_idx}")
-    aln = pysam.AlignmentFile(bamfile, reference_filename=refpath)
+    chrom, idx, start, end = region
+    logger.debug(f"Entering func for region {chrom}:{start}-{end}")
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
     reference = pysam.FastaFile(refpath)
     all_encoded = []
     all_starts = []
-    logger.debug(f"Encoding region {chrom}:{start}-{end} idx: {window_idx}")
+    logger.debug(f"Encoding region {chrom}:{start}-{end}")
     for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
                                                      window_size=window_size, min_reads=min_reads, batch_size=batch_size, window_step=window_step):
         all_encoded.append(encoded_region)
@@ -532,12 +373,142 @@ def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, wi
         'encoded_pileup': encoded,
         'region': (chrom, start, end),
         'start_positions': all_starts,
-        'window_idx': window_idx,
     }
-    dest = Path(destdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
-    logger.debug(f"Saving data as {dest.absolute()}")
-    torch.save(data, dest)
-    return dest.absolute()
+    return data
+
+def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, max_read_depth=150, window_size=150):
+    """
+    Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
+    """
+    min_reads = 5 # Abort if there are fewer than this many reads
+    batch_size = 16 # Tensors hold this many regions
+    window_step = 25
+
+    encoded_region_count = 0
+    while True:
+        region = region_queue.get()
+        if region == REGION_STOP_TOKEN:
+            logger.debug("Region worker found end token")
+            output_queue.put(None)
+            break
+        else:
+            logger.debug(f"Encoding region {region}")
+            data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
+            encoded_region_count += 1
+            if data is not None:
+                output_queue.put(data)
+            else:
+                logger.warning(f"Whoa, got back None from encode_region")
+
+    logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
+
+
+@torch.no_grad()
+def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_template, max_batch_size):
+    """
+    Call variants from the encoded regions and return them as a list of variant records suitable for writing to a VCF file
+    No more than max_batch_size are processed in a single batch
+    """
+    # Accumulate regions until we have at least this many
+    min_samples_callbatch = 256
+
+    batch_encoded = []
+    batch_start_pos = []
+    batch_regions = []
+    batch_count = 0
+    call_start = datetime.datetime.now()
+    window_count = 0
+    var_records = []  # Stores all variant records so we can sort before writing
+
+    for data in datas:
+        # Load the data, parsing location + encoded data from file
+        chrom, start, end = data['region']
+        batch_encoded.append(data['encoded_pileup'])
+        batch_start_pos.extend(data['start_positions'])
+        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+        window_count += len(batch_start_pos)
+        if len(batch_start_pos) > min_samples_callbatch:
+            batch_count += 1
+            if len(batch_encoded) > 1:
+                allencoded = torch.concat(batch_encoded, dim=0)
+            else:
+                allencoded = batch_encoded[0]
+            allencoded = allencoded.float()
+            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
+                                        max_batch_size)
+            var_records.extend(
+                vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
+            )
+            batch_encoded = []
+            batch_start_pos = []
+            batch_regions = []
+
+    # Write last few
+    if len(batch_start_pos):
+        batch_count += 1
+        if len(batch_encoded) > 1:
+            allencoded = torch.concat(batch_encoded, dim=0)
+        else:
+            allencoded = batch_encoded[0]
+        allencoded = allencoded.float()
+        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+        var_records.extend(
+            vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
+        )
+
+    call_elapsed = datetime.datetime.now() - call_start
+    logger.info(
+        f"Called variants in {window_count} windows over {batch_count} batches from {len(datas)} paths in {call_elapsed.total_seconds() :.2f} seconds"
+    )
+    return var_records
+
+
+def accumulate_regions_and_call(modelpath: str,
+                                inputq: mp.Queue,
+                                refpath: str,
+                                bampath: str,
+                                classifier_path,
+                                max_batch_size: int,
+                                vcf_out_path: str,
+                                header_extras: str):
+
+    model = load_model(modelpath)
+    model.eval()
+    classifier = buildclf.load_model(classifier_path)
+
+    vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=header_extras)
+    vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
+    logger.info(f"Writing variants to {Path(vcf_out_path).absolute()}")
+
+    vcf_out = open(vcf_out_path, "w")
+    vcf_out.write(str(vcf_header))
+
+    reference = pysam.FastaFile(refpath)
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+
+    datas = []
+    max_datas = 24
+    while True:
+        data = inputq.get()
+        if data is not None:
+            logger.info(f"Model proc found a non-empty item with region {data['region']}")
+            datas.append(data)
+
+        if data is None or len(datas) > max_datas:
+            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            # Write the variant records to the VCF file
+            for var in sorted(records, key=lambda x: x.pos):
+                vcf_out.write(str(var))
+            vcf_out.flush()
+
+            datas = []
+
+        if data is None:
+            logger.info("Found data stop token, no submitting any more region tensors for calling")
+            break
+    vcf_out.close()
+    logger.info("Calling worker is exiting")
+
 
 
 def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
