@@ -234,6 +234,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param vcf_out:
     :param clf_model_path:
     """
+    torch.set_num_threads(1) # Per-process ?
     mp.set_start_method('spawn')
     start_time = time.perf_counter()
     tmpdir_root = Path(kwargs.get("temp_dir"))
@@ -280,6 +281,7 @@ def call_vars_in_parallel(
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
     tensors_queue = mp.Queue(maxsize=threads * 100)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
 
+
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
@@ -313,6 +315,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     Then finc regions that may contain a variant, and add all of these
     to the region_queue
     """
+    torch.set_num_threads(2) # Must be here for it to work for this process
     region_count = 0
     tot_size_bp = 0
     sus_region_bp = 0
@@ -350,6 +353,7 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
     """
     chrom, idx, start, end = region
+    torch.set_num_threads(2) # Must be here for it to work for this process
     logger.debug(f"Entering func for region {chrom}:{start}-{end}")
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
     reference = pysam.FastaFile(refpath)
@@ -381,7 +385,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
     """
     min_reads = 5 # Abort if there are fewer than this many reads
-    batch_size = 16 # Tensors hold this many regions
+    batch_size = 32 # Tensors hold this many regions
     window_step = 25
 
     encoded_region_count = 0
@@ -476,6 +480,7 @@ def accumulate_regions_and_call(modelpath: str,
                                 header_extras: str,
                                 n_region_workers: int):
 
+    torch.set_num_threads(4)
     model = load_model(modelpath)
     model.eval()
     classifier = buildclf.load_model(classifier_path)
