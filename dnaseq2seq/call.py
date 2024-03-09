@@ -483,8 +483,10 @@ def encode_regions(bamfile, reference_fasta, regions, tmpdir, n_threads, max_rea
 
     futures = []
     result_paths = []
+    logger.info(f"Creating process pool with {n_threads} for {len(regions)} regions")
     with concurrent.futures.ProcessPoolExecutor(max_workers=n_threads) as pool:
         for chrom, window_idx, start, end in regions:
+            logger.debug(f"Submitting region {chrom}: {start}-{end} (idx {window_idx}) to process pool")
             fut = pool.submit(encode_func, region=(chrom, window_idx, int(start), int(end)))
             futures.append(fut)
 
@@ -507,6 +509,7 @@ def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, wi
     Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
     """
     chrom, window_idx, start, end = region
+    logger.debug(f"Entering func for {chrom}:{start} - {end}")
     aln = pysam.AlignmentFile(bamfile, reference_filename=refpath)
     reference = pysam.FastaFile(refpath)
     all_encoded = []

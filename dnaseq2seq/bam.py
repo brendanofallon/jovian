@@ -105,9 +105,9 @@ class ReadWindow:
             allreads = sorted(allreads, key=lambda x: x[0])
 
         window_size = end - start
-        t = torch.zeros(window_size, max_reads, 10, device='cpu')
+        t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            encoded = self.cache[read].char()
+            encoded = self.cache[read].char() # Char is the same as int8
             enc_start_offset = max(0,  start - readstart)
             enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
             t_start_offset = max(0, readstart - start)
