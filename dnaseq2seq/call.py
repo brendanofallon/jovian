@@ -13,6 +13,7 @@ from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
+import queue
 import pysam
 import numpy as np
 
@@ -406,7 +407,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
                 logger.warning(f"Whoa, got back None from encode_region")
 
     logger.debug("Region worker will wait a bit to shut down....")
-    time.sleep(10)
+    time.sleep(2)
     logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
@@ -502,9 +503,16 @@ def accumulate_regions_and_call(modelpath: str,
     # If its to small, then we end up sending lots of tiny little batches to the GPU, which also isn't efficient
     max_datas = n_region_workers * 2
     n_finished_workers = 0
+    max_consecutive_timeouts = 10
+    timeouts = 0
     while True:
         try:
-            data = inputq.get()
+            data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
+            timeouts = 0
+        except queue.Empty:
+            timouts += 1
+            data = None
+            logger.info(f"Got a timeout in model queue, have {timeouts} total")
         except FileNotFoundError as ex:
             logger.warning("Got a FNF error polling tensor input queue, ignoring it...")
             continue
@@ -512,7 +520,7 @@ def accumulate_regions_and_call(modelpath: str,
         if data is not None:
             datas.append(data)
 
-        if data is None or len(datas) > max_datas:
+        if (data is None and len(datas)) or len(datas) > max_datas:
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             # Write the variant records to the VCF file
             for var in sorted(records, key=lambda x: x.pos):
@@ -520,6 +528,10 @@ def accumulate_regions_and_call(modelpath: str,
             vcf_out.flush()
 
             datas = []
+    
+        if timeouts == max_consecutive_timeouts:
+            logger.info(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
+            break
 
         if data is None:
             n_finished_workers += 1
