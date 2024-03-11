@@ -356,7 +356,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
         if idx % 1 == 0:
             logger.info(f"Read {region_count} raw regions with suspect regions: {sus_region_count} tot bp: {sus_region_bp} ")
 
-    logger.info("Done generating sus regions")
+    logger.info("Done finding regions")
     for i in range(n_signals):
         regionq.put(REGION_STOP_TOKEN)
 
@@ -539,18 +539,17 @@ def accumulate_regions_and_call(modelpath: str,
     max_vbuff_size = 100 # Max number of variants to buffer
     while True:
         try:
-            logger.debug("Calling func is polling for new item...")
             data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
             timeouts = 0
         except queue.Empty:
             timeouts += 1
             data = None
-            logger.info(f"Got a timeout in model queue, have {timeouts} total")
+            logger.debug(f"Got a timeout in model queue, have {timeouts} total")
         except FileNotFoundError:
             # This might be some weird bug... occasionally we get FileNotFound errors polling the queue, but they
             # don't seem to have any effect?
-            logger.debug(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
-            continue
+            logger.warning(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
+            data = None
 
         if data != CALLING_STOP_TOKEN and data is not None:
             regions_found += 1
