@@ -406,6 +406,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
 
     batch_encoded = []
     batch_start_pos = []
+    batch_reftoks = []
     batch_regions = []
     batch_count = 0
     call_start = datetime.datetime.now()
@@ -421,6 +422,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
         window_idx = int(data['window_idx'])
         batch_encoded.append(data['encoded_pileup'])
         batch_start_pos.extend(data['start_positions'])
+        batch_reftoks.extend(data['ref_tokens'])
         batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
         os.unlink(path)
         window_count += len(batch_start_pos)
@@ -431,7 +433,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
                 allencoded = torch.concat(batch_encoded, dim=0)
             else:
                 allencoded = batch_encoded[0]
-            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
+            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_reftoks, batch_regions, model, reference,
                                         max_batch_size)
             var_records.extend(
                 vars_hap_to_records(
@@ -441,6 +443,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
             batch_encoded = []
             batch_start_pos = []
             batch_regions = []
+            batch_reftoks = []
 
     # Write last few
     logger.debug(f"Calling variants on window {window_idx} path: {path}")
@@ -450,7 +453,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
             allencoded = torch.concat(batch_encoded, dim=0)
         else:
             allencoded = batch_encoded[0]
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_reftoks, batch_regions, model, reference, max_batch_size)
         var_records.extend(
             vars_hap_to_records(
                 chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
@@ -511,11 +514,13 @@ def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, wi
     reference = pysam.FastaFile(refpath)
     all_encoded = []
     all_starts = []
+    all_reftoks = []
     logger.debug(f"Encoding region {chrom}:{start}-{end} idx: {window_idx}")
-    for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
+    for encoded_region, start_positions, ref_toks in _encode_region(aln, reference, chrom, start, end, max_read_depth,
                                                      window_size=window_size, min_reads=min_reads, batch_size=batch_size, window_step=window_step):
         all_encoded.append(encoded_region)
         all_starts.extend(start_positions)
+        all_reftoks.extend(ref_toks)
     logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
     if len(all_encoded) > 1:
         encoded = torch.concat(all_encoded, dim=0)
@@ -529,6 +534,7 @@ def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, wi
         'encoded_pileup': encoded,
         'region': (chrom, start, end),
         'start_positions': all_starts,
+        'ref_tokens': all_reftoks,
         'window_idx': window_idx,
     }
     dest = Path(destdir) / f"enc_chr{chrom}_{window_idx}_{randchars(6)}.pt"
@@ -537,7 +543,7 @@ def encode_and_save_region(bamfile, refpath, destdir, region, max_read_depth, wi
     return dest.absolute()
 
 
-def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
+def call_and_merge(batch, batch_offsets, batch_reftoks, regions, model, reference, max_batch_size):
     """
 
     """
@@ -553,10 +559,11 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        subbatch_reftoks = [r for i, r in zip(subbatch_idx, batch_reftoks) if i == sbi]
         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
-        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
+        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, subbatch_reftoks, model, reference, n_output_toks, max_batch_size=max_batch_size)
 
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
@@ -604,9 +611,9 @@ def merge_multialts(v0, v1):
         return longer
 
 
-
 def het(rec):
     return rec.samples[0]['GT'] == (0,1) or rec.samples[0]['GT'] == (1,0)
+
 
 def merge_overlaps(overlaps, min_qual):
     """
@@ -629,6 +636,7 @@ def merge_overlaps(overlaps, min_qual):
     overlaps[1].samples['sample']['GT'] = (1, None)
     result.extend(sorted(overlaps, key=lambda x: x.pos))
     return result
+
 
 def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100):
     allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[0])
@@ -683,14 +691,6 @@ def vars_hap_to_records(
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
 
-    # vcf_vars = vcf.vcf_vars(
-    #     vars_hap0=vars_hap0,
-    #     vars_hap1=vars_hap1,
-    #     chrom=chrom,
-    #     aln=aln,
-    #     reference=reference
-    # )
-
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100)
 
     # covert variants to pysam vcf records
@@ -701,7 +701,6 @@ def vars_hap_to_records(
 
     if not vcf_records:
         return []
-
 
     for rec in vcf_records:
         if rec.ref == rec.alts[0]:
@@ -731,7 +730,7 @@ def vars_hap_to_records(
     return merged
 
 
-def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=True):
+def _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size, enable_amp=True):
     """
     Predict the sequence for the encoded reads, but dont submit more than 'max_batch_size' samples
     at once
@@ -743,7 +742,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
-            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model, reftoks[start:end],
                                             n_output_toks=n_output_toks, device=DEVICE)
         if seq_preds is None:
             seq_preds = preds
@@ -757,7 +756,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     return seq_preds, probs
 
 
-def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks, max_batch_size):
+def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_output_toks, max_batch_size):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
@@ -768,7 +767,7 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
     #encoded_reads = encoded_reads.bfloat16()
 
-    seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
+    seq_preds, probs = _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size)
 
     calledvars = []
     for offset, (chrom, start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
@@ -788,11 +787,11 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     return calledvars
 
 
-def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
+def add_ref_bases(encbases, refseq, max_read_depth):
     """
     Add the reference sequence as read 0
     """
-    refseq = reference.fetch(chrom, start, end)
+
     ref_encoded = bam.string_to_tensor(refseq)
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
@@ -822,15 +821,19 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     window_start = int(start - 0.7 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
+    batch_toks = []
     readwindow = bam.ReadWindow(aln, chrom, start - 150, end + window_size)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     returned_count = 0
     while window_start <= (end - 0.2 * window_size):
+        refseq = reference.fetch(chrom, window_start, window_start + window_size)
         try:
             #logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
             enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
-            encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
-                                             max_read_depth=max_read_depth)
+            encoded_with_ref = add_ref_bases(enc_reads, refseq, max_read_depth=max_read_depth)
+            tok_bases = ((start - window_start) // 4) * 4
+            window_toks = util.bases_to_kvec(refseq[0:max(0, tok_bases)], util.s2i)
+            batch_toks.append(window_toks)
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
             #logger.debug(f"Added item to batch from window_start {window_start}")
@@ -843,15 +846,16 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
         if len(batch) >= batch_size:
             encodedreads = torch.stack(batch, dim=0).cpu().float()
             returned_count += 1
-            yield encodedreads, batch_offsets
+            yield encodedreads, batch_offsets, batch_toks
             batch = []
             batch_offsets = []
+            batch_toks = []
 
     # Last few
     if batch:
         encodedreads = torch.stack(batch, dim=0).cpu().float() # Keep encoded tensors on cpu for now
         returned_count += 1
-        yield encodedreads, batch_offsets
+        yield encodedreads, batch_offsets, batch_toks
 
     if not returned_count:
         logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")

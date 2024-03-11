@@ -345,7 +345,7 @@ def expand_to_bases(probs, expansion_factor=TGT_KMER_SIZE):
     return list(chain(*([k]*expansion_factor for k in probs)))
 
 
-def predict_sequence(src, model, n_output_toks, device):
+def predict_sequence(src, model, reftoks, n_output_toks, device):
     """
     Generate a predicted sequence with next-word prediction be repeatedly calling the model
     """
