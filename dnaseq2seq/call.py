@@ -418,6 +418,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
     No more than max_batch_size are processed in a single batch
     """
     # Accumulate regions until we have at least this many
+    # Bigger number here use more memory but allow for more efficient processing downstream
     min_samples_callbatch = 256
 
     batch_encoded = []
@@ -426,7 +427,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
     batch_count = 0
     call_start = datetime.datetime.now()
     window_count = 0
-    var_records = []  # Stores all variant records so we can sort before writing
+    var_records = []  # Stores all variant records
 
     for data in datas:
         # Load the data, parsing location + encoded data from file
@@ -480,6 +481,11 @@ def accumulate_regions_and_call(modelpath: str,
                                 vcf_out_path: str,
                                 header_extras: str,
                                 n_region_workers: int):
+    """
+    Continually poll the input queue to find new encoded regions, and call variants over those regions
+    This function is typically called inside a subprocess and runs until it finds a None entry in the queue
+    Variants are written to the output VCF file here
+    """
 
     torch.set_num_threads(4)
     model = load_model(modelpath)
@@ -505,6 +511,8 @@ def accumulate_regions_and_call(modelpath: str,
     n_finished_workers = 0
     max_consecutive_timeouts = 10
     timeouts = 0
+    vbuff = []
+    max_vbuff_size = 1000 # Max number of variants to buffer
     while True:
         try:
             data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
@@ -513,8 +521,10 @@ def accumulate_regions_and_call(modelpath: str,
             timeouts += 1
             data = None
             logger.info(f"Got a timeout in model queue, have {timeouts} total")
-        except FileNotFoundError as ex:
-            logger.warning("Got a FNF error polling tensor input queue, ignoring it...")
+        except FileNotFoundError:
+            # This might be some weird bug... occasionally we get FileNotFound errors polling the queue, but they
+            # don't seem to have any effect?
+            logger.debug("Got a FNF error polling tensor input queue, ignoring it...")
             continue
 
         if data is not None:
@@ -522,13 +532,24 @@ def accumulate_regions_and_call(modelpath: str,
 
         if (data is None and len(datas)) or len(datas) > max_datas:
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
-            # Write the variant records to the VCF file
-            for var in sorted(records, key=lambda x: x.pos):
-                vcf_out.write(str(var))
-            vcf_out.flush()
+
+            # Store the variants in a buffer so we can sort big groups of them (no strong guarantees about sort order for
+            # variants coming out of queue)
+            vbuff.extend(records)
+            if len(vbuff) > max_vbuff_size:
+                # Write the variant records to the VCF file
+                for var in sorted(vbuff, key=lambda x: x.pos):
+                    vcf_out.write(str(var))
+                vcf_out.flush()
+                vbuff = []
 
             datas = []
-    
+
+        # vbuff might not be empty
+        for var in sorted(vbuff, key=lambda x: x.pos):
+            vcf_out.write(str(var))
+        vcf_out.flush()
+
         if timeouts == max_consecutive_timeouts:
             logger.info(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
             break
@@ -547,10 +568,28 @@ def accumulate_regions_and_call(modelpath: str,
 
 def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
     """
+    Generate haplotypes for the batch, identify variants in each, and then 'merge genotypes' across the overlapping
+    windows with the ad-hoc algo in the merge_genotypes function. This also filters out any variants not found
+    in the 'regions' tuple
 
+    Note that this function contains additional, unused logic to divide batch up into smaller regions and send those
+    through the model individually. This might be useful if different regions have very different numbers of predicted
+    tokens, for instance. However, since the time spent in forward passes of the model are almost constant in batch size
+    this doesn't offer much speedup in a naive implementation.
+
+    :param batch: Tensor of encoded regions
+    :param batch_offsets: List of start positions, must have same length as batch.shape[0]
+    :param regions: List of genomic regions, must have length equal to batch_offsets
+    :param model: Model for haplotype prediction
+    :param reference: pysam.FastaFile with reference genome
+    :param max_batch_size: Maximum number of regions to call in one go
+    :returns Tuple(List, List) of variants found on each haplotype
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+
+    # Identify distinct sub-batches for calling. In the future we might populate this with different indexes
+    # Setting everything to 0 effectively turns it off for now
     subbatch_idx = np.zeros(len(dists), dtype=int)
 
     byregion = defaultdict(list)
