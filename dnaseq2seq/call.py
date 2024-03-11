@@ -512,7 +512,7 @@ def accumulate_regions_and_call(modelpath: str,
     max_consecutive_timeouts = 10
     timeouts = 0
     vbuff = []
-    max_vbuff_size = 1000 # Max number of variants to buffer
+    max_vbuff_size = 100 # Max number of variants to buffer
     while True:
         try:
             data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
@@ -545,11 +545,6 @@ def accumulate_regions_and_call(modelpath: str,
 
             datas = []
 
-        # vbuff might not be empty
-        for var in sorted(vbuff, key=lambda x: x.pos):
-            vcf_out.write(str(var))
-        vcf_out.flush()
-
         if timeouts == max_consecutive_timeouts:
             logger.info(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
             break
@@ -561,8 +556,13 @@ def accumulate_regions_and_call(modelpath: str,
         if n_finished_workers == n_region_workers:
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
-
+    
+    # vbuff might not be empty
+    for var in sorted(vbuff, key=lambda x: x.pos):
+        vcf_out.write(str(var))
+    vcf_out.flush()
     vcf_out.close()
+    
     logger.info("Calling worker is exiting")
 
 
