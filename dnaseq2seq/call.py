@@ -399,9 +399,9 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
         else:
             logger.debug(f"Encoding region {region}")
             data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
-            data['encoded_pileup'].share_memory_()
-            encoded_region_count += 1
             if data is not None:
+                data['encoded_pileup'].share_memory_()
+                encoded_region_count += 1
                 output_queue.put(data)
             else:
                 logger.warning(f"Whoa, got back None from encode_region")
@@ -510,7 +510,7 @@ def accumulate_regions_and_call(modelpath: str,
             data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
             timeouts = 0
         except queue.Empty:
-            timouts += 1
+            timeouts += 1
             data = None
             logger.info(f"Got a timeout in model queue, have {timeouts} total")
         except FileNotFoundError as ex:
