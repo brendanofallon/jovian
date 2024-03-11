@@ -279,8 +279,21 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 def call_vars_in_parallel(
     bampath, bed, refpath, model_path, classifier_path, threads, max_batch_size, vcf_out, vcf_header_extras,
 ):
+    """
+    Call variants in asynchronous fashion. There are three types of Processes that communicate via two mp.Queues
+    The first process finds 'suspect' regions in the BAM file and adds them to the 'regions_queue', this is fast and there's just one Process that handles this
+    The second type of process reads the regions_queue and generates region Tensors (data from BAM/CRAM files encoded into Tensors), and adds them to the 'tensors_queue'. There are 'threads' number of these Processes
+    The final process reads from the tensors_queue and runs the forward pass of the model to generate haplotypes, then aligns those haplotypes to call variants. This is slow, but not
+    sure we can parallelize it since there's (probably) only one GPU anyway? 
+
+    A total footgun here is that pytorch releases tensors generates by a Process when that process dies, even if they've been added to a shared queue (!!). So the 'generate_tensors'
+    Processes must stay alive until the variant calling Process has completed. The calling process therefore waits until it receives 'threads' number of completion signals in the tensors_queue,
+    then finishes processing everything, then adds signals (None objects) into the 'keepalive' queue (upon which the generate_tensors processes are waiting) to tell them they can finally die
+
+    """
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
     tensors_queue = mp.Queue(maxsize=threads * 100)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
@@ -288,14 +301,14 @@ def call_vars_in_parallel(
     region_finder.start()
 
     region_workers = [mp.Process(target=generate_tensors,
-                                 args=(regions_queue, tensors_queue, bampath, refpath))
+                                 args=(regions_queue, tensors_queue, bampath, refpath, region_keepalive_queue))
                       for _ in range(threads)]
 
     for p in region_workers:
         p.start()
 
     model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads))
+                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
     model_proc.start()
 
     region_finder.join()
@@ -381,7 +394,7 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     }
     return data
 
-def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, max_read_depth=150, window_size=150):
+def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, keepalive_queue: mp.Queue, max_read_depth=150, window_size=150):
     """
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
     """
@@ -402,12 +415,18 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             if data is not None:
                 data['encoded_pileup'].share_memory_()
                 encoded_region_count += 1
+                logger.debug(f"Putting new data item into queue, region is {data['region']}")
                 output_queue.put(data)
             else:
                 logger.warning(f"Whoa, got back None from encode_region")
 
-    logger.debug("Region worker will wait a bit to shut down....")
-    time.sleep(2)
+    
+    # It is CRITICAL to keep these threads alive, even after they're done doing everything. Pytorch will clean up the 
+    # the tensors *that have already been queued* when these threads die, even if the tensors haven't been processed yet
+    # This will lead to errors when the calling process polls the queue, leading to missed variant calls. Instead, we wait for
+    # the calling process to put a signal into the 'keepalive' queue to signal that it is all done and we can finally exit
+    logger.debug("Polling keepalive queue...")
+    result = keepalive_queue.get()
     logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
@@ -480,7 +499,8 @@ def accumulate_regions_and_call(modelpath: str,
                                 max_batch_size: int,
                                 vcf_out_path: str,
                                 header_extras: str,
-                                n_region_workers: int):
+                                n_region_workers: int,
+                                keepalive_queue: mp.Queue):
     """
     Continually poll the input queue to find new encoded regions, and call variants over those regions
     This function is typically called inside a subprocess and runs until it finds a None entry in the queue
@@ -515,6 +535,7 @@ def accumulate_regions_and_call(modelpath: str,
     max_vbuff_size = 100 # Max number of variants to buffer
     while True:
         try:
+            logger.debug("Calling func is polling for new item...")
             data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
             timeouts = 0
         except queue.Empty:
@@ -524,13 +545,15 @@ def accumulate_regions_and_call(modelpath: str,
         except FileNotFoundError:
             # This might be some weird bug... occasionally we get FileNotFound errors polling the queue, but they
             # don't seem to have any effect?
-            logger.debug("Got a FNF error polling tensor input queue, ignoring it...")
+            logger.debug(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
             continue
 
         if data is not None:
+            logger.debug("Found a non-None data object, appending it")
             datas.append(data)
 
         if (data is None and len(datas)) or len(datas) > max_datas:
+            logger.debug(f"Calling variants from {len(datas)} objects")
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
 
             # Store the variants in a buffer so we can sort big groups of them (no strong guarantees about sort order for
@@ -538,6 +561,7 @@ def accumulate_regions_and_call(modelpath: str,
             vbuff.extend(records)
             if len(vbuff) > max_vbuff_size:
                 # Write the variant records to the VCF file
+                logger.debug(f"Writing batch of {len(vbuff)} vars to output")
                 for var in sorted(vbuff, key=lambda x: x.pos):
                     vcf_out.write(str(var))
                 vcf_out.flush()
@@ -556,7 +580,12 @@ def accumulate_regions_and_call(modelpath: str,
         if n_finished_workers == n_region_workers:
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
-    
+
+    for i in range(n_region_workers):
+        logger.debug("Sending kill msg to region {i}")
+        keepalive_queue.put(None)
+
+    logger.debug(f"Writing final {len(vbuff)} variants...")
     # vbuff might not be empty
     for var in sorted(vbuff, key=lambda x: x.pos):
         vcf_out.write(str(var))
@@ -605,7 +634,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
         batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
-
+        logger.debug(f"Called {len(batchvars)} in {subbatch_regions}")
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
 
