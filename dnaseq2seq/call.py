@@ -32,6 +32,7 @@ import warnings
 warnings.filterwarnings(action='ignore')
 
 REGION_STOP_TOKEN = "stop"
+REGION_ERROR_TOKEN = "error"
 CALLING_STOP_TOKEN = "floob"
 
 
@@ -369,7 +370,6 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
     """
     chrom, idx, start, end = region
-    torch.set_num_threads(2) # Must be here for it to work for this process
     logger.debug(f"Entering func for region {chrom}:{start}-{end}")
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
     reference = pysam.FastaFile(refpath)
@@ -403,6 +403,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     min_reads = 5 # Abort if there are fewer than this many reads
     batch_size = 32 # Tensors hold this many regions
     window_step = 25
+    torch.set_num_threads(2)  # Must be here for it to work for this process
 
     encoded_region_count = 0
     while True:
@@ -413,15 +414,18 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             break
         else:
             logger.debug(f"Encoding region {region}")
-            data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
-            if data is not None:
-                data['encoded_pileup'].share_memory_()
-                encoded_region_count += 1
-                logger.debug(f"Putting new data item into queue, region is {data['region']}")
-                output_queue.put(data)
-            else:
-                logger.warning(f"Whoa, got back None from encode_region")
-
+            try:
+                data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
+                if data is not None:
+                    data['encoded_pileup'].share_memory_()
+                    encoded_region_count += 1
+                    logger.debug(f"Putting new data item into queue, region is {data['region']}")
+                    output_queue.put(data)
+                else:
+                    logger.warning(f"Whoa, got back None from encode_region")
+            except Exception as ex:
+                output_queue.put(REGION_ERROR_TOKEN)
+                raise ex
     
     # It is CRITICAL to keep these processes alive, even after they're done doing everything. Pytorch will clean up the 
     # the tensors *that have already been queued* when these threads die, even if the tensors haven't been processed yet
@@ -539,17 +543,23 @@ def accumulate_regions_and_call(modelpath: str,
     max_vbuff_size = 100 # Max number of variants to buffer
     while True:
         try:
-            data = inputq.get(timeout=1) # Timeout is 10 seconds, if we go this long without getting a new object
+            data = inputq.get(timeout=1) # Timeout is 1 second, we count these and error out if there are too many
             timeouts = 0
         except queue.Empty:
             timeouts += 1
             data = None
             logger.debug(f"Got a timeout in model queue, have {timeouts} total")
-        except FileNotFoundError:
-            # This might be some weird bug... occasionally we get FileNotFound errors polling the queue, but they
-            # don't seem to have any effect?
+        except FileNotFoundError as ex:
+            # This happens when region workers exit prematurely, it's bad
             logger.warning(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
-            data = None
+            raise ex
+        except Exception as ex:
+            logger.error(f"Exception polling calling input queue: {ex}")
+            raise ex
+
+        if data == REGION_ERROR_TOKEN:
+            logger.error(f"Calling worker discovered an error token, we are shutting down")
+            break
 
         if data != CALLING_STOP_TOKEN and data is not None:
             regions_found += 1
@@ -577,7 +587,7 @@ def accumulate_regions_and_call(modelpath: str,
             datas = []
 
         if timeouts == max_consecutive_timeouts:
-            logger.info(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
+            logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
             break
 
         if data == CALLING_STOP_TOKEN:
