@@ -396,6 +396,7 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     }
     return data
 
+
 def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, keepalive_queue: mp.Queue, max_read_depth=150, window_size=150):
     """
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
@@ -543,7 +544,7 @@ def accumulate_regions_and_call(modelpath: str,
     max_vbuff_size = 100 # Max number of variants to buffer
     while True:
         try:
-            data = inputq.get(timeout=1) # Timeout is 1 second, we count these and error out if there are too many
+            data = inputq.get(timeout=10) # Timeout is 1 second, we count these and error out if there are too many
             timeouts = 0
         except queue.Empty:
             timeouts += 1
