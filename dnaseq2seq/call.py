@@ -35,6 +35,16 @@ REGION_STOP_TOKEN = "stop"
 REGION_ERROR_TOKEN = "error"
 CALLING_STOP_TOKEN = "floob"
 
+class CallingStopSignal:
+
+    def __init__(self, regions_submitted):
+        self.regions_submitted = regions_submitted
+
+class CallingErrorSignal:
+
+    def __init__(self, errormsg):
+        self.err = errormsg
+
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
@@ -411,7 +421,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
         region = region_queue.get()
         if region == REGION_STOP_TOKEN:
             logger.debug("Region worker found end token")
-            output_queue.put(CALLING_STOP_TOKEN)
+            output_queue.put(CallingStopSignal(regions_submitted=encoded_region_count))
             break
         else:
             logger.debug(f"Encoding region {region}")
@@ -425,7 +435,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
                 else:
                     logger.warning(f"Whoa, got back None from encode_region")
             except Exception as ex:
-                output_queue.put(REGION_ERROR_TOKEN)
+                output_queue.put(CallingErrorSignal(errormsg=str(ex)))
                 raise ex
     
     # It is CRITICAL to keep these processes alive, even after they're done doing everything. Pytorch will clean up the 
@@ -540,6 +550,7 @@ def accumulate_regions_and_call(modelpath: str,
     timeouts = 0
     regions_found = 0
     regions_processed = 0
+    tot_regions_submitted = 0
     vbuff = []
     max_vbuff_size = 100 # Max number of variants to buffer
     while True:
@@ -558,11 +569,11 @@ def accumulate_regions_and_call(modelpath: str,
             logger.error(f"Exception polling calling input queue: {ex}")
             raise ex
 
-        if data == REGION_ERROR_TOKEN:
-            logger.error(f"Calling worker discovered an error token, we are shutting down")
+        if type(data) == CallingErrorSignal:
+            logger.error(f"Calling worker discovered an error token: {data.err}, we are shutting down")
             break
 
-        if data != CALLING_STOP_TOKEN and data is not None:
+        if type(data) != CallingStopSignal and data is not None:
             regions_found += 1
             logger.debug("Found a non-None data object, appending it")
             datas.append(data)
@@ -570,7 +581,7 @@ def accumulate_regions_and_call(modelpath: str,
         if data is None:
             logger.info(f"Hmm, got None from the calling input queue, this doesn't seem right")
 
-        if (data == CALLING_STOP_TOKEN and len(datas)) or len(datas) > max_datas:
+        if (type(data) == CallingStopSignal and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             regions_processed += len(datas)
@@ -591,15 +602,16 @@ def accumulate_regions_and_call(modelpath: str,
             logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
             break
 
-        if data == CALLING_STOP_TOKEN:
+        if type(data) == CallingStopSignal:
             n_finished_workers += 1
-            logger.debug(f"Found a stop token, {n_finished_workers} of {n_region_workers} are done")
+            tot_regions_submitted += data.regions_submitted
+            logger.debug(f"Found a stop token, {n_finished_workers} of {n_region_workers} are done, tot regions submitted: {tot_regions_submitted}, tot processed: {regions_processed}")
 
         if n_finished_workers == n_region_workers:
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
 
-    logger.info(f"Calling process is cleaning up, found {regions_found} regions and processed {regions_processed} regions")
+    logger.info(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
     for i in range(n_region_workers):
         logger.debug(f"Sending kill msg to region {i}")
         keepalive_queue.put(None)
