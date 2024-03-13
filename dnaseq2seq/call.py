@@ -309,6 +309,8 @@ def call_vars_in_parallel(
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
 
+    tot_regions, tot_bases = util.count_bed(bed)
+
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
