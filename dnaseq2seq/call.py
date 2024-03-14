@@ -447,6 +447,23 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     result = keepalive_queue.get()
     logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
+def generate_var_records(byregion):
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
+    for region, rvars in byregion.items():
+        chrom, start, end = region
+        h0, h1 = merge_genotypes(rvars)
+        for k, v in h0.items():
+            if start <= v[0].pos < end:
+                hap0[k].extend(v)
+        for k, v in h1.items():
+            if start <= v[0].pos < end:
+                hap1[k].extend(v)
+
+
+        var_records.extend(
+            vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
+        )
 
 @torch.no_grad()
 def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_template, max_batch_size):
@@ -480,8 +497,9 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
             else:
                 allencoded = batch_encoded[0]
             allencoded = allencoded.float()
-            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
+            varsbyregion = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
                                         max_batch_size)
+
             var_records.extend(
                 vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
             )
@@ -644,7 +662,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     :param model: Model for haplotype prediction
     :param reference: pysam.FastaFile with reference genome
     :param max_batch_size: Maximum number of regions to call in one go
-    :returns Tuple(List, List) of variants found on each haplotype
+    :returns Dict[(chrom, start, end)] -> List[proto vars] for the variants found in each region
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
@@ -670,19 +688,21 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
 
-    hap0 = defaultdict(list)
-    hap1 = defaultdict(list)
-    for region, rvars in byregion.items():
-        chrom, start, end = region
-        h0, h1 = merge_genotypes(rvars)
-        for k, v in h0.items():
-            if start <= v[0].pos < end:
-                hap0[k].extend(v)
-        for k, v in h1.items():
-            if start <= v[0].pos < end:
-                hap1[k].extend(v)
+    return byregion
 
-    return hap0, hap1
+    # hap0 = defaultdict(list)
+    # hap1 = defaultdict(list)
+    # for region, rvars in byregion.items():
+    #     chrom, start, end = region
+    #     h0, h1 = merge_genotypes(rvars)
+    #     for k, v in h0.items():
+    #         if start <= v[0].pos < end:
+    #             hap0[k].extend(v)
+    #     for k, v in h1.items():
+    #         if start <= v[0].pos < end:
+    #             hap1[k].extend(v)
+    #
+    # return hap0, hap1
 
 
 def merge_multialts(v0, v1):
