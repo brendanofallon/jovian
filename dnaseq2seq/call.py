@@ -309,6 +309,8 @@ def call_vars_in_parallel(
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
 
+    tot_regions, tot_bases = util.count_bed(bed)
+
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
@@ -446,6 +448,23 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     result = keepalive_queue.get()
     logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
+def generate_var_records(byregion):
+    hap0 = defaultdict(list)
+    hap1 = defaultdict(list)
+    for region, rvars in byregion.items():
+        chrom, start, end = region
+        h0, h1 = merge_genotypes(rvars)
+        for k, v in h0.items():
+            if start <= v[0].pos < end:
+                hap0[k].extend(v)
+        for k, v in h1.items():
+            if start <= v[0].pos < end:
+                hap1[k].extend(v)
+
+
+        var_records.extend(
+            vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
+        )
 
 @torch.no_grad()
 def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_template, max_batch_size):
@@ -479,10 +498,11 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
             else:
                 allencoded = batch_encoded[0]
             allencoded = allencoded.float()
-            hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
+            hap0, hap1= call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
                                         max_batch_size)
+
             var_records.extend(
-                vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
+                vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template)
             )
             batch_encoded = []
             batch_start_pos = []
@@ -498,7 +518,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
         allencoded = allencoded.float()
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
         var_records.extend(
-            vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
+            vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template)
         )
 
     call_elapsed = datetime.datetime.now() - call_start
@@ -643,7 +663,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     :param model: Model for haplotype prediction
     :param reference: pysam.FastaFile with reference genome
     :param max_batch_size: Maximum number of regions to call in one go
-    :returns Tuple(List, List) of variants found on each haplotype
+    :returns Dict[(chrom, start, end)] -> List[proto vars] for the variants found in each region
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
@@ -739,19 +759,20 @@ def merge_overlaps(overlaps, min_qual):
     return result
 
 
-def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100):
+def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
     allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[0])
 
     all_vcf_vars = []
     group0 = defaultdict(list)
     group1 = defaultdict(list)
     prevpos = -1000
+    prevchrom = None
     for k in allkeys:
-        if k[0] - prevpos > minimum_safe_distance:
+        chrom, pos, ref, alt = k
+        if (chrom != prevchrom) or (pos - prevpos > minimum_safe_distance):
             vcf_vars = vcf.vcf_vars(
                 vars_hap0=group0,
                 vars_hap1=group1,
-                chrom=chrom,
                 aln=aln,
                 reference=reference
             )
@@ -763,29 +784,27 @@ def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_saf
                 group0[k].extend(vars_hap0[k])
             if k in vars_hap1:
                 group1[k].extend(vars_hap1[k])
-            prevpos = k[0]
+            prevpos = pos
         else:
             if k in vars_hap0:
                 group0[k].extend(vars_hap0[k])
             if k in vars_hap1:
                 group1[k].extend(vars_hap1[k])
+        prevchrom = chrom
 
     vcf_vars = vcf.vcf_vars(
         vars_hap0=group0,
         vars_hap1=group1,
-        chrom=chrom,
         aln=aln,
         reference=reference
     )
     all_vcf_vars.extend(vcf_vars)
     return all_vcf_vars
 
-def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file=None
-):
+
+def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template):
     """
     Convert variant haplotype objects to variant records
-    Performs merging of overlapping variants and collection o phase groups
     """
 
     # Merging vars can sometimes cause a poor quality variant to clobber a very high quality one, to avoid this
@@ -793,7 +812,7 @@ def vars_hap_to_records(
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
 
-    vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100)
+    vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
 
     # covert variants to pysam vcf records
     vcf_records = [
@@ -810,7 +829,7 @@ def vars_hap_to_records(
 
         if classifier_model:
             rec.info["RAW_QUAL"] = rec.qual
-            rec.qual = buildclf.predict_one_record(classifier_model, rec, aln, var_freq_file)
+            rec.qual = buildclf.predict_one_record(classifier_model, rec, aln)
 
     merged = []
     overlaps = [vcf_records[0]]
@@ -867,12 +886,11 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
-    #encoded_reads = encoded_reads.bfloat16()
 
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
     calledvars = []
-    for offset, (chrom, start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
+    for offset, (chrom, start, end), b in zip(offsets, regions, range(len(seq_preds))):
         hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
         hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
         hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
@@ -880,8 +898,8 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, chrom, offset, probs=probs0) if start <= v.pos <= end)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, chrom, offset, probs=probs1) if start <= v.pos <= end)
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         #calledvars.append((vars_hap0, vars_hap1))
         calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
