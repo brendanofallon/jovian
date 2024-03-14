@@ -811,11 +811,6 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
 
-    logger.debug(f"Entering vars_hap_to_records, hap0: {vars_hap0}")
-    logger.debug(f"Entering vars_hap_to_records, hap1: {vars_hap1}")
-    logger.debug(f"vars hap0 keys: {vars_hap0.keys()}")
-    logger.debug(f"vars hap1 keys: {vars_hap1.keys()}")
-
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
 
     logger.debug(f"vcf_vars: {vcf_vars}")
@@ -825,8 +820,6 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
         vcf.create_vcf_rec(var, vcf_template)
         for var in sorted(vcf_vars, key=lambda x: x.pos)
     ]
-
-    logger.debug(f"vcf_records: {vcf_records}")
 
     if not vcf_records:
         return []
