@@ -345,7 +345,42 @@ def expand_to_bases(probs, expansion_factor=TGT_KMER_SIZE):
     return list(chain(*([k]*expansion_factor for k in probs)))
 
 
-def predict_sequence(src, model, reftoks, n_output_toks, device):
+def predict_sequence(src, model, pretoks, n_output_toks, padding_mask=None, device='cpu'):
+    """
+    Generate a predicted sequence with next-word prediction be repeatedly calling the model
+    """
+
+    num_classes = FEATURE_DIM
+    if pretoks is not None:
+        predictions = pretoks
+    else:
+        predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
+
+    if padding_mask is not None:
+        assert padding_mask.shape[0] == src.shape[0]  # batch dim
+        assert padding_mask.shape[1] == pretoks.shape[2]  # sequence dim
+        pos_offsets = (padding_mask == float("-inf")).sum(dim=1)
+        probs = torch.ones(src.shape[0], 2, pretoks.shape[2]).float().to(device)
+    else:
+        padding_mask = torch.zeros((src.shape[0], predictions.shape[2]), dtype=torch.float)
+        probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
+        pos_offsets = None
+
+
+    mem = model.encode(src)
+    for i in range(n_output_toks + 1):
+        # tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
+        new_preds = model.decode(mem, predictions, tgt_mask=None, tgt_key_padding_mask=padding_mask,
+                                 tgt_pos_offsets=pos_offsets)[:, :, -1:, :]
+        new_probs, tophit = torch.max(new_preds, dim=-1)
+        p = torch.nn.functional.one_hot(tophit, num_classes=num_classes)
+        predictions = torch.concat((predictions, p), dim=2)
+        probs = torch.concat((probs, new_probs), dim=-1)
+        padding_mask = torch.concat((padding_mask, torch.zeros((src.shape[0], 1))), dim=1)
+
+    return predictions[:, :, 1:, :], probs[:, :, 1:]
+
+def orig_predict_sequence(src, model, reftoks, n_output_toks, device):
     """
     Generate a predicted sequence with next-word prediction be repeatedly calling the model
     """
@@ -368,6 +403,29 @@ def predict_sequence(src, model, reftoks, n_output_toks, device):
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]
 
+
+def select_columns(tensor, start_indices, num_columns):
+    """
+    Selects columns from a tensor based on start indices and the number
+    of columns to select.
+
+      Parameters:
+      - tensor: The original tensor from which to select columns.
+      - start_indices: A 1D tensor of starting column indices for each row.
+      - num_columns: The number of columns to select for each row.
+
+      Returns:
+      - A new tensor containing the selected columns for each row.
+    """
+    # Number of rows in the original tensor
+    num_rows = tensor.size(0)
+    # Create a tensor of row indices
+    row_indices = torch.arange(num_rows).unsqueeze(1).expand(-1, num_columns)
+    # Create a tensor of column indices to select
+    column_indices = (start_indices.unsqueeze(1) + torch.arange(num_columns)).long()
+    # Use advanced indexing to select the columns
+    selected = tensor[row_indices, column_indices]
+    return selected
 
 class WarmupCosineLRScheduler:
 

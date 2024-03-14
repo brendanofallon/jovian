@@ -89,12 +89,13 @@ class PositionalEncoding(nn.Module):
 
         self.register_buffer('pe', pe)
 
-    def forward(self, x):
+    def forward(self, x, offset=0):
         """
         Args:
             x: Tensor, shape [seq_len, batch_size, embedding_dim]
         """
         if self.batch_first:
+            # x[:, offset:, :] = x[:, offset:, :] + self.pe[:, 0:x.size(1)-offset, :]
             x = x + self.pe[:, 0:x.size(1), :]
         else:
             x = x + self.pe[0:x.size(0), :, :]
@@ -160,15 +161,22 @@ class VarTransformer(nn.Module):
         mem = self.encoder(src)
         return mem
 
-    def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
+    def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None, tgt_pos_offsets=None):
         mem_proj = self.converter(mem)
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
+        if tgt_pos_offsets is not None:
+            assert tgt_pos_offsets.shape[0] == mem.shape[0]
+            # Not sure how to vectorize this because it's ragged?
+            for i in range(mem.shape[0]):
+                offset = tgt_pos_offsets[i]
+                tgt0[i:i+1, offset:, :] = self.tgt_pos_encoder(tgt[i:i+1, 0, offset:, :])
+                tgt1[i:i+1, offset:, :] = self.tgt_pos_encoder(tgt[i:i+1, 1, offset:, :])
 
         # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
         # This hack just forces it to be a square again
-        if tgt_mask.shape[0] != tgt_mask.shape[1]:
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
+        # if tgt_mask.shape[0] != tgt_mask.shape[1]:
+        #     tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
             #logger.info(f"Forcing tgt mask shapre to be {tgt_mask.shape}, input enc shape is: {mem.shape}")
         h0 = self.decoder0(tgt0, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h1 = self.decoder1(tgt1, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
@@ -176,8 +184,8 @@ class VarTransformer(nn.Module):
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)
 
-    def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None):
+    def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None, tgt_pos_offset=0):
         mem = self.encode(src)
-        result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask, tgt_pos_offset=tgt_pos_offset)
         return result
 

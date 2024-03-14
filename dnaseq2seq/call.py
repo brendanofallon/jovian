@@ -547,11 +547,17 @@ def call_and_merge(batch, batch_offsets, batch_reftoks, regions, model, referenc
     """
 
     """
-    dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+    # dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+    dists = np.array([r[2] - r[1] for r in regions])
     subbatch_idx = np.zeros(len(dists), dtype=int)
 
     byregion = defaultdict(list)
     max_dist = max(dists)
+
+    # Need logic here to deal with how many tokens we should generate, after taking into account
+    # ref tokens - specifically we want to make sure that we extend across sus regions to the fullest extent
+    # Maybe that just means having 'dists' measure from the start of the sus region to the end?
+
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
@@ -679,6 +685,7 @@ def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_saf
     all_vcf_vars.extend(vcf_vars)
     return all_vcf_vars
 
+
 def vars_hap_to_records(
     chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
 ):
@@ -730,30 +737,84 @@ def vars_hap_to_records(
     return merged
 
 
+def pop_reftoks(reftoks, n_toks, num_classes=260):
+    batchtoks = []
+    masks = []
+    for i, rtok in enumerate(reftoks):
+        if len(rtok) >= n_toks:
+            s = util.START_TOKEN.expand(1, -1)
+            t = torch.concat((s, torch.nn.functional.one_hot(torch.tensor(rtok[0:n_toks]), num_classes=num_classes)))
+            batchtoks.append(t)
+            m = torch.zeros(n_toks + 1)
+            masks.append(m)
+        else:
+            num_starts = n_toks - len(rtok)
+            s = util.START_TOKEN.expand(num_starts + 1, -1)
+            if len(rtok) > 0:
+                t = torch.concat((s, torch.nn.functional.one_hot(torch.tensor(rtok), num_classes=num_classes)))
+            else:
+                t = s
+            batchtoks.append(t)
+            m = torch.concat((torch.ones(num_starts) * float("-inf"), torch.zeros(len(rtok) + 1)), dim=0)
+            masks.append(m)
+
+    t = torch.stack(batchtoks)
+    # Expand to haplotype dim
+    t = t.unsqueeze(1).expand(-1, 2, -1, -1).float()
+
+    masks = torch.stack(masks).float()
+
+    return t, masks
+
+def trim_preds(seq_preds, probs, offsets):
+    assert seq_preds.shape[0] == offsets.shape[0]
+    trimmed_preds = []
+    trimmed_probs = []
+    for i in range(seq_preds.shape[0]):
+        offset = offsets[i].item()
+        h0 = torch.argmax(seq_preds[i, 0, offset:, :], dim=-1)
+        h1 = torch.argmax(seq_preds[i, 1, offset:, :], dim=-1)
+        trimmed_preds.append((h0, h1))
+        trimmed_probs.append(
+            (probs[i, 0, offset:], probs[i, 1, offset:])
+        )
+
+    return trimmed_preds, trimmed_probs
+
+
 def _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size, enable_amp=True):
     """
     Predict the sequence for the encoded reads, but dont submit more than 'max_batch_size' samples
     at once
     """
-    seq_preds = None
-    probs = None
+    seq_preds = []
+    probs = []
     start = 0
-    
+
+    maxrt = min(20, max(len(r) for r in reftoks))
+    pretoks, premask = pop_reftoks(reftoks, maxrt, num_classes=util.FEATURE_DIM)
+    reftok_offset = (premask == float("-inf")).sum(dim=1)
+
+    toks_to_generate = max(5, n_output_toks - maxrt)
+
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
-            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model, reftoks[start:end],
-                                            n_output_toks=n_output_toks, device=DEVICE)
-        if seq_preds is None:
-            seq_preds = preds
-        else:
-            seq_preds = torch.concat((seq_preds, preds), dim=0)
-        if probs is None:
-            probs = prbs.detach().cpu().numpy()
-        else:
-            probs = np.concatenate((probs, prbs.detach().cpu().numpy()), axis=0)
+            preds, prbs = util.predict_sequence(
+                                encoded_reads[start:end, :, :, :].to(DEVICE),
+                                model,
+                                pretoks[start:end, :, :, :],
+                                n_output_toks=toks_to_generate,
+                                padding_mask=premask[start:end, :],
+                                device=DEVICE
+                            )
+
+        seq_preds.append(preds)
+        probs.append(prbs.detach().cpu())
         start += max_batch_size
-    return seq_preds, probs
+
+    trimmed_preds, trimmed_probs = trim_preds(torch.concat(seq_preds), torch.concat(probs), reftok_offset)
+    return trimmed_preds, trimmed_probs
 
 
 def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_output_toks, max_batch_size):
@@ -765,17 +826,15 @@ def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_out
     """
     assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
     assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
-    #encoded_reads = encoded_reads.bfloat16()
 
     seq_preds, probs = _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size)
 
     calledvars = []
-    for offset, (chrom, start, end), b in zip(offsets, regions, range(seq_preds.shape[0])):
-        hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
-        hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
-        hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
-        probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
-        probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
+    for offset, (chrom, start, end), b in zip(offsets, regions, range(len(seq_preds))):
+        hap0 = util.kmer_idx_to_str(seq_preds[b][0], util.i2s)
+        hap1 = util.kmer_idx_to_str(seq_preds[b][1], util.i2s)
+        probs0 = np.exp(util.expand_to_bases(probs[b][0].numpy()))
+        probs1 = np.exp(util.expand_to_bases(probs[b][1].numpy()))
 
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
