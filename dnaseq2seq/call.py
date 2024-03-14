@@ -436,9 +436,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
             hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_reftoks, batch_regions, model, reference,
                                         max_batch_size)
             var_records.extend(
-                vars_hap_to_records(
-                    chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-                )
+                vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file)
             )
             batch_encoded = []
             batch_start_pos = []
@@ -455,9 +453,7 @@ def call_multi_paths(encoded_paths, model, reference, aln, classifier_model, vcf
             allencoded = batch_encoded[0]
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_reftoks, batch_regions, model, reference, max_batch_size)
         var_records.extend(
-            vars_hap_to_records(
-                chrom, window_idx, hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-            )
+            vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template, var_freq_file)
         )
 
     call_elapsed = datetime.datetime.now() - call_start
@@ -570,7 +566,7 @@ def call_and_merge(batch, batch_offsets, batch_reftoks, regions, model, referenc
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
         batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, subbatch_reftoks, model, reference, n_output_toks, max_batch_size=max_batch_size)
-
+        # Batchvars is a list of two tuples of lists of Variant objects [ ([vars0...], [vars1...]), ([vars0..], [vars1..]) ], raw calls from each region not aggregated
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
 
@@ -644,19 +640,20 @@ def merge_overlaps(overlaps, min_qual):
     return result
 
 
-def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100):
+def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
     allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[0])
 
     all_vcf_vars = []
     group0 = defaultdict(list)
     group1 = defaultdict(list)
     prevpos = -1000
+    prevchrom = None
     for k in allkeys:
-        if k[0] - prevpos > minimum_safe_distance:
+        chrom, pos, ref, alt = k
+        if (chrom != prevchrom) or (pos - prevpos > minimum_safe_distance):
             vcf_vars = vcf.vcf_vars(
                 vars_hap0=group0,
                 vars_hap1=group1,
-                chrom=chrom,
                 aln=aln,
                 reference=reference
             )
@@ -668,17 +665,17 @@ def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_saf
                 group0[k].extend(vars_hap0[k])
             if k in vars_hap1:
                 group1[k].extend(vars_hap1[k])
-            prevpos = k[0]
+            prevpos = pos
         else:
             if k in vars_hap0:
                 group0[k].extend(vars_hap0[k])
             if k in vars_hap1:
                 group1[k].extend(vars_hap1[k])
+        prevchrom = chrom
 
     vcf_vars = vcf.vcf_vars(
         vars_hap0=group0,
         vars_hap1=group1,
-        chrom=chrom,
         aln=aln,
         reference=reference
     )
@@ -686,9 +683,7 @@ def collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_saf
     return all_vcf_vars
 
 
-def vars_hap_to_records(
-    chrom, window_idx, vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file
-):
+def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template, var_freq_file):
     """
     Convert variant haplotype objects to variant records
     """
@@ -698,7 +693,7 @@ def vars_hap_to_records(
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
 
-    vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100)
+    vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
 
     # covert variants to pysam vcf records
     vcf_records = [
@@ -837,8 +832,8 @@ def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_out
         probs1 = np.exp(util.expand_to_bases(probs[b][1].numpy()))
 
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, offset, probs=probs0) if start <= v.pos <= end)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, offset, probs=probs1) if start <= v.pos <= end)
+        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, chrom, offset, probs=probs0) if start <= v.pos <= end)
+        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, chrom, offset, probs=probs1) if start <= v.pos <= end)
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         #calledvars.append((vars_hap0, vars_hap1))
         calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
@@ -850,7 +845,6 @@ def add_ref_bases(encbases, refseq, max_read_depth):
     """
     Add the reference sequence as read 0
     """
-
     ref_encoded = bam.string_to_tensor(refseq)
     return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
 
