@@ -272,12 +272,10 @@ def dedup_vcf(input_vcf, dest):
         if clump:
             ofh.write(str(clump[0]))
 
-
 def check_overlap(interval1, interval2):
     start1, end1 = interval1
     start2, end2 = interval2
     return not (end1 < start2 or end2 < start1)
-
 
 def records_overlap(rec1, rec2):
     """ True if the two records share any reference bases """
@@ -285,7 +283,6 @@ def records_overlap(rec1, rec2):
         (rec1.pos, rec1.pos + (len(rec1.ref) - len(rec1.alts[0]))),
         (rec2.pos, rec2.pos + (len(rec2.ref) - len(rec2.alts[0]))),
     )
-
 
 def merge_overlapping_regions(regions):
     """
