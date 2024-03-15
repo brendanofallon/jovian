@@ -636,7 +636,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     in the 'regions' tuple
 
     Note that this function contains additional, unused logic to divide batch up into smaller regions and send those
-    through the model individually. This might be useful if different regions have very different numbers of predicted
+    through the model individually. This might be useful if different regions require very different numbers of predicted
     tokens, for instance. However, since the time spent in forward passes of the model are almost constant in batch size
     this doesn't offer much speedup in a naive implementation.
 
@@ -807,12 +807,6 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
     min_merge_qual = 0.01
 
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
-
-    dups = find_duplicates(vcf_vars)
-    if dups:
-        logger.error(f"Yikes, found duplicate variants!!: {dups}")
-
-    logger.debug(f"vcf_vars: {vcf_vars}")
 
     # covert variants to pysam vcf records
     vcf_records = [
