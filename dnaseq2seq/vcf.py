@@ -78,6 +78,9 @@ class VcfVar:
     def alt(self):
         return self.alts[0]
 
+    def __hash__(self):
+        return hash("{self.chrom}&{self.pos}&{self.ref}&{self.alts}")
+
 
 
 def _cigtups(cigstr):
