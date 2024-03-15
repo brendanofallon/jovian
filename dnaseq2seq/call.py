@@ -447,23 +447,6 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     result = keepalive_queue.get()
     logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
-def generate_var_records(byregion):
-    hap0 = defaultdict(list)
-    hap1 = defaultdict(list)
-    for region, rvars in byregion.items():
-        chrom, start, end = region
-        h0, h1 = merge_genotypes(rvars)
-        for k, v in h0.items():
-            if start <= v[0].pos < end:
-                hap0[k].extend(v)
-        for k, v in h1.items():
-            if start <= v[0].pos < end:
-                hap1[k].extend(v)
-
-
-        var_records.extend(
-            vars_hap_to_records(chrom, -1, hap0, hap1, aln, reference, classifier_model, vcf_template)
-        )
 
 @torch.no_grad()
 def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_template, max_batch_size):
@@ -800,6 +783,17 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
     all_vcf_vars.extend(vcf_vars)
     return all_vcf_vars
 
+def find_duplicates(lst):
+    seen = set()  # To track seen items
+    duplicates = set()  # To store duplicates
+    for item in lst:
+        if item in seen:
+            duplicates.add(item)
+        else:
+            seen.add(item)
+
+    return duplicates
+
 
 def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template):
     """
@@ -812,6 +806,10 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
     min_merge_qual = 0.01
 
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
+
+    dups = find_duplicates(vcf_vars)
+    if dups:
+        logger.error(f"Yikes, found duplicate variants!!: {dups}")
 
     logger.debug(f"vcf_vars: {vcf_vars}")
 
