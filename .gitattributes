@@ -1,0 +1,2 @@
+models/100M_s28_cont_mapsus_lolr2_epoch2.model filter=lfs diff=lfs merge=lfs -text
+models/s28ce40_bamfix.model filter=lfs diff=lfs merge=lfs -text
