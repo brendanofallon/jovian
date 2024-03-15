@@ -370,6 +370,64 @@ def predict_sequence(src, model, n_output_toks, device):
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]
 
+class VariantSortedBuffer:
+    """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
+    def __init__(self, outputfh, buff_size=500):
+        self.outputfh = outputfh
+        self.buff_size = buff_size
+        self.buffer = []
+
+    def _chromval(self, c):
+        c = c.replace("chr", "")
+        try:
+            return int(c)
+        except:
+            if c == 'X':
+                return 50
+            elif c == 'Y':
+                return 60
+            else:
+                return 100 + ord(c[0])
+
+    def _sortkey(self, v):
+        return int(self._chromval(v.chrom) * 1e9) + v.pos
+
+    def _sort(self):
+        self.buffer = sorted(self.buffer, key=self._sortkey)
+
+    def _dumphalf(self):
+        self._sort()
+        for v in self.buffer[0:len(self.buffer)//2]:
+            self.outputfh.write(str(v))
+        self.buffer = self.buffer[len(self.buffer)//2:]
+        try:
+            self.outputfh.flush()
+        except:
+            pass
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def flush(self):
+        for v in self.buffer:
+            self.outputfh.write(str(v))
+        self.buffer = []
+        try:
+            self.outputfh.flush()
+        except:
+            pass
+
+    def put(self, v):
+        self.buffer.append(v)
+        if len(self.buffer) > self.buff_size:
+            self._dumphalf()
+
+    def put_all(self, items):
+        for v in items:
+            self.put(v)
+
+
+
 
 class WarmupCosineLRScheduler:
 
