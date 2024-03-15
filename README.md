@@ -58,6 +58,9 @@ In general performance is somewhere near 15MB (megabases) per hour, depending on
 generation procedure, the number of threads and batch size, and the GPU speed. 
 
 
+### Warning
+The current Jenever model has been trained on Illumina WGS germline short-read data, and is not likely to work on hybrid-capture (e.g. exome), long read, somatic, or other types of genomic data. 
+
 ### Training a new model
 
 
