@@ -248,10 +248,14 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param vcf_out:
     :param clf_model_path:
     """
+    seed = hash("floobish")
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     torch.set_num_threads(1) # Per-process ?
     mp.set_start_method('spawn')
     start_time = time.perf_counter()
-    tmpdir_root = Path(kwargs.get("temp_dir"))
     threads = kwargs.get('threads', 1)
     max_batch_size = kwargs.get('max_batch_size', 64)
     logger.info(f"Using {threads} threads for encoding")
