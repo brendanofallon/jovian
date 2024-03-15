@@ -248,7 +248,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param vcf_out:
     :param clf_model_path:
     """
-    seed = hash("floobish")
+    seed = 1283769
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -557,8 +557,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_found = 0
     regions_processed = 0
     tot_regions_submitted = 0
-    vbuff = []
-    max_vbuff_size = 100 # Max number of variants to buffer
+    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=200)
     while True:
         try:
             data = inputq.get(timeout=1) # Timeout is 1 second, we count these and error out if there are too many
@@ -593,15 +592,7 @@ def accumulate_regions_and_call(modelpath: str,
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no strong guarantees about sort order for
             # variants coming out of queue)
-            vbuff.extend(records)
-            if len(vbuff) > max_vbuff_size:
-                # Write the variant records to the VCF file
-                logger.debug(f"Writing batch of {len(vbuff)} vars to output")
-                for var in sorted(vbuff, key=lambda x: x.pos):
-                    vcf_out.write(str(var))
-                vcf_out.flush()
-                vbuff = []
-
+            vbuff.put_all(records)
             datas = []
 
         if timeouts == max_consecutive_timeouts:
@@ -617,18 +608,18 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
 
+    vbuff.flush()
+    vcf_out.close()
+
     logger.info(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
     for i in range(n_region_workers):
         logger.debug(f"Sending kill msg to region {i}")
         keepalive_queue.put(None)
 
     logger.debug(f"Writing final {len(vbuff)} variants...")
-    # vbuff might not be empty
-    for var in sorted(vbuff, key=lambda x: x.pos):
-        vcf_out.write(str(var))
-    vcf_out.flush()
+    vbuff.flush()
     vcf_out.close()
-    
+
     logger.info("Calling worker is exiting")
 
 
