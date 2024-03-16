@@ -641,7 +641,7 @@ def merge_overlaps(overlaps, min_qual):
 
 
 def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
-    allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[0])
+    allkeys = sorted(set(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys())), key=lambda x: x[1])
 
     all_vcf_vars = []
     group0 = defaultdict(list)
@@ -791,7 +791,7 @@ def _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size, ena
     reftok_offset = (premask == float("-inf")).sum(dim=1)
 
     toks_to_generate = max(5, n_output_toks - maxrt)
-
+    logger.debug(f"Requested {n_output_toks} total output toks, found max {maxrt} reftokens, will generate {toks_to_generate} tokens")
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
