@@ -500,7 +500,7 @@ def predict_one_record(loaded_model, var_rec, aln, var_freq_file, **kwargs):
     :return: classifier quality
     """
     feats = var_feats(var_rec, aln, var_freq_file)
-    logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
+    # logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):
         prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
         return prediction[0, 1]
