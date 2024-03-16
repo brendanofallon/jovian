@@ -558,7 +558,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_found = 0
     regions_processed = 0
     tot_regions_submitted = 0
-    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=200)
+    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=1000)
     while True:
         try:
             data = inputq.get(timeout=10) # Timeout is 1 second, we count these and error out if there are too many
