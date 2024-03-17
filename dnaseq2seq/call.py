@@ -236,6 +236,11 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     :param clf_model_path:
     """
     start_time = time.perf_counter()
+    seed = 52342318
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     tmpdir_root = Path(kwargs.get("temp_dir"))
     threads = kwargs.get('threads', 1)
     max_batch_size = kwargs.get('max_batch_size', 64)
@@ -545,14 +550,11 @@ def call_and_merge(batch, batch_offsets, batch_reftoks, regions, model, referenc
     """
     # dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     dists = np.array([r[2] - r[1] for r in regions])
-    subbatch_idx = np.zeros(len(dists), dtype=int)
+    median_dist = np.median(dists)
+    # subbatch_idx = np.zeros(len(dists), dtype=int)
+    subbatch_idx = (dists <= median_dist).astype(int)
 
     byregion = defaultdict(list)
-    max_dist = max(dists)
-
-    # Need logic here to deal with how many tokens we should generate, after taking into account
-    # ref tokens - specifically we want to make sure that we extend across sus regions to the fullest extent
-    # Maybe that just means having 'dists' measure from the start of the sus region to the end?
 
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
@@ -564,7 +566,7 @@ def call_and_merge(batch, batch_offsets, batch_reftoks, regions, model, referenc
         subbatch_reftoks = [r for i, r in zip(subbatch_idx, batch_reftoks) if i == sbi]
 
         # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
-        n_output_toks = [min(150 // util.TGT_KMER_SIZE, d // util.TGT_KMER_SIZE + 1) for d in subbatch_dists]
+        n_output_toks = [min(150 // util.TGT_KMER_SIZE, d // util.TGT_KMER_SIZE + 2) for d in subbatch_dists]
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
         batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, subbatch_reftoks, model, reference, n_output_toks, max_batch_size=max_batch_size)
@@ -686,12 +688,21 @@ def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_out
     for offset, (chrom, start, end), b in zip(offsets, regions, range(len(seq_preds))):
         hap0 = util.kmer_idx_to_str(seq_preds[b][0], util.i2s)
         hap1 = util.kmer_idx_to_str(seq_preds[b][1], util.i2s)
+
+        # o = ' ' * (offset - start + 120)
+        # print(f"{chrom}:{start}-{end}\tH0:{o}{hap0}")
+        # print(f"{chrom}:{start}-{end}\tH1:{o}{hap1}")
+
         probs0 = np.exp(util.expand_to_bases(probs[b][0].numpy()))
         probs1 = np.exp(util.expand_to_bases(probs[b][1].numpy()))
 
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, chrom, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, chrom, offset, probs=probs1) if start <= v.pos <= end)
+
+        print("vars0:" + ', '.join(f"{v.chrom}:{v.pos} {v.ref}-{v.alt}" for v in vars_hap0))
+        print("vars1:" + ', '.join(f"{v.chrom}:{v.pos} {v.ref}-{v.alt}" for v in vars_hap1))
+
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         #calledvars.append((vars_hap0, vars_hap1))
         calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
