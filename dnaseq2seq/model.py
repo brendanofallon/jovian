@@ -163,10 +163,12 @@ class VarTransformer(nn.Module):
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None, tgt_pos_offsets=None):
         mem_proj = self.converter(mem)
+        tgt = tgt.to(self.device)
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
         if tgt_pos_offsets is not None:
             assert tgt_pos_offsets.shape[0] == mem.shape[0]
+            tgt_pos_offsets = tgt_pos_offsets.to(self.device)
             # Not sure how to vectorize this because it's ragged?
             for i in range(mem.shape[0]):
                 offset = tgt_pos_offsets[i]

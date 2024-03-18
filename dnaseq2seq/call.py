@@ -647,10 +647,11 @@ def _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size, ena
         batch_tokcounts = n_output_toks[start:end]
         maxrt = min(20, max(len(r) for r in batch_reftoks))
         pretoks, premask = pop_reftoks(batch_reftoks, maxrt, num_classes=util.FEATURE_DIM)
+        premask = premask.to(DEVICE)
         reftok_offset = (premask == float("-inf")).sum(dim=1)
         toks_to_generate = max(5, max(batch_tokcounts))
 
-        logger.debug(
+        logger.info(
             f"Requested {n_output_toks} total output toks, found max {maxrt} reftokens, will generate {toks_to_generate} tokens"
         )
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):

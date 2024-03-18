@@ -352,17 +352,17 @@ def predict_sequence(src, model, pretoks, n_output_toks, padding_mask=None, devi
 
     num_classes = FEATURE_DIM
     if pretoks is not None:
-        predictions = pretoks
+        predictions = pretoks.to(device)
     else:
         predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
 
     if padding_mask is not None:
         assert padding_mask.shape[0] == src.shape[0]  # batch dim
         assert padding_mask.shape[1] == pretoks.shape[2]  # sequence dim
-        pos_offsets = (padding_mask == float("-inf")).sum(dim=1)
-        probs = torch.ones(src.shape[0], 2, pretoks.shape[2]).float().to(device)
+        pos_offsets = (padding_mask == float("-inf")).sum(dim=1).to(device)
+        probs = torch.zeros(src.shape[0], 2, pretoks.shape[2]).float().to(device)
     else:
-        padding_mask = torch.zeros((src.shape[0], predictions.shape[2]), dtype=torch.float)
+        padding_mask = torch.zeros((src.shape[0], predictions.shape[2]), dtype=torch.float).to(device)
         probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
         pos_offsets = None
 
@@ -376,7 +376,7 @@ def predict_sequence(src, model, pretoks, n_output_toks, padding_mask=None, devi
         p = torch.nn.functional.one_hot(tophit, num_classes=num_classes)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
-        padding_mask = torch.concat((padding_mask, torch.zeros((src.shape[0], 1))), dim=1)
+        padding_mask = torch.concat((padding_mask, torch.zeros((src.shape[0], 1)).to(device) ), dim=1)
 
     return predictions[:, :, 1:, :], probs[:, :, 1:]
 
