@@ -692,9 +692,9 @@ def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_out
         hap0 = util.kmer_idx_to_str(seq_preds[b][0], util.i2s)
         hap1 = util.kmer_idx_to_str(seq_preds[b][1], util.i2s)
 
-        o = ' ' * (offset - start + 120)
-        print(f"{chrom}:{start}-{end}\td: {offset - start} r: {len(rt)*4}\tH0:{o}{hap0}")
-        print(f"{chrom}:{start}-{end}\td: {offset - start} r: {len(rt)*4}\tH1:{o}{hap1}")
+        # o = ' ' * (offset - start + 120)
+        # print(f"{chrom}:{start}-{end}\td: {offset - start} r: {len(rt)*4}\tH0:{o}{hap0}")
+        # print(f"{chrom}:{start}-{end}\td: {offset - start} r: {len(rt)*4}\tH1:{o}{hap1}")
 
         probs0 = np.exp(util.expand_to_bases(probs[b][0].numpy()))
         probs1 = np.exp(util.expand_to_bases(probs[b][1].numpy()))
