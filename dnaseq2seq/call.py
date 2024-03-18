@@ -259,7 +259,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
     tmpdir = tmpdir_root / f"jv_tmpdata_{randchars()}"
     logger.info(f"Saving temp data in {tmpdir}")
-    os.makedirs(tmpdir, exist_ok=False)
+    os.makedirs(tmpdir, exist_ok=True)
 
     logger.info(f"The model will be loaded from path {model_path}")
 
@@ -548,25 +548,28 @@ def call_and_merge(batch, batch_offsets, batch_reftoks, regions, model, referenc
     """
 
     """
-    # dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
-    dists = np.array([r[2] - r[1] for r in regions])
+    # Offset is genomic pos of beginning of window, and r[2] here is the end of the calling region
+    # so dist is the total number of basepairs we need to generate
+    dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+
     median_dist = np.median(dists)
-    # subbatch_idx = np.zeros(len(dists), dtype=int)
-    subbatch_idx = (dists <= median_dist).astype(int)
+    subbatch_idx = np.zeros(len(dists), dtype=int)
+    # subbatch_idx = (dists <= median_dist).astype(int)
 
     byregion = defaultdict(list)
 
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
+        if not len(which): # Sometimes the median is also one of the boundaries of the range, meaning there may be no items in this sub-batch
+            continue
         subbatch = batch[torch.tensor(which), :, :, :]
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
         subbatch_reftoks = [r for i, r in zip(subbatch_idx, batch_reftoks) if i == sbi]
 
-        # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
-        n_output_toks = [min(150 // util.TGT_KMER_SIZE, d // util.TGT_KMER_SIZE + 2) for d in subbatch_dists]
+        n_output_toks = [min(150 // util.TGT_KMER_SIZE, (d - len(brt) * util.TGT_KMER_SIZE ) // util.TGT_KMER_SIZE + 1) for brt, d in zip(subbatch_reftoks, subbatch_dists)]
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
         batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, subbatch_reftoks, model, reference, n_output_toks, max_batch_size=max_batch_size)
@@ -647,7 +650,7 @@ def _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size, ena
         end = start + max_batch_size
         batch_reftoks = reftoks[start:end]
         batch_tokcounts = n_output_toks[start:end]
-        maxrt = min(20, max(len(r) for r in batch_reftoks))
+        maxrt = max(len(r) for r in batch_reftoks)
         pretoks, premask = pop_reftoks(batch_reftoks, maxrt, num_classes=util.FEATURE_DIM)
         reftok_offset = (premask == float("-inf")).sum(dim=1)
         toks_to_generate = max(5, max(batch_tokcounts))
@@ -685,13 +688,13 @@ def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_out
     seq_preds, probs = _call_safe(encoded_reads, model, reftoks, n_output_toks, max_batch_size)
 
     calledvars = []
-    for offset, (chrom, start, end), b in zip(offsets, regions, range(len(seq_preds))):
+    for offset, (chrom, start, end), b, rt in zip(offsets, regions, range(len(seq_preds)), reftoks):
         hap0 = util.kmer_idx_to_str(seq_preds[b][0], util.i2s)
         hap1 = util.kmer_idx_to_str(seq_preds[b][1], util.i2s)
 
-        # o = ' ' * (offset - start + 120)
-        # print(f"{chrom}:{start}-{end}\tH0:{o}{hap0}")
-        # print(f"{chrom}:{start}-{end}\tH1:{o}{hap1}")
+        o = ' ' * (offset - start + 120)
+        print(f"{chrom}:{start}-{end}\td: {offset - start} r: {len(rt)*4}\tH0:{o}{hap0}")
+        print(f"{chrom}:{start}-{end}\td: {offset - start} r: {len(rt)*4}\tH1:{o}{hap1}")
 
         probs0 = np.exp(util.expand_to_bases(probs[b][0].numpy()))
         probs1 = np.exp(util.expand_to_bases(probs[b][1].numpy()))
@@ -700,8 +703,8 @@ def call_batch(encoded_reads, offsets, regions, reftoks, model, reference, n_out
         vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, chrom, offset, probs=probs0) if start <= v.pos <= end)
         vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, chrom, offset, probs=probs1) if start <= v.pos <= end)
 
-        print("vars0:" + ', '.join(f"{v.chrom}:{v.pos} {v.ref}-{v.alt}" for v in vars_hap0))
-        print("vars1:" + ', '.join(f"{v.chrom}:{v.pos} {v.ref}-{v.alt}" for v in vars_hap1))
+        # print("vars0:" + ', '.join(f"{v.chrom}:{v.pos} {v.ref}-{v.alt}" for v in vars_hap0))
+        # print("vars1:" + ', '.join(f"{v.chrom}:{v.pos} {v.ref}-{v.alt}" for v in vars_hap1))
 
         #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
         #calledvars.append((vars_hap0, vars_hap1))
