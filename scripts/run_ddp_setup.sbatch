@@ -33,9 +33,9 @@ echo "MASTER_ADDR="$MASTER_ADDR
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
-GIT_BRANCH="embed_dropout"
+GIT_BRANCH="master"
 
-export RUN_NAME="100M_s28_cont_embdropout"
+export RUN_NAME="100M_BWA_ft"
 
 cd $ROOT_DIR
 mkdir -p $RUN_NAME
