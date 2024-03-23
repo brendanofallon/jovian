@@ -269,6 +269,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
     vcf_header_extras = kwargs.get('cmdline')
 
+    assert Path(model_path).is_file(), f"Model file {model_path} isn't a regular file"
+    assert Path(bam).is_file(), f"Alignment file {bam} isn't a regular file"
+    assert Path(bed).is_file(), f"BED file {bed} isn't a regular file"
+    assert Path(reference_fasta).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
+ 
+
 
     call_vars_in_parallel(
         bampath=bam,
@@ -534,7 +540,10 @@ def accumulate_regions_and_call(modelpath: str,
     torch.set_num_threads(4)
     model = load_model(modelpath)
     model.eval()
-    classifier = buildclf.load_model(classifier_path)
+    if classifier_path:
+        classifier = buildclf.load_model(classifier_path)
+    else:
+        classifier = None
 
     vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=header_extras)
     vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
