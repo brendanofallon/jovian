@@ -372,6 +372,7 @@ def predict_sequence(src, model, n_output_toks, device):
 
 class VariantSortedBuffer:
     """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
+    
     def __init__(self, outputfh, buff_size=500):
         self.outputfh = outputfh
         self.buff_size = buff_size
@@ -397,9 +398,9 @@ class VariantSortedBuffer:
 
     def _dumphalf(self):
         self._sort()
-        for v in self.buffer[0:len(self.buffer)//2]:
+        for v in self.buffer[0:len(self.buffer)//4]:
             self.outputfh.write(str(v))
-        self.buffer = self.buffer[len(self.buffer)//2:]
+        self.buffer = self.buffer[len(self.buffer)//4:]
         try:
             self.outputfh.flush()
         except:
@@ -409,6 +410,7 @@ class VariantSortedBuffer:
         return len(self.buffer)
 
     def flush(self):
+        self._sort()
         for v in self.buffer:
             self.outputfh.write(str(v))
         self.buffer = []
