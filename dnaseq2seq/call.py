@@ -747,7 +747,8 @@ def merge_overlaps(overlaps, min_qual):
 
 
 def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
-    allkeys = sorted(list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys()), key=lambda x: x[1])
+    allkeys = list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys())
+    allkeys = sorted(set(allkeys), key=lambda x: x[1])
 
     all_vcf_vars = []
     group0 = defaultdict(list)
