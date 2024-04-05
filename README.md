@@ -30,13 +30,19 @@ on the command line. All dependencies should be automatically installed.
 
 It's a good idea to install in a separate conda environment or python virtualenv if possible, but not required unless there are dependency conflicts. 
 
-#### Obtaining model weights
+#### Model weights
 
 Model weights are stored using [git lfs](https://git-lfs.com/), under the `models/` directory. If you don't have `git lfs` installed, the weights files will appear as small stub files with references to the actual weights objects. If you install `git lfs` after you've already cloned the repo, run
 
     git lfs fetch
 
 to actually download the weights.
+There are two types of model files. The first stores weights for the main transformer model used for haplotype generation. These are big, often over 1GB. The second is the 'classifier' model which predicts variant quality from multiple overlapping haplotypes. These are typically much smaller (~40MB)
+
+#### Model files:
+    `100M_s28_cont_mapsus_lolr2_epoch2.model`: This contains weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower. 
+    `s28ce40_bamfix.model`: The original classifier model, as used in the Jenever publication
+    `paraclf.model`: A new classifier model, trained on more data with slightly higher performance the the previous model. 
 
 
 
@@ -58,7 +64,7 @@ In general performance is somewhere near 15MB (megabases) per hour, depending on
 generation procedure, the number of threads and batch size, and the GPU speed. 
 
 
-### Warning
+### Warning!
 The current Jenever model has been trained on Illumina WGS germline short-read data, and is not likely to work on hybrid-capture (e.g. exome), long read, somatic, or other types of genomic data. 
 
 ### Training a new model
