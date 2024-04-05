@@ -607,9 +607,9 @@ def merge_multialts(v0, v1):
         return longer
 
 
-
 def het(rec):
     return rec.samples[0]['GT'] == (0,1) or rec.samples[0]['GT'] == (1,0)
+
 
 def merge_overlaps(overlaps, min_qual):
     """
@@ -685,14 +685,6 @@ def vars_hap_to_records(
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
-
-    # vcf_vars = vcf.vcf_vars(
-    #     vars_hap0=vars_hap0,
-    #     vars_hap1=vars_hap1,
-    #     chrom=chrom,
-    #     aln=aln,
-    #     reference=reference
-    # )
 
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, chrom, aln, reference, minimum_safe_distance=100)
 
