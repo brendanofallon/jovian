@@ -40,9 +40,9 @@ to actually download the weights.
 There are two types of model files. The first stores weights for the main transformer model used for haplotype generation. These are big, often over 1GB. The second is the 'classifier' model which predicts variant quality from multiple overlapping haplotypes. These are typically much smaller (~40MB)
 
 #### Model files:
-    - *100M_s28_cont_mapsus_lolr2_epoch2.model*: This contains weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower. 
-    - *s28ce40_bamfix.model*: The original classifier model, as used in the Jenever publication
-    - *paraclf.model*: A new classifier model, trained on more data with slightly higher performance the the previous model. 
+- **100M_s28_cont_mapsus_lolr2_epoch2.model**: This contains weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower.
+- **s28ce40_bamfix.model**: The original classifier model, as used in the Jenever publication
+- **paraclf.model**: A new classifier model, trained on more data with slightly higher performance the the previous model. 
 
 
 
