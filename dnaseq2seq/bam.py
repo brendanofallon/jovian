@@ -194,7 +194,6 @@ def decode(t):
         return util.INDEX_TO_BASE[t[0:4].argmax()]
 
 
-
 def string_to_tensor(bases):
     return torch.vstack([encode_basecall(b, 50, 0, 0, 0, 0, 50) for b in bases])
 
@@ -216,43 +215,6 @@ def pad_zeros(pre, data, post):
         postpad = torch.zeros(post, data.shape[-1], dtype=data.dtype)
         data = torch.cat((data, postpad))
     return data
-
-
-def iterate_cigar(rec):
-    cigtups = rec.cigartuples
-    bases = rec.query_sequence
-    quals = rec.query_qualities
-    cig_index = 0
-    n_bases_cigop = cigtups[cig_index][1]
-    cigop = cigtups[cig_index][0]
-    is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
-    is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
-    is_clipped = cigop in {4, 5}
-    base_index = 0
-    refstart = alnstart(rec)
-    refpos = refstart
-    while True:
-        if is_seq_consumed:
-            base = bases[base_index]
-            qual = quals[base_index]
-            base_index += 1
-        else:
-            base = "-"
-            qual = 0
-        if is_ref_consumed:
-            refpos += 1
-
-        yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clippead, rec.mapping_quality), is_ref_consumed
-        n_bases_cigop -= 1
-        if n_bases_cigop <= 0:
-            cig_index += 1
-            if cig_index >= len(cigtups):
-                break
-            n_bases_cigop = cigtups[cig_index][1]
-            cigop = cigtups[cig_index][0]
-            is_ref_consumed = cigop in {0, 2, 4, 5, 7}
-            is_seq_consumed = cigop in {0, 1, 3, 4, 7}
-            is_clipped = cigop in {4, 5}
 
 
 def iterate_bases(rec):
@@ -459,7 +421,7 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
     if (len(allreads) // maxreads) < num_samples:
         num_samples = max(1, len(allreads) // maxreads)
-        # logger.info(f"Only {len(allreads)} reads here, will only return {num_samples} samples")
+
     #logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
     readwindow = ReadWindow(bam, chrom, start, end)
     for i in range(num_samples):
@@ -472,13 +434,3 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
         yield encoded_with_ref, (start, end)
-
-
-if __name__=="__main__":
-    aln = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram",
-                              reference_filename="/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    rw = ReadWindow(aln, "21", 20762200, 20762270)
-    t = rw.get_window(20762222, 20762267, max_reads=100)
-
-    print(t.shape)
-    print(util.to_pileup(t))

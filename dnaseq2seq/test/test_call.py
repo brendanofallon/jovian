@@ -4,29 +4,6 @@ from dataclasses import dataclass
 from dnaseq2seq import call, vcf, util
 from typing import List
 
-@dataclass
-class MockVariantRecord:
-    chrom: str
-    start: int
-    ref: str
-    alts: List[str]
-
-    @property
-    def alt(self):
-        return self.alts[0]
-
-    @property
-    def end(self):
-        return self.start + len(self.ref)
-
-    @property
-    def pos(self):
-        return self.start + 1
-
-    @alt.setter
-    def alt(self, a):
-        self.alts = [a]
-
 
 
 def test_merge_genotypes():
@@ -96,27 +73,6 @@ def test_merge_genotypes():
     haps = call.merge_genotypes(gconf)
 
 
-def test_overlaps():
-    assert util.records_overlap(
-        MockVariantRecord(chrom='X', start=5, ref='A', alts=['T']),
-        MockVariantRecord(chrom='X', start=5, ref='G', alts=['C']),
-    )
-    assert not util.records_overlap(
-        MockVariantRecord(chrom='X', start=5, ref='A', alts=['T']),
-        MockVariantRecord(chrom='X', start=6, ref='G', alts=['C']),
-    )
-    assert util.records_overlap(
-        MockVariantRecord(chrom='X', start=5, ref='AC', alts=['T']),
-        MockVariantRecord(chrom='X', start=6, ref='G', alts=['C']),
-    )
-    assert not util.records_overlap(
-        MockVariantRecord(chrom='X', start=5, ref='A', alts=['TGTG']),
-        MockVariantRecord(chrom='X', start=6, ref='G', alts=['C']),
-    )
-    assert util.records_overlap(
-        MockVariantRecord(chrom='X', start=5, ref='ATGGTA', alts=['']),
-        MockVariantRecord(chrom='X', start=8, ref='GG', alts=['C']),
-    )
 
 def test_split_overlaps():
     v0 = [

@@ -182,34 +182,10 @@ def predprobs(t):
 
 
 def tgt_str(seq):
+    """
+    Convert a list of base indices into a string and return it
+    """
     return "".join(INDEX_TO_BASE[b] for b in seq)
-
-
-def correctstr(seq, predseq):
-    seq = "".join(INDEX_TO_BASE[b] for b in seq)
-    output = "".join('*' if a==b else 'x' for a,b in zip(seq, predseq))
-    return output
-
-
-def writeseqtensor(t):
-    assert len(t.shape) == 2, f"Expected 2-dimensional input"
-    for pos in range(t.shape[0]):
-        clip = 1 if t[pos, 7] else 0
-        print(clip, end="")
-    print()
-    for pos in range(t.shape[0]):
-        refmatch = 1 if t[pos, 6] else 0
-        print(refmatch, end="")
-    print()
-    for pos in range(t.shape[0]):
-        if torch.sum(t[pos, 0:4]) == 0:
-            base = '.'
-        elif torch.sum(t[pos, 0:4]) < 0:
-            base = '-'
-        else:
-            base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
-        print(f"{base}", end="")
-    print()
 
 
 def count_bed(bedpath):
@@ -233,6 +209,9 @@ def _varkey(variant):
 
 
 def check_overlap(interval1, interval2):
+    """
+    Return True if the intervals overlap
+    """
     start1, end1 = interval1
     start2, end2 = interval2
     return not (end1 < start2 or end2 < start1)
@@ -264,7 +243,7 @@ def merge_overlapping_regions(regions):
 
 def kmer_preds_to_seq(preds, i2s):
     """
-    Return a sequence of bases from the given predictions
+    Return a sequence of bases from the given prediction tensor
     """
     m = torch.argmax(preds, dim=-1).cpu().detach().numpy()
     return kmer_idx_to_str(m, i2s)
@@ -275,7 +254,9 @@ def kmer_idx_to_str(kmer_idx, i2s):
 
 
 def bases_to_kvec(bases, s2i, kmersize=4):
-    """ Return a list of indices for nonoverlapping kmers read from the base """
+    """
+    Return a list of kmer indices for nonoverlapping kmers read from the base
+    """
     indices = []
     for i in range(0, len(bases), kmersize):
         kmer = bases[i:i+kmersize]
@@ -284,6 +265,10 @@ def bases_to_kvec(bases, s2i, kmersize=4):
 
 
 def seq_to_onehot_kmers(seq):
+    """
+    Convert sequence of bases to a Tensor
+    Tensor will have dimension [FEATURE_DIM, len(seq)]
+    """
     h = []
     for i in bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
         t = torch.zeros(FEATURE_DIM, dtype=torch.float)
@@ -293,6 +278,11 @@ def seq_to_onehot_kmers(seq):
 
 
 def tgt_to_kmers(tgt):
+    """
+    Convert a batched tensor of sequence haplotypes into a tensor of kmer indices
+    :param tgt: Tensor of shape [batch, haplotype, base]
+    :return: Tensor of [batch, haplotype, kmer index]
+    """
     result = []
     for i in range(tgt.shape[0]):
         tgtseq0 = tgt_str(tgt[i, 0, :])
@@ -304,8 +294,11 @@ def tgt_to_kmers(tgt):
     return torch.stack(result, dim=0)
 
 
-def expand_to_bases(probs, expansion_factor=TGT_KMER_SIZE):
-    return list(chain(*([k]*expansion_factor for k in probs)))
+def expand_to_bases(vals, expansion_factor=TGT_KMER_SIZE):
+    """
+    Replicate each item in vals by expansion_factor times successively and return them in a list
+    """
+    return list(chain(*([k]*expansion_factor for k in vals)))
 
 
 def predict_sequence(src, model, n_output_toks, device):
@@ -335,10 +328,11 @@ def predict_sequence(src, model, n_output_toks, device):
 class VariantSortedBuffer:
     """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
     
-    def __init__(self, outputfh, buff_size=500):
+    def __init__(self, outputfh, buff_size=500, capacity_factor=4):
         self.outputfh = outputfh
         self.buff_size = buff_size
         self.buffer = []
+        self.capacity_factor = capacity_factor
 
     def _chromval(self, c):
         c = c.replace("chr", "")
@@ -360,9 +354,9 @@ class VariantSortedBuffer:
 
     def _dumphalf(self):
         self._sort()
-        for v in self.buffer[0:len(self.buffer)//4]:
+        for v in self.buffer[0:len(self.buffer)//self.capacity_factor]:
             self.outputfh.write(str(v))
-        self.buffer = self.buffer[len(self.buffer)//4:]
+        self.buffer = self.buffer[len(self.buffer)//self.capacity_factor:]
         try:
             self.outputfh.flush()
         except:
