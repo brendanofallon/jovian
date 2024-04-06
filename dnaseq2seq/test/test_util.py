@@ -68,7 +68,7 @@ def test_no_overlapping_regions():
 
 def test_adjacent_regions():
     regions = [('chr1', 1, 100, 200), ('chr1', 2, 200, 300)]
-    assert merge_overlapping_regions(regions) == regions
+    assert merge_overlapping_regions(regions) == [('chr1', 1, 100, 300)]
 
 def test_overlapping_regions():
     regions = [('chr1', 1, 100, 250), ('chr1', 2, 200, 300)]
