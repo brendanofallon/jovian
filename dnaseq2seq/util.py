@@ -228,54 +228,15 @@ def count_bed(bedpath):
     return tot_regions, tot_bases
 
 
-def sort_chrom_vcf(input_vcf, dest):
-    """
-    Sort variants found in the given vcf file and write them to the given destination file
-    Raises an exception if not all variants are on the same chromosome
-    """
-    vcf = pysam.VariantFile(input_vcf)
-    chrom = None
-    with open(dest, "w") as ofh:
-        ofh.write(str(vcf.header))
-        for var in sorted(vcf.fetch(), key=lambda x: x.pos):
-            if chrom is None:
-                chrom = var.chrom
-            else:
-                assert var.chrom == chrom, f"Variants must be on same chromsome, but found {var} which is not on chrom {chrom}"
-            ofh.write(str(var))
-
-        
 def _varkey(variant):
     return variant.chrom, variant.pos, variant.ref, ",".join(str(s) for s in variant.alts)
 
-
-def dedup_vcf(input_vcf, dest):
-    """
-    Iterate a VCF file and remove any variants that duplicates in terms of chrom/pos/ref/alt
-    Requires input VCF to be sorted
-    """
-    vcf = pysam.VariantFile(input_vcf)
-    clump = []
-    with open(dest, "w") as ofh:
-        ofh.write(str(vcf.header))
-        for var in vcf.fetch():
-            if len(clump) == 0:
-                clump.append(var)
-            else:
-                if _varkey(var) == _varkey(clump[0]):
-                    clump.append(var)
-                else:
-                    # Big question here: Which variant to write if there are duplicates found?
-                    # Currently we just write the first one, but maybe we could be smarter
-                    ofh.write(str(clump[0]))
-                    clump = [var]
-        if clump:
-            ofh.write(str(clump[0]))
 
 def check_overlap(interval1, interval2):
     start1, end1 = interval1
     start2, end2 = interval2
     return not (end1 < start2 or end2 < start1)
+
 
 def records_overlap(rec1, rec2):
     """ True if the two records share any reference bases """
@@ -369,6 +330,7 @@ def predict_sequence(src, model, n_output_toks, device):
     decode_elapsed = time.perf_counter() - encode
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]
+
 
 class VariantSortedBuffer:
     """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
