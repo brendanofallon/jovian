@@ -758,7 +758,7 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
     for k in allkeys:
         chrom, pos, ref, alt = k
         if (chrom != prevchrom) or (pos - prevpos > minimum_safe_distance):
-            vcf_vars = vcf.vcf_vars(
+            vcf_vars = vcf.construct_vcfvars(
                 vars_hap0=group0,
                 vars_hap1=group1,
                 aln=aln,
@@ -780,7 +780,7 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
                 group1[k].extend(vars_hap1[k])
         prevchrom = chrom
 
-    vcf_vars = vcf.vcf_vars(
+    vcf_vars = vcf.construct_vcfvars(
         vars_hap0=group0,
         vars_hap1=group1,
         aln=aln,

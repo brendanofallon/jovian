@@ -5,11 +5,16 @@ import logging
 import pysam
 
 from skbio.alignment import StripedSmithWaterman
+from typing import List
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class Variant:
+    """
+    Represents a variant found in a single calling window. These are 0-based, have no reference padding, and
+    model a single alt allele
+    """
     chrom: str
     ref: str
     alt: str
@@ -49,12 +54,12 @@ class Cigar:
 @dataclass
 class VcfVar:
     """
-    holds params for vcf variant records
+    A variant found across multiple calling windows.
+    These are VCF-style, with 1-based coords and reference padding on indels, and a list of alts
     """
     chrom: str
     pos: int
     ref: str
-    # alt: str
     quals: list
     qual: float
     filter: list
@@ -65,7 +70,7 @@ class VcfVar:
     window_var_count: int
     window_cis_vars: int
     window_trans_vars: int
-    window_offset: int
+    window_offset: List[int]
     var_index: int
     call_count: int
     step_count: int
@@ -161,6 +166,9 @@ def _mismatches_to_vars(query, target, chrom, cig_offset, window_offset, probs):
 
 
 def _display_aln(aln):
+    """
+    Utility function for printing an alignment
+    """
     qit = iter(aln.query_sequence)
     tit = iter(aln.target_sequence)
     tbases = 0
@@ -287,15 +295,15 @@ def var_depth(chrom, pos, aln):
     return count
 
 
-def vcf_vars(vars_hap0, vars_hap1, aln, reference, mindepth=30):
+def construct_vcfvars(vars_hap0, vars_hap1, aln, reference, mindepth=30):
     """
-    From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
-    This creates VcfVar objects, which are almost like pysam.VariantRecord objects but not quite
-    :param vars_hap0: Dict of (pos, ref, alt) -> Variants on hap 0
-    :param vars_hap1: Dict of (pos, ref, alt) -> Variants on hap 1
-    :param chrom:
-    :param window_idx: simple index of sequential call windows
-    :param aln: bam AlignmentFile
+    Aggregate sets of Variant objects into VcfVar objects.
+     This calculates most of the fields that are emitted in the final pysam.VariantRecord objects and used for
+     the classifier model calculation
+
+    :param vars_hap0: Dict of (chrom, pos, ref, alt) -> [Variants] on hap 0
+    :param vars_hap1: Dict of (chrom, pos, ref, alt) -> [Variants] on hap 1
+    :param aln: bam AlignmentFile (for depth calculation)
     :param mindepth: read depth cut off in bam to be labled as LowCov in filter field
     :return: single dict of vars for call window
     """
