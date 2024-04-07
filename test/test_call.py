@@ -47,18 +47,20 @@ def test_merge_genotypes():
     #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1)]),
     # ]
 
+def test_resolve_haplotypes():
+    gconf = [
+        ([vcf.Variant(chrom='X', pos=5, ref='X', alt='Y', qual=1)],
+         [vcf.Variant(chrom='X', pos=10, ref='A', alt='T', qual=1), vcf.Variant(chrom='X', pos=20, ref='G', alt='C', qual=1)]),
 
-    # gconf = [
-    #     ([vcf.Variant(pos=5, ref='X', alt='Y', qual=1)],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)]),
-    #
-    #     ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1)]),
-    #
-    #     ([vcf.Variant(pos=10, ref='A', alt='T', qual=1)],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1)]),
-    # ]
+        ([vcf.Variant(chrom='X', pos=10, ref='A', alt='T', qual=1), vcf.Variant(chrom='X', pos=20, ref='G', alt='C', qual=1)],
+         [vcf.Variant(chrom='X', pos=10, ref='A', alt='T', qual=1)]),
 
+        ([vcf.Variant(chrom='X', pos=10, ref='A', alt='T', qual=1)],
+         [vcf.Variant(chrom='X', pos=10, ref='A', alt='T', qual=1)]),
+    ]
+
+
+def test_resolve_haplotypes_samepos():
     gconf = [
         ([vcf.Variant(chrom='X', pos=5, ref='X', alt='Y', qual=1)],
          []),
@@ -70,7 +72,12 @@ def test_merge_genotypes():
          []),
     ]
 
-    haps = call.merge_genotypes(gconf)
+    hap0, hap1 = call.resolve_haplotypes(gconf)
+    assert len(hap0) == 1
+    assert len(hap1) == 1
+    assert len(hap0[('X', 5, 'X', 'Y')]) == 1
+    assert len(hap1[('X', 5, 'A', 'T')]) == 2
+
 
 
 
