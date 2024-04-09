@@ -451,7 +451,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
                 raise ex
     
     # It is CRITICAL to keep these processes alive, even after they're done doing everything. Pytorch will clean up the 
-    # the tensors *that have already been queued* when these threads die, even if the tensors haven't been processed yet
+    # the tensors *that have already been queued* when these processes die, even if the tensors haven't been processed yet
     # This will lead to errors when the calling process polls the queue, leading to missed variant calls. Instead, we wait for
     # the calling process to put a signal into the 'keepalive' queue to signal that it is all done and we can finally exit
     logger.debug(f"Polling keepalive queue after generating {encoded_region_count} tensors")
@@ -570,7 +570,7 @@ def accumulate_regions_and_call(modelpath: str,
     vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=1000)
     while True:
         try:
-            data = inputq.get(timeout=10) # Timeout is 1 second, we count these and error out if there are too many
+            data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
             timeouts = 0
         except queue.Empty:
             timeouts += 1
@@ -600,7 +600,7 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             regions_processed += len(datas)
-            # Store the variants in a buffer so we can sort big groups of them (no strong guarantees about sort order for
+            # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
             vbuff.put_all(records)
             datas = []
@@ -617,9 +617,6 @@ def accumulate_regions_and_call(modelpath: str,
         if n_finished_workers == n_region_workers:
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
-
-    vbuff.flush()
-    vcf_out.close()
 
     logger.info(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
     for i in range(n_region_workers):
@@ -788,17 +785,6 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
     )
     all_vcf_vars.extend(vcf_vars)
     return all_vcf_vars
-
-def find_duplicates(lst):
-    seen = set()  # To track seen items
-    duplicates = set()  # To store duplicates
-    for item in lst:
-        if item in seen:
-            duplicates.add(item)
-        else:
-            seen.add(item)
-
-    return duplicates
 
 
 def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template):
