@@ -328,7 +328,7 @@ def predict_sequence(src, model, n_output_toks, device):
 class VariantSortedBuffer:
     """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
     
-    def __init__(self, outputfh, buff_size=500, capacity_factor=4):
+    def __init__(self, outputfh, buff_size=500, capacity_factor=10):
         self.outputfh = outputfh
         self.buff_size = buff_size
         self.buffer = []

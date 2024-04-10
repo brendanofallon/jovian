@@ -263,7 +263,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
 
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
-            logger.info(f"CUDA device {idev} name: {torch.cuda.get_device_name({idev})}")
+            logger.info(f"Using CUDA device {idev} {torch.cuda.get_device_name({idev})}")
 
     logger.info(f"The model will be loaded from path {model_path}")
 
@@ -273,7 +273,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     assert Path(bam).is_file(), f"Alignment file {bam} isn't a regular file"
     assert Path(bed).is_file(), f"BED file {bed} isn't a regular file"
     assert Path(reference_fasta).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
- 
 
 
     call_vars_in_parallel(
@@ -317,7 +316,6 @@ def call_vars_in_parallel(
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
     tensors_queue = mp.Queue(maxsize=threads * 100)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
-
 
     tot_regions, tot_bases = util.count_bed(bed)
 
@@ -598,6 +596,8 @@ def accumulate_regions_and_call(modelpath: str,
 
         if (type(data) == CallingStopSignal and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
+            datas = sorted(datas, key=lambda d: d['region'][1]) # Sorting data chunks here helps ensure sorted output
+            logger.info(f"Calling variants up to {datas[-1]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}")
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
