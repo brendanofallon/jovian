@@ -91,39 +91,9 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
 
 def load_model(model_path):
-    
-    #96M params
-    # encoder_attention_heads = 8
-    # decoder_attention_heads = 10
-    # dim_feedforward = 512
-    # encoder_layers = 10
-    # decoder_layers = 10
-    # embed_dim_factor = 160
-
-    #50M params
-    #encoder_attention_heads = 8
-    #decoder_attention_heads = 4 
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6
-    #embed_dim_factor = 120 
-
-    #50M 'small decoder'
-    #decoder_attention_heads = 4
-    #decoder_layers = 2
-    #dim_feedforward = 512
-    #embed_dim_factor = 120
-    #encoder_attention_heads = 10
-    #encoder_layers = 10
-
-    # 35M params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 6
-    #decoder_layers = 4 # was 2
-    #embed_dim_factor = 120 # was 100
-
+    """
+    Load model from given path and return it in .eval() mode
+    """
     model_info = torch.load(model_path, map_location=DEVICE)
     statedict = model_info['model']
     modelconf = model_info['conf']
@@ -132,17 +102,6 @@ def load_model(model_path):
       new_key = key.replace('_orig_mod.', '')
       new_state_dict[new_key] = statedict[key]
     statedict = new_state_dict
-
-    #modelconf = {
-    #        "max_read_depth": 150,
-    #        "feats_per_read": 10,
-    #        "decoder_layers": 10,
-   #         "decoder_attention_heads": 10,
-   #         "encoder_layers": 10,
-   #         "encoder_attention_heads": 8,
-   #         "dim_feedforward": 512,
-   #         "embed_dim_factor": 160,
-   #         }
 
     model = VarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
