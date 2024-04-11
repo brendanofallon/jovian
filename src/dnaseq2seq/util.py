@@ -23,6 +23,52 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+
+def read_bed_regions(bedpath):
+    """
+    Generate chrom, start, end regions from a BED formatted file
+    """
+    with open(bedpath) as fh:
+        for line in fh:
+            line = line.strip()
+            if len(line) == 0 or line.startswith("#"):
+                continue
+            toks = line.split("\t")
+            chrom, start, end = toks[0], int(toks[1]), int(toks[2])
+            assert end > start, f"End position {end} must be strictly greater start {start}"
+            yield chrom, start, end
+
+
+def split_large_regions(regions, max_region_size):
+    """
+    Split any regions greater than max_region_size into regions smaller than max_region_size
+    """
+    for chrom, start, end in regions:
+        while start < end:
+            yield chrom, start, min(end, start + max_region_size)
+            start += max_region_size
+
+
+def cluster_positions(poslist, maxdist=100):
+    """
+    Iterate over the given list of positions (numbers), and generate ranges containing
+    positions not greater than 'maxdist' in size
+    """
+    cluster = []
+    end_pad_bases = 8
+    for pos in poslist:
+        if len(cluster) == 0 or pos - min(cluster) < maxdist:
+            cluster.append(pos)
+        else:
+            yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
+            cluster = [pos]
+
+    if len(cluster) == 1:
+        yield cluster[0] - end_pad_bases, cluster[0] + end_pad_bases
+    elif len(cluster) > 1:
+        yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
+
+
 def log_timer(func):
     """
     A decorator which when applied will make the total time taken to complete the function

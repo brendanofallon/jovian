@@ -164,67 +164,21 @@ def load_model(model_path):
     
     return model
 
-
-def read_bed_regions(bedpath):
-    """
-    Generate chrom, start, end regions from a BED formatted file
-    """
-    with open(bedpath) as fh:
-        for line in fh:
-            line = line.strip()
-            if len(line) == 0 or line.startswith("#"):
-                continue
-            toks = line.split("\t")
-            chrom, start, end = toks[0], int(toks[1]), int(toks[2])
-            assert end > start, f"End position {end} must be strictly greater start {start}"
-            yield chrom, start, end
-
-
-def split_large_regions(regions, max_region_size):
-    """
-    Split any regions greater than max_region_size into regions smaller than max_region_size
-    """
-    for chrom, start, end in regions:
-        while start < end:
-            yield chrom, start, min(end, start + max_region_size)
-            start += max_region_size
-
-
-def cluster_positions(poslist, maxdist=100):
-    """
-    Iterate over the given list of positions (numbers), and generate ranges containing
-    positions not greater than 'maxdist' in size
-    """
-    cluster = []
-    end_pad_bases = 8
-    for pos in poslist:
-        if len(cluster) == 0 or pos - min(cluster) < maxdist:
-            cluster.append(pos)
-        else:
-            yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
-            cluster = [pos]
-
-    if len(cluster) == 1:
-        yield cluster[0] - end_pad_bases, cluster[0] + end_pad_bases
-    elif len(cluster) > 1:
-        yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
-
-
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
     Generate a list of ranges containing a list of positions from the given window
     returns: list of (chrom, index, start, end) tuples
     """
     chrom, window_idx, window_start, window_end = window
-    
+
     cpname = mp.current_process().name
     logger.debug(
         f"{cpname}: Generating regions from window {window_idx}: "
         f"{window_start}-{window_end} on chromosome {chrom}"
     )
     return [
-        (chrom, window_idx, start, end) 
-        for start, end in cluster_positions(
+        (chrom, window_idx, start, end)
+        for start, end in util.cluster_positions(
             gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
             maxdist=maxdist,
         )
@@ -314,7 +268,7 @@ def call_vars_in_parallel(
 
     """
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue = mp.Queue(maxsize=threads * 100)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue = mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
     tot_regions, tot_bases = util.count_bed(bed)
@@ -322,6 +276,7 @@ def call_vars_in_parallel(
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
+
 
     region_workers = [mp.Process(target=generate_tensors,
                                  args=(regions_queue, tensors_queue, bampath, refpath, region_keepalive_queue))
@@ -349,7 +304,7 @@ def call_vars_in_parallel(
 def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     """
     Read the input BED formatted file and merge / split the regions into big chunks
-    Then finc regions that may contain a variant, and add all of these
+    Then find regions that may contain a variant, and add all of these
     to the region_queue
     """
     torch.set_num_threads(2) # Must be here for it to work for this process
@@ -357,7 +312,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     tot_size_bp = 0
     sus_region_bp = 0
     sus_region_count = 0
-    for idx, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(inputbed), max_region_size=10000)):
+    for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
 
