@@ -14,6 +14,7 @@ from pathlib import Path
 import logging
 import shutil
 from itertools import chain
+from typing import List
 
 from torch.nn.parallel import DistributedDataParallel
 
@@ -67,6 +68,22 @@ def cluster_positions(poslist, maxdist=100):
         yield cluster[0] - end_pad_bases, cluster[0] + end_pad_bases
     elif len(cluster) > 1:
         yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
+
+def unique_chroms(bed: Path) -> List[str]:
+    """
+    Returns a list of unique chromosomes from the input file, in order first
+    encountered in file
+    """
+    chroms = []
+    with open(bed) as fh:
+        for line in fh:
+            if line.startswith("#") or len(line.strip()) == 0:
+                continue
+            else:
+                chrom = line.strip().split("\t")[0]
+                if chrom not in chroms:
+                    chroms.append(chrom)
+    return chroms
 
 
 def log_timer(func):

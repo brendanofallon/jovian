@@ -10,6 +10,7 @@ from io import StringIO
 from typing import List
 from dataclasses import dataclass
 import random
+from tempfile import NamedTemporaryFile
 
 @dataclass
 class MockVariantRecord:
@@ -151,3 +152,19 @@ def test_kmer_onehot():
     km = util.seq_to_onehot_kmers(seq0)
     s0 = util.kmer_preds_to_seq(km, util.i2s)
     assert seq0 == s0
+
+
+def test_unique_chroms():
+    bed = """#this is a header
+chr1\t10\t20
+chr1\t20\t30
+chr5\t3\t5
+chr5\t10\t25
+chrX\t100\t250
+"""
+    testfile = NamedTemporaryFile(delete=False)
+    with open(testfile.name, "w") as fh:
+        fh.write(bed)
+        fh.flush()
+    chroms = util.unique_chroms(Path(testfile.name))
+    assert chroms == ["chr1", "chr5", "chrX"]

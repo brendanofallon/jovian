@@ -6,10 +6,11 @@ import datetime
 import logging
 import string
 import random
-import itertools
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
+from typing import List, Optional, Callable
+import heapq
 
 import torch
 import torch.multiprocessing as mp
@@ -211,6 +212,16 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
 
 
+def region_priority(chrom_order: List[str], region_data: dict) -> int:
+    """
+    Returns the priority value for the given region tensor
+    Smaller-valued items are grabbed first by a PriorityQueue
+    """
+    chrom, start, end = region_data['region']
+    idx = chrom_order.index(chrom)
+    return int(1e9 * idx + start)
+
+
 def call_vars_in_parallel(
     bampath, bed, refpath, model_path, classifier_path, threads, max_batch_size, vcf_out, vcf_header_extras,
 ):
@@ -226,11 +237,14 @@ def call_vars_in_parallel(
     then finishes processing everything, then adds signals (None objects) into the 'keepalive' queue (upon which the generate_tensors processes are waiting) to tell them they can finally die
 
     """
+
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue = mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
     tot_regions, tot_bases = util.count_bed(bed)
+    bed_chrom_order = util.unique_chroms(bed)
+    priority_func = partial(region_priority, chrom_order=bed_chrom_order)
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
@@ -245,7 +259,7 @@ def call_vars_in_parallel(
         p.start()
 
     model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
+                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
     model_proc.start()
 
     region_finder.join()
@@ -435,6 +449,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
 
 def accumulate_regions_and_call(modelpath: str,
                                 inputq: mp.Queue,
+                                priority_func: Callable,
                                 refpath: str,
                                 bampath: str,
                                 classifier_path,
@@ -468,11 +483,12 @@ def accumulate_regions_and_call(modelpath: str,
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
-    
+    entry_count = 0 # Used as tie-breaker when working with heapq
+
     # Not sure what the optimum is here - we accumulate tensors until we have at least this many, then process them in batches
     # If this number is too large, we will wait for too long before submitting the next batch to the GPU
     # If its to small, then we end up sending lots of tiny little batches to the GPU, which also isn't efficient
-    max_datas = n_region_workers * 2
+    max_datas = n_region_workers * 4 # Bigger numbers here use more memory but help ensure we produce sorted outputs
     n_finished_workers = 0
     max_consecutive_timeouts = 10
     timeouts = 0
@@ -510,14 +526,14 @@ def accumulate_regions_and_call(modelpath: str,
 
         if (type(data) == CallingStopSignal and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
-            datas = sorted(datas, key=lambda d: d['region'][1]) # Sorting data chunks here helps ensure sorted output
-            logger.info(f"Calling variants up to {datas[-1]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}")
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
+            logger.info(f"Calling variants up to {datas[len(datas)//2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}")
+            records = call_multi_paths(datas[0:len(datas)//2], model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
             vbuff.put_all(records)
-            datas = []
+            datas = datas[len(datas)//2:]
 
         if timeouts == max_consecutive_timeouts:
             logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
