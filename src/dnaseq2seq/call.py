@@ -212,7 +212,7 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
 
 
-def region_priority(chrom_order: List[str], region_data: dict) -> int:
+def region_priority(region_data: dict, chrom_order: List[str]) -> int:
     """
     Returns the priority value for the given region tensor
     Smaller-valued items are grabbed first by a PriorityQueue
@@ -483,7 +483,7 @@ def accumulate_regions_and_call(modelpath: str,
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
-    entry_count = 0 # Used as tie-breaker when working with heapq
+    bp_processed = 0
 
     # Not sure what the optimum is here - we accumulate tensors until we have at least this many, then process them in batches
     # If this number is too large, we will wait for too long before submitting the next batch to the GPU
@@ -512,11 +512,11 @@ def accumulate_regions_and_call(modelpath: str,
             logger.error(f"Exception polling calling input queue: {ex}")
             raise ex
 
-        if type(data) == CallingErrorSignal:
+        if isinstance(data, CallingErrorSignal):
             logger.error(f"Calling worker discovered an error token: {data.err}, we are shutting down")
             break
 
-        if type(data) != CallingStopSignal and data is not None:
+        if not isinstance(data, CallingStopSignal) and data is not None:
             regions_found += 1
             logger.debug("Found a non-None data object, appending it")
             datas.append(data)
@@ -524,11 +524,16 @@ def accumulate_regions_and_call(modelpath: str,
         if data is None:
             logger.info(f"Hmm, got None from the calling input queue, this doesn't seem right")
 
-        if (type(data) == CallingStopSignal and len(datas)) or len(datas) > max_datas:
+        if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
-            logger.info(f"Calling variants up to {datas[len(datas)//2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}")
-            records = call_multi_paths(datas[0:len(datas)//2], model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            datas_to_process = datas[0:len(datas)//2]
+            bp = sum(d['region'][2] - d['region'][1] for d in datas_to_process)
+            bp_processed += bp
+            logger.info(
+                f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB")
+            records = call_multi_paths(datas_to_process, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
