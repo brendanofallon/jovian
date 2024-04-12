@@ -6,10 +6,11 @@ import datetime
 import logging
 import string
 import random
-import itertools
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
+from typing import List, Optional, Callable
+import heapq
 
 import torch
 import torch.multiprocessing as mp
@@ -91,39 +92,9 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
 
 def load_model(model_path):
-    
-    #96M params
-    # encoder_attention_heads = 8
-    # decoder_attention_heads = 10
-    # dim_feedforward = 512
-    # encoder_layers = 10
-    # decoder_layers = 10
-    # embed_dim_factor = 160
-
-    #50M params
-    #encoder_attention_heads = 8
-    #decoder_attention_heads = 4 
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6
-    #embed_dim_factor = 120 
-
-    #50M 'small decoder'
-    #decoder_attention_heads = 4
-    #decoder_layers = 2
-    #dim_feedforward = 512
-    #embed_dim_factor = 120
-    #encoder_attention_heads = 10
-    #encoder_layers = 10
-
-    # 35M params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 6
-    #decoder_layers = 4 # was 2
-    #embed_dim_factor = 120 # was 100
-
+    """
+    Load model from given path and return it in .eval() mode
+    """
     model_info = torch.load(model_path, map_location=DEVICE)
     statedict = model_info['model']
     modelconf = model_info['conf']
@@ -132,17 +103,6 @@ def load_model(model_path):
       new_key = key.replace('_orig_mod.', '')
       new_state_dict[new_key] = statedict[key]
     statedict = new_state_dict
-
-    #modelconf = {
-    #        "max_read_depth": 150,
-    #        "feats_per_read": 10,
-    #        "decoder_layers": 10,
-   #         "decoder_attention_heads": 10,
-   #         "encoder_layers": 10,
-   #         "encoder_attention_heads": 8,
-   #         "dim_feedforward": 512,
-   #         "embed_dim_factor": 160,
-   #         }
 
     model = VarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
@@ -164,67 +124,21 @@ def load_model(model_path):
     
     return model
 
-
-def read_bed_regions(bedpath):
-    """
-    Generate chrom, start, end regions from a BED formatted file
-    """
-    with open(bedpath) as fh:
-        for line in fh:
-            line = line.strip()
-            if len(line) == 0 or line.startswith("#"):
-                continue
-            toks = line.split("\t")
-            chrom, start, end = toks[0], int(toks[1]), int(toks[2])
-            assert end > start, f"End position {end} must be strictly greater start {start}"
-            yield chrom, start, end
-
-
-def split_large_regions(regions, max_region_size):
-    """
-    Split any regions greater than max_region_size into regions smaller than max_region_size
-    """
-    for chrom, start, end in regions:
-        while start < end:
-            yield chrom, start, min(end, start + max_region_size)
-            start += max_region_size
-
-
-def cluster_positions(poslist, maxdist=100):
-    """
-    Iterate over the given list of positions (numbers), and generate ranges containing
-    positions not greater than 'maxdist' in size
-    """
-    cluster = []
-    end_pad_bases = 8
-    for pos in poslist:
-        if len(cluster) == 0 or pos - min(cluster) < maxdist:
-            cluster.append(pos)
-        else:
-            yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
-            cluster = [pos]
-
-    if len(cluster) == 1:
-        yield cluster[0] - end_pad_bases, cluster[0] + end_pad_bases
-    elif len(cluster) > 1:
-        yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
-
-
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
     Generate a list of ranges containing a list of positions from the given window
     returns: list of (chrom, index, start, end) tuples
     """
     chrom, window_idx, window_start, window_end = window
-    
+
     cpname = mp.current_process().name
     logger.debug(
         f"{cpname}: Generating regions from window {window_idx}: "
         f"{window_start}-{window_end} on chromosome {chrom}"
     )
     return [
-        (chrom, window_idx, start, end) 
-        for start, end in cluster_positions(
+        (chrom, window_idx, start, end)
+        for start, end in util.cluster_positions(
             gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
             maxdist=maxdist,
         )
@@ -298,6 +212,16 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
         logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
 
 
+def region_priority(region_data: dict, chrom_order: List[str]) -> int:
+    """
+    Returns the priority value for the given region tensor
+    Smaller-valued items are grabbed first by a PriorityQueue
+    """
+    chrom, start, end = region_data['region']
+    idx = chrom_order.index(chrom)
+    return int(1e9 * idx + start)
+
+
 def call_vars_in_parallel(
     bampath, bed, refpath, model_path, classifier_path, threads, max_batch_size, vcf_out, vcf_header_extras,
 ):
@@ -313,15 +237,19 @@ def call_vars_in_parallel(
     then finishes processing everything, then adds signals (None objects) into the 'keepalive' queue (upon which the generate_tensors processes are waiting) to tell them they can finally die
 
     """
+
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue = mp.Queue(maxsize=threads * 100)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
     tot_regions, tot_bases = util.count_bed(bed)
+    bed_chrom_order = util.unique_chroms(bed)
+    priority_func = partial(region_priority, chrom_order=bed_chrom_order)
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
+
 
     region_workers = [mp.Process(target=generate_tensors,
                                  args=(regions_queue, tensors_queue, bampath, refpath, region_keepalive_queue))
@@ -331,7 +259,7 @@ def call_vars_in_parallel(
         p.start()
 
     model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
+                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
     model_proc.start()
 
     region_finder.join()
@@ -349,7 +277,7 @@ def call_vars_in_parallel(
 def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     """
     Read the input BED formatted file and merge / split the regions into big chunks
-    Then finc regions that may contain a variant, and add all of these
+    Then find regions that may contain a variant, and add all of these
     to the region_queue
     """
     torch.set_num_threads(2) # Must be here for it to work for this process
@@ -357,7 +285,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     tot_size_bp = 0
     sus_region_bp = 0
     sus_region_count = 0
-    for idx, (chrom, window_start, window_end) in enumerate(split_large_regions(read_bed_regions(inputbed), max_region_size=10000)):
+    for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
 
@@ -521,6 +449,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
 
 def accumulate_regions_and_call(modelpath: str,
                                 inputq: mp.Queue,
+                                priority_func: Callable,
                                 refpath: str,
                                 bampath: str,
                                 classifier_path,
@@ -554,11 +483,12 @@ def accumulate_regions_and_call(modelpath: str,
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
-    
+    bp_processed = 0
+
     # Not sure what the optimum is here - we accumulate tensors until we have at least this many, then process them in batches
     # If this number is too large, we will wait for too long before submitting the next batch to the GPU
     # If its to small, then we end up sending lots of tiny little batches to the GPU, which also isn't efficient
-    max_datas = n_region_workers * 2
+    max_datas = n_region_workers * 4 # Bigger numbers here use more memory but help ensure we produce sorted outputs
     n_finished_workers = 0
     max_consecutive_timeouts = 10
     timeouts = 0
@@ -582,11 +512,11 @@ def accumulate_regions_and_call(modelpath: str,
             logger.error(f"Exception polling calling input queue: {ex}")
             raise ex
 
-        if type(data) == CallingErrorSignal:
+        if isinstance(data, CallingErrorSignal):
             logger.error(f"Calling worker discovered an error token: {data.err}, we are shutting down")
             break
 
-        if type(data) != CallingStopSignal and data is not None:
+        if not isinstance(data, CallingStopSignal) and data is not None:
             regions_found += 1
             logger.debug("Found a non-None data object, appending it")
             datas.append(data)
@@ -594,16 +524,21 @@ def accumulate_regions_and_call(modelpath: str,
         if data is None:
             logger.info(f"Hmm, got None from the calling input queue, this doesn't seem right")
 
-        if (type(data) == CallingStopSignal and len(datas)) or len(datas) > max_datas:
+        if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
-            datas = sorted(datas, key=lambda d: d['region'][1]) # Sorting data chunks here helps ensure sorted output
-            logger.info(f"Calling variants up to {datas[-1]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}")
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
+            datas_to_process = datas[0:len(datas)//2]
+            bp = sum(d['region'][2] - d['region'][1] for d in datas_to_process)
+            bp_processed += bp
+            logger.info(
+                f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB")
+            records = call_multi_paths(datas_to_process, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
             vbuff.put_all(records)
-            datas = []
+            datas = datas[len(datas)//2:]
 
         if timeouts == max_consecutive_timeouts:
             logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
