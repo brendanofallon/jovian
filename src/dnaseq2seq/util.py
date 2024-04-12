@@ -25,6 +25,21 @@ INDEX_TO_BASE = [
 ]
 
 
+def format_bp(bp):
+    try:
+        bp = int(bp)
+        if bp < 10000:
+            return f"{bp:,}"
+        elif bp < 100000:
+            return f"{round(bp/1000, 3):,}Kb"
+        elif bp < 1000000:
+            return f"{round(bp/1e6, 3):,}MB"
+        else:
+            return f"{round(bp/1e9, 3):,}GB"
+
+    except:
+        return bp
+
 def read_bed_regions(bedpath):
     """
     Generate chrom, start, end regions from a BED formatted file
