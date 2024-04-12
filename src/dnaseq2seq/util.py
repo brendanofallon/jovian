@@ -333,6 +333,8 @@ class VariantSortedBuffer:
         self.buff_size = buff_size
         self.buffer = []
         self.capacity_factor = capacity_factor
+        self.lastchrom = None
+        self.lastpos = -1
 
     def _chromval(self, c):
         c = c.replace("chr", "")
@@ -356,6 +358,8 @@ class VariantSortedBuffer:
         self._sort()
         for v in self.buffer[0:len(self.buffer)//self.capacity_factor]:
             self.outputfh.write(str(v))
+            self.lastpos = v.pos
+            self.lastchrom = v.chrom
         self.buffer = self.buffer[len(self.buffer)//self.capacity_factor:]
         try:
             self.outputfh.flush()
@@ -377,6 +381,9 @@ class VariantSortedBuffer:
 
     def put(self, v):
         self.buffer.append(v)
+        if v.pos < self.lastpos and v.chrom == self.lastchrom:
+            raise ValueError(f"Ahh, just got variant with position {v.pos} but we've already emitted a variant with position {self.lastpos}")
+
         if len(self.buffer) > self.buff_size:
             self._dumphalf()
 
