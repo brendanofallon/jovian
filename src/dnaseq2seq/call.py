@@ -254,6 +254,8 @@ def call_vars_in_parallel(
     bed_chrom_order = util.unique_chroms(bed)
     priority_func = partial(region_priority, chrom_order=bed_chrom_order)
 
+    logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {bed}")
+
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
@@ -308,9 +310,6 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
             sus_region_count += 1
             sus_region_bp += r[-1] - r[-2]
             regionq.put(r)
-
-        if idx % 1 == 0:
-            logger.info(f"Read {region_count} raw regions with suspect regions: {sus_region_count} tot bp: {sus_region_bp} ")
 
     logger.info("Done finding regions")
     for i in range(n_signals):
@@ -485,6 +484,7 @@ def accumulate_regions_and_call(modelpath: str,
 
     vcf_out = open(vcf_out_path, "w")
     vcf_out.write(str(vcf_header))
+    vcf_out.flush()
 
     reference = pysam.FastaFile(refpath)
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
@@ -502,7 +502,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_found = 0
     regions_processed = 0
     tot_regions_submitted = 0
-    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=1000)
+    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=10000)
     while True:
         try:
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
@@ -534,11 +534,13 @@ def accumulate_regions_and_call(modelpath: str,
         if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
+
+            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             bp = sum(d['region'][2] - d['region'][1] for d in datas)
             bp_processed += bp
             logger.info(
-                f"Calling variants up to {datas[-1['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB")
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+                f"Calling variants near {datas[-1]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {util.format_bp(bp_processed)}"
+            )
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for

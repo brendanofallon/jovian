@@ -95,11 +95,11 @@ def main(bed, vcf):
     confbedint = Path(intersect_beds(bed, confbed)).absolute()
     
     destdir = run_vcfeval(confbedint, baselinevcf, vcf)
-    os.chdir(destdir)
-    destdir = run_vcfeval(confbedint, baselinevcf, vcf, output_mode='combine')
-    os.rename(f"{destdir}/output.vcf.gz", "output.vcf.gz")
-    os.rename(f"{destdir}/output.vcf.gz.tbi", "output.vcf.gz.tbi")
-    shutil.rmtree(destdir)
+    #os.chdir(destdir)
+    #destdir = run_vcfeval(confbedint, baselinevcf, vcf, output_mode='combine')
+    #os.rename(f"{destdir}/output.vcf.gz", "output.vcf.gz")
+    #os.rename(f"{destdir}/output.vcf.gz.tbi", "output.vcf.gz.tbi")
+    #shutil.rmtree(destdir)
     
     os.unlink(confbedint)
 
