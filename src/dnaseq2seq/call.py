@@ -573,7 +573,8 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     Note that this function contains additional, unused logic to divide batch up into smaller regions and send those
     through the model individually. This might be useful if different regions require very different numbers of predicted
     tokens, for instance. However, since the time spent in forward passes of the model are almost constant in batch size
-    this doesn't offer much speedup in a naive implementation.
+    this doesn't offer much speedup in a naive implementation (but since we don't do KV caching during decoding the cost
+    for generating additional tokens increases linearly in the total token count... so maybe it makes sense to do this?)
 
     :param batch: Tensor of encoded regions
     :param batch_offsets: List of start positions, must have same length as batch.shape[0]
@@ -585,13 +586,14 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
-
+    mid_dist = int(np.mean(dists))
+    #logger.info(f"Dists: {dists} mid dist: {mid_dist}")
     # Identify distinct sub-batches for calling. In the future we might populate this with different indexes
     # Setting everything to 0 effectively turns it off for now
     subbatch_idx = np.zeros(len(dists), dtype=int)
-
+    #subbatch_idx = (dists > mid_dist).astype(np.int_)
+    #logger.info('\n'.join(f"{b, d}" for b,d in zip(subbatch_idx, dists)))
     byregion = defaultdict(list)
-    max_dist = max(dists)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
@@ -599,6 +601,8 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        max_dist = max(subbatch_dists)
+        logger.debug(f"Max dist for sub-batch {sbi} : {max_dist}")
         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
