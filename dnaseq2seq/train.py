@@ -18,10 +18,12 @@ import torch.cuda.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
-import dnaseq2seq.vcf
-import dnaseq2seq.loader
-import dnaseq2seq.util
+import dnaseq2seq.vcf as vcf
+import dnaseq2seq.loader as loader
+import dnaseq2seq.util as util
 from dnaseq2seq.model import VarTransformer
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
 formatter = logging.Formatter(LOG_FORMAT)
