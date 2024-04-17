@@ -527,18 +527,17 @@ def accumulate_regions_and_call(modelpath: str,
         if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
-            datas_to_process = datas[0:len(datas)//2]
-            bp = sum(d['region'][2] - d['region'][1] for d in datas_to_process)
+            bp = sum(d['region'][2] - d['region'][1] for d in datas)
             bp_processed += bp
             logger.info(
                 f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB")
-            records = call_multi_paths(datas_to_process, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
             vbuff.put_all(records)
-            datas = datas[len(datas)//2:]
+            datas = []
 
         if timeouts == max_consecutive_timeouts:
             logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
