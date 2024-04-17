@@ -8,13 +8,12 @@ import torch.nn as nn
 import numpy as np
 import gzip
 import lz4.frame
-import pysam
 import io
 from pathlib import Path
 import logging
 import shutil
 from itertools import chain
-from typing import List
+from typing import List, Tuple
 
 from torch.nn.parallel import DistributedDataParallel
 
@@ -25,22 +24,46 @@ INDEX_TO_BASE = [
 ]
 
 
+def make_kmer_lookups(size):
+    """
+    Generate forward and reverse lookups for kmers
+    str2index returns the index int for a given kmer,
+    index2str returns the kmer string for a given index
+    """
+    bases = "ACGT"
+    baselist = [bases] * size
+    str2index = {}
+    index2str = [None] * (len(bases) ** size)
+    for i, combo in enumerate(itertools.product(*baselist)):
+        s = ''.join(combo)
+        str2index[s] = i
+        index2str[i] = s
+    return str2index, index2str
+
+TGT_KMER_SIZE = 4
+s2i, i2s = make_kmer_lookups(TGT_KMER_SIZE)
+KMER_COUNT = 4 ** TGT_KMER_SIZE
+FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
+START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
+START_TOKEN[:, FEATURE_DIM-1] = 1
+
+
 def format_bp(bp):
     try:
         bp = int(bp)
         if bp < 10000:
             return f"{bp:,}"
-        elif bp < 100000:
-            return f"{round(bp/1000, 3):,}Kb"
         elif bp < 1000000:
-            return f"{round(bp/1e6, 3):,}MB"
+            return f"{round(bp/1000, 2):,} Kb"
+        elif bp < 1e9:
+            return f"{round(bp/1e6, 2):,} MB"
         else:
-            return f"{round(bp/1e9, 3):,}GB"
+            return f"{round(bp/1e9, 2):,} GB"
 
     except:
         return bp
 
-def read_bed_regions(bedpath):
+def read_bed_regions(bedpath: Path):
     """
     Generate chrom, start, end regions from a BED formatted file
     """
@@ -55,7 +78,7 @@ def read_bed_regions(bedpath):
             yield chrom, start, end
 
 
-def split_large_regions(regions, max_region_size):
+def split_large_regions(regions: List[Tuple[str, int, int]], max_region_size: int):
     """
     Split any regions greater than max_region_size into regions smaller than max_region_size
     """
@@ -65,24 +88,24 @@ def split_large_regions(regions, max_region_size):
             start += max_region_size
 
 
-def cluster_positions(poslist, maxdist=100):
+def cluster_positions(poslist: List[int], maxdist: int = 100, pad_bases=8):
     """
     Iterate over the given list of positions (numbers), and generate ranges containing
     positions not greater than 'maxdist' in size
     """
     cluster = []
-    end_pad_bases = 8
     for pos in poslist:
         if len(cluster) == 0 or pos - min(cluster) < maxdist:
             cluster.append(pos)
         else:
-            yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
+            yield min(cluster) - pad_bases, max(cluster) + pad_bases
             cluster = [pos]
 
     if len(cluster) == 1:
-        yield cluster[0] - end_pad_bases, cluster[0] + end_pad_bases
+        yield cluster[0] - pad_bases, cluster[0] + pad_bases
     elif len(cluster) > 1:
-        yield min(cluster) - end_pad_bases, max(cluster) + end_pad_bases
+        yield min(cluster) - pad_bases, max(cluster) + pad_bases
+
 
 def unique_chroms(bed: Path) -> List[str]:
     """
@@ -123,29 +146,6 @@ def log_timer(func):
         return result
 
     return wrapper
-
-def make_kmer_lookups(size):
-    """
-    Generate forward and reverse lookups for kmers
-    str2index returns the index int for a given kmer,
-    index2str returns the kmer string for a given index
-    """
-    bases = "ACGT"
-    baselist = [bases] * size
-    str2index = {}
-    index2str = [None] * (len(bases) ** size)
-    for i, combo in enumerate(itertools.product(*baselist)):
-        s = ''.join(combo)
-        str2index[s] = i
-        index2str[i] = s
-    return str2index, index2str
-
-TGT_KMER_SIZE = 4
-s2i, i2s = make_kmer_lookups(TGT_KMER_SIZE)
-KMER_COUNT = 4 ** TGT_KMER_SIZE
-FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
-START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
-START_TOKEN[:, FEATURE_DIM-1] = 1
 
 
 def var_type(variant):
@@ -248,6 +248,31 @@ def to_pileup(data, altmask=None):
     return "\n".join(pileup)
 
 
+
+def print_pileup(path, idx, **kwargs):
+    """
+    Utility for printing a single encoded region as text
+    """
+    path = Path(path)
+
+    suffix = path.name.split("_")[-1]
+    tgtpath = path.parent / f"tgt_{suffix}"
+    if tgtpath.exists():
+        tgt = tensor_from_file(tgtpath, device='cpu')
+        logger.info(f"Found target file: {tgtpath}, loaded tensor of shape {tgt.shape}")
+        for i in range(tgt.shape[1]):
+            t = tgt[idx, i, :]
+            bases = tgt_str(tgt[idx, i, :])
+            print(bases)
+    else:
+        logger.info(f"No tgt file found (look for {tgtpath})")
+
+    src = tensor_from_file(path, device='cpu')
+    logger.info(f"Loaded tensor with shape {src.shape}")
+    s = to_pileup(src[idx, :, :, :])
+    #print(src[idx, 5, 0:10, :])
+    print(s)
+
 def predprobs(t):
     t = t.detach().cpu().numpy()
     output = []
@@ -301,6 +326,7 @@ def records_overlap(rec1, rec2):
         (rec1.pos, rec1.pos + (len(rec1.ref) - len(rec1.alts[0]))),
         (rec2.pos, rec2.pos + (len(rec2.ref) - len(rec2.alts[0]))),
     )
+
 
 def merge_overlapping_regions(regions):
     """

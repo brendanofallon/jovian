@@ -147,6 +147,7 @@ def test_convert_kmers():
     s0 = util.kmer_idx_to_str(kvec0, util.i2s)
     assert s0 == seq0
 
+
 def test_kmer_onehot():
     seq0 = "ACTAGACAATTCGATGCGATAGATCGGCTTGGAAAACCCCTTTTGAGA"
     km = util.seq_to_onehot_kmers(seq0)
@@ -168,3 +169,69 @@ chrX\t100\t250
         fh.flush()
     chroms = util.unique_chroms(Path(testfile.name))
     assert chroms == ["chr1", "chr5", "chrX"]
+
+def test_format_bp():
+    assert util.format_bp(123) == "123"
+    assert util.format_bp(123000) == "123.0 Kb"
+    assert util.format_bp(123500456) == "123.5 MB"
+    assert util.format_bp(123500456000) == "123.5 GB"
+
+
+def test_empty_regions():
+    regions = []
+    max_region_size = 100
+    result = list(util.split_large_regions(regions, max_region_size))
+    assert result == []
+
+
+def test_single_region_below_max_size():
+    regions = [("chr1", 100, 200)]
+    max_region_size = 150
+    result = list(util.split_large_regions(regions, max_region_size))
+    assert result == [("chr1", 100, 200)]
+
+
+def test_single_region_above_max_size():
+    regions = [("chr1", 100, 300)]
+    max_region_size = 150
+    result = list(util.split_large_regions(regions, max_region_size))
+    assert result == [("chr1", 100, 250), ("chr1", 250, 300)]
+
+
+def test_multiple_regions():
+    regions = [("chr1", 100, 200), ("chr1", 300, 400), ("chr2", 500, 600)]
+    max_region_size = 150
+    result = list(util.split_large_regions(regions, max_region_size))
+    assert result == [("chr1", 100, 200), ("chr1", 300, 400), ("chr2", 500, 600)]
+
+
+def test_cluster_positions_basic():
+    poslist = [10, 50, 55, 160]
+    maxdist = 50
+    expected = [(2, 63), (152, 168)]
+    result = list(util.cluster_positions(poslist, maxdist))
+    assert result == expected, f"Expected {expected}, got {result}"
+
+
+def test_cluster_positions_single_position():
+    poslist = [20]
+    expected = [(12, 28)]
+    result = list(util.cluster_positions(poslist))
+    assert result == expected, f"Expected {expected}, got {result}"
+
+
+def test_cluster_positions_with_padding():
+    poslist = [100, 110, 115, 220, 225]
+    pad_bases = 10
+    maxdist = 15
+    expected = [(90, 125), (210, 235)]
+    result = list(util.cluster_positions(poslist, maxdist, pad_bases))
+    assert result == expected, f"Expected {expected}, got {result}"
+
+
+def test_cluster_positions_no_overlap():
+    poslist = [10, 120, 230, 340]
+    maxdist = 50
+    expected = [(2, 18), (112, 128), (222, 238), (332, 348)]
+    result = list(util.cluster_positions(poslist, maxdist))
+    assert result == expected, f"Expected {expected}, got {result}"
