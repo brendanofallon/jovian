@@ -594,14 +594,16 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
+    logger.info(f"Dists: {dists}")
+    median_dist = np.median(dists)
 
     # Identify distinct sub-batches for calling. In the future we might populate this with different indexes
     # Setting everything to 0 effectively turns it off for now
-    subbatch_idx = np.zeros(len(dists), dtype=int)
-
+    # subbatch_idx = np.zeros(len(dists), dtype=int)
+    subbatch_idx = (dists > median_dist).astype(np.int_)
+    logger.info(f"Subbatch idxs: {subbatch_idx}")
     byregion = defaultdict(list)
     max_dist = max(dists)
-    # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
         subbatch = batch[torch.tensor(which), :, :, :]
@@ -687,6 +689,12 @@ def merge_overlaps(overlaps, min_qual):
 
 
 def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
+    """
+    Construct VcfVar objects with phase from Variant dict objects, assuming we can only
+    correctly phase Variants within 'minimum_safe_distance' bp
+
+    :returns: List of VcfVar objects
+    """
     allkeys = list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys())
     allkeys = sorted(set(allkeys), key=lambda x: x[1])
 

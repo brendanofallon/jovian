@@ -420,8 +420,6 @@ def _process_sample(args):
 
 
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
-    alltps = []
-    allfps = []
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -438,9 +436,14 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps'), var_freq_file) for sample in conf.keys()))
 
     y = []
+    feats = []
+    tpcount = 0
+    fpcount = 0
     for tpfeats, fpfeats, fstrs, labs in results:
-        alltps.extend(tpfeats)
-        allfps.extend(fpfeats)
+        feats += tpfeats
+        feats += fpfeats
+        tpcount += len(tpfeats)
+        fpcount += len(fpfeats)
         y.extend(labs)
         if feat_fh:
             for fstr in fstrs:
@@ -455,13 +458,12 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         label_fh.close()
 
 
-    logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
-    feats = alltps + allfps
+    logger.info(f"Loaded {tpcount} TP and {fpcount} FPs")
 
     feat_train, feat_test, lab_train, lab_test = train_test_split(feats, y, test_size=0.1)
     print(f"Test set size: {len(lab_test)}")
-    #clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
-    clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
+    clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
+    #clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
     
     clf.fit(feat_train, lab_train)
 
@@ -500,7 +502,7 @@ def predict_one_record(loaded_model, var_rec, aln, **kwargs):
     :return: classifier quality
     """
     feats = var_feats(var_rec, aln, None)
-    logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
+    #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):
         prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
         return prediction[0, 1]
