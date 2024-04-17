@@ -32,14 +32,20 @@ DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_availa
 import warnings
 warnings.filterwarnings(action='ignore')
 
-REGION_STOP_TOKEN = "stop"
 REGION_ERROR_TOKEN = "error"
-CALLING_STOP_TOKEN = "floob"
+
+class RegionStopSignal:
+
+    def __init__(self, total_sus_regions, total_sus_bp):
+        self.tot_sus_regions = total_sus_regions
+        self.tot_sus_bp = total_sus_bp
 
 class CallingStopSignal:
 
-    def __init__(self, regions_submitted):
+    def __init__(self, regions_submitted, sus_region_count, sus_region_bp):
         self.regions_submitted = regions_submitted
+        self.sus_region_count = sus_region_count
+        self.sus_region_bp = sus_region_bp
 
 class CallingErrorSignal:
 
@@ -145,7 +151,7 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     ]
 
 
-def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, **kwargs):
+def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str, classifier_path=None, **kwargs):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -155,12 +161,12 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
       3. call variants in each window
       4. join variants after searching for any duplicates
       5. save to vcf file
-    :param trans_model_path:
-    :param bam:
-    :param bed:
-    :param reference_fasta:
-    :param vcf_out:
-    :param clf_model_path:
+    :param model_path: Path to haplotype generation model
+    :param bam: Path to input BAM / CRAM file
+    :param bed: Path to input BED file
+    :param reference_fasta: Path to reference genome fasta
+    :param vcf_out: Path to destination VCF
+    :param classifier_path: Path to classifier model
     """
     seed = 1283769
     torch.manual_seed(seed)
@@ -187,7 +193,6 @@ def call(model_path, bam, bed, reference_fasta, vcf_out, classifier_path=None, *
     assert Path(bam).is_file(), f"Alignment file {bam} isn't a regular file"
     assert Path(bed).is_file(), f"BED file {bed} isn't a regular file"
     assert Path(reference_fasta).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
-
 
     call_vars_in_parallel(
         bampath=bam,
@@ -227,10 +232,13 @@ def call_vars_in_parallel(
 ):
     """
     Call variants in asynchronous fashion. There are three types of Processes that communicate via two mp.Queues
-    The first process finds 'suspect' regions in the BAM file and adds them to the 'regions_queue', this is fast and there's just one Process that handles this
-    The second type of process reads the regions_queue and generates region Tensors (data from BAM/CRAM files encoded into Tensors), and adds them to the 'tensors_queue'. There are 'threads' number of these Processes
-    The final process reads from the tensors_queue and runs the forward pass of the model to generate haplotypes, then aligns those haplotypes to call variants. This is slow, but not
-    sure we can parallelize it since there's (probably) only one GPU anyway? 
+    The first process finds 'suspect' regions in the BAM file and adds them to the 'regions_queue', this is fast and
+    there's just one Process that handles this
+    The second type of process reads the regions_queue and generates region Tensors (data from BAM/CRAM files encoded
+    into Tensors), and adds them to the 'tensors_queue'. There are 'threads' number of these Processes
+    The final process reads from the tensors_queue and runs the forward pass of the model to generate haplotypes,
+    then aligns those haplotypes to call variants. This is slow, but not sure we can parallelize it since there's
+    (probably) only one GPU anyway?
 
     A total footgun here is that pytorch releases tensors generates by a Process when that process dies, even if they've been added to a shared queue (!!). So the 'generate_tensors'
     Processes must stay alive until the variant calling Process has completed. The calling process therefore waits until it receives 'threads' number of completion signals in the tensors_queue,
@@ -246,10 +254,11 @@ def call_vars_in_parallel(
     bed_chrom_order = util.unique_chroms(bed)
     priority_func = partial(region_priority, chrom_order=bed_chrom_order)
 
+    logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {bed}")
+
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
     region_finder.start()
-
 
     region_workers = [mp.Process(target=generate_tensors,
                                  args=(regions_queue, tensors_queue, bampath, refpath, region_keepalive_queue))
@@ -302,12 +311,9 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
             sus_region_bp += r[-1] - r[-2]
             regionq.put(r)
 
-        if idx % 1 == 0:
-            logger.info(f"Read {region_count} raw regions with suspect regions: {sus_region_count} tot bp: {sus_region_bp} ")
-
     logger.info("Done finding regions")
     for i in range(n_signals):
-        regionq.put(REGION_STOP_TOKEN)
+        regionq.put(RegionStopSignal(sus_region_count, sus_region_bp))
 
 
 def encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size, window_step):
@@ -357,9 +363,9 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     encoded_region_count = 0
     while True:
         region = region_queue.get()
-        if region == REGION_STOP_TOKEN:
+        if isinstance(region, RegionStopSignal):
             logger.debug("Region worker found end token")
-            output_queue.put(CallingStopSignal(regions_submitted=encoded_region_count))
+            output_queue.put(CallingStopSignal(regions_submitted=encoded_region_count, sus_region_count=region.tot_sus_regions, sus_region_bp=region.tot_sus_bp))
             break
         else:
             logger.debug(f"Encoding region {region}")
@@ -478,6 +484,7 @@ def accumulate_regions_and_call(modelpath: str,
 
     vcf_out = open(vcf_out_path, "w")
     vcf_out.write(str(vcf_header))
+    vcf_out.flush()
 
     reference = pysam.FastaFile(refpath)
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
@@ -495,7 +502,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_found = 0
     regions_processed = 0
     tot_regions_submitted = 0
-    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=1000)
+    vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=10000)
     while True:
         try:
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
@@ -527,10 +534,12 @@ def accumulate_regions_and_call(modelpath: str,
         if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
+
             bp = sum(d['region'][2] - d['region'][1] for d in datas)
             bp_processed += bp
             logger.info(
-                f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB")
+                f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
+            )
             records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
 
             regions_processed += len(datas)
@@ -573,7 +582,8 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     Note that this function contains additional, unused logic to divide batch up into smaller regions and send those
     through the model individually. This might be useful if different regions require very different numbers of predicted
     tokens, for instance. However, since the time spent in forward passes of the model are almost constant in batch size
-    this doesn't offer much speedup in a naive implementation.
+    this doesn't offer much speedup in a naive implementation (but since we don't do KV caching during decoding the cost
+    for generating additional tokens increases linearly in the total token count... so maybe it makes sense to do this?)
 
     :param batch: Tensor of encoded regions
     :param batch_offsets: List of start positions, must have same length as batch.shape[0]
@@ -585,20 +595,26 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
-
+    #mid_dist = int(np.mean(dists))
+    #logger.info(f"Dists: {dists} mid dist: {mid_dist}")
     # Identify distinct sub-batches for calling. In the future we might populate this with different indexes
     # Setting everything to 0 effectively turns it off for now
     subbatch_idx = np.zeros(len(dists), dtype=int)
-
+    #subbatch_idx = (dists > mid_dist).astype(np.int_)
+    #logger.info('\n'.join(f"{b, d}" for b,d in zip(subbatch_idx, dists)))
     byregion = defaultdict(list)
-    max_dist = max(dists)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
+    #logger.info(f"Dists: {dists}")
+    #median_dist = np.median(dists)
+
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
         subbatch = batch[torch.tensor(which), :, :, :]
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        max_dist = max(subbatch_dists)
+        logger.debug(f"Max dist for sub-batch {sbi} : {max_dist}")
         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
@@ -678,6 +694,12 @@ def merge_overlaps(overlaps, min_qual):
 
 
 def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
+    """
+    Construct VcfVar objects with phase from Variant dict objects, assuming we can only
+    correctly phase Variants within 'minimum_safe_distance' bp
+
+    :returns: List of VcfVar objects
+    """
     allkeys = list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys())
     allkeys = sorted(set(allkeys), key=lambda x: x[1])
 
