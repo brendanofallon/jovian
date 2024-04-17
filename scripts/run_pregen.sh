@@ -3,7 +3,7 @@
 #SBATCH --account=arupbio-kp
 #SBATCH --partition=arup-kp
 #SBATCH --nodes=1
-#SBATCH --time=3-0
+#SBATCH --time=8-0
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=brendan.ofallon@aruplab.com
 
