@@ -362,7 +362,7 @@ def _process_sample(args):
         var_freq_file = pysam.VariantFile(var_freq_file)
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
-    feats = []
+    allfeats = []
     featstrs = []
     labels = []
     max_tp_snvs = 10000
@@ -391,7 +391,7 @@ def _process_sample(args):
                         logger.warning(f"Couldn't find true pos match for {var}")
                         continue
                     feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
-                    feats.append(feats)
+                    allfeats.append(feats)
                     featstrs.append(fstr)
                     labels.append(1)
                     if is_snv(var):
@@ -410,12 +410,12 @@ def _process_sample(args):
                     logger.warning(f"Couldn't find FP match for find variant {var}")
                     continue
                 feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
-                feats.append(feats)
+                allfeats.append(feats)
                 featstrs.append(fstr)
                 labels.append(0)
 
-    logger.info(f"Done with {sample} : TPs: {len(tp_feats)} FPs: {len(fp_feats)}")
-    return feats, featstrs, labels
+    logger.info(f"Done with {sample} : TPs: {sum(labels)} FPs: {np.sum(1 - np.array(labels))}")
+    return allfeats, featstrs, labels
 
 
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
