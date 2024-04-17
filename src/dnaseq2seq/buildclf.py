@@ -362,8 +362,7 @@ def _process_sample(args):
         var_freq_file = pysam.VariantFile(var_freq_file)
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
-    tp_feats = []
-    fp_feats = []
+    feats = []
     featstrs = []
     labels = []
     max_tp_snvs = 10000
@@ -392,7 +391,7 @@ def _process_sample(args):
                         logger.warning(f"Couldn't find true pos match for {var}")
                         continue
                     feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
-                    tp_feats.append(feats)
+                    feats.append(feats)
                     featstrs.append(fstr)
                     labels.append(1)
                     if is_snv(var):
@@ -411,12 +410,12 @@ def _process_sample(args):
                     logger.warning(f"Couldn't find FP match for find variant {var}")
                     continue
                 feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
-                fp_feats.append(feats)
+                feats.append(feats)
                 featstrs.append(fstr)
                 labels.append(0)
 
     logger.info(f"Done with {sample} : TPs: {len(tp_feats)} FPs: {len(fp_feats)}")
-    return tp_feats, fp_feats, featstrs, labels
+    return feats, featstrs, labels
 
 
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
@@ -439,11 +438,8 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     feats = []
     tpcount = 0
     fpcount = 0
-    for tpfeats, fpfeats, fstrs, labs in results:
-        feats += tpfeats
-        feats += fpfeats
-        tpcount += len(tpfeats)
-        fpcount += len(fpfeats)
+    for samplefeats, fstrs, labs in results:
+        feats += samplefeats
         y.extend(labs)
         if feat_fh:
             for fstr in fstrs:
@@ -457,8 +453,8 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     if label_fh:
         label_fh.close()
 
-
-    logger.info(f"Loaded {tpcount} TP and {fpcount} FPs")
+    y = np.array(y)
+    logger.info(f"Loaded {np.sum(1 - y)} TP and {np.sum(y)} FPs")
 
     feat_train, feat_test, lab_train, lab_test = train_test_split(feats, y, test_size=0.1)
     print(f"Test set size: {len(lab_test)}")
