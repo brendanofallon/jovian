@@ -17,11 +17,10 @@ import argparse
 import yaml
 
 # Hack so to make dev easier,
-sys.path.append(str(Path(__file__).parent))
-import util as util
-import loader as loader
-from train import train
-from call import call
+from dnaseq2seq import util as util
+from dnaseq2seq import loader as loader
+from dnaseq2seq from train import train
+from dnaseq2seq from call import call
 
 logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',

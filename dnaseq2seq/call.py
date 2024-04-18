@@ -17,11 +17,11 @@ import torch.multiprocessing as mp
 import pysam
 import numpy as np
 
-from model import VarTransformer
-import buildclf
-import vcf
-import util
-import bam
+from dnaseq2seq.model import VarTransformer
+from dnaseq2seq import buildclf
+from dnaseq2seq import vcf
+from dnaseq2seq import util
+from dnaseq2seq import bam
 
 logger = logging.getLogger(__name__)
 
@@ -77,38 +77,11 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
 
 def load_model(model_path):
-    
-    #96M params
-    # encoder_attention_heads = 8
-    # decoder_attention_heads = 10
-    # dim_feedforward = 512
-    # encoder_layers = 10
-    # decoder_layers = 10
-    # embed_dim_factor = 160
-
-    #50M params
-    #encoder_attention_heads = 8
-    #decoder_attention_heads = 4 
-    #dim_feedforward = 512
-    #encoder_layers = 8
-    #decoder_layers = 6
-    #embed_dim_factor = 120 
-
-    #50M 'small decoder'
-    #decoder_attention_heads = 4
-    #decoder_layers = 2
-    #dim_feedforward = 512
-    #embed_dim_factor = 120
-    #encoder_attention_heads = 10
-    #encoder_layers = 10
-
-    # 35M params
-    #encoder_attention_heads = 8 # was 4
-    #decoder_attention_heads = 4 # was 4
-    #dim_feedforward = 512
-    #encoder_layers = 6
-    #decoder_layers = 4 # was 2
-    #embed_dim_factor = 120 # was 100
+    """
+    Create the VariantTransformer model using params / config settings from the given path
+    Model is compiled with torch.compile and set to eval mode
+    :returns: VariantTransformer model with parameters loaded
+    """
 
     model_info = torch.load(model_path, map_location=DEVICE)
     statedict = model_info['model']
@@ -142,13 +115,10 @@ def load_model(model_path):
                            device=DEVICE)
 
     model.load_state_dict(statedict)
-
-    #model.half()
     model.eval()
     model.to(DEVICE)
     
     model = torch.compile(model, fullgraph=True)
-    
     return model
 
 

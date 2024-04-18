@@ -7,7 +7,7 @@ import torch
 import logging
 from collections import defaultdict
 
-import util
+from dnaseq2seq import util
 
 logger = logging.getLogger(__name__)
 
