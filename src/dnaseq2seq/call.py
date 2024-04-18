@@ -9,8 +9,7 @@ import random
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import List, Optional, Callable
-import heapq
+from typing import List, Callable
 
 import torch
 import torch.multiprocessing as mp
@@ -18,11 +17,11 @@ import queue
 import pysam
 import numpy as np
 
-from model import VarTransformer
-import buildclf
-import vcf
-import util
-import bam
+from dnaseq2seq.model import VarTransformer
+from dnaseq2seq import buildclf
+from dnaseq2seq import vcf
+from dnaseq2seq import util
+from dnaseq2seq import bam
 
 logger = logging.getLogger(__name__)
 
