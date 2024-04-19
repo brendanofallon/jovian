@@ -7,17 +7,104 @@ import itertools
 import logging
 import random
 import traceback as tb
+import yaml
+from string import ascii_letters, digits
+import lz4.frame
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pysam
 import torch
 
-import call
-import util
-from bam import target_string_to_tensor, encode_and_downsample, ensure_dim
-import phaser
+from dnaseq2seq import call
+from dnaseq2seq import util
+from dnaseq2seq.bam import target_string_to_tensor, encode_and_downsample, ensure_dim
+from dnaseq2seq import phaser
+from dnaseq2seq import loader
 
 logger = logging.getLogger(__name__)
+
+
+def load_conf(confyaml):
+    logger.info(f"Loading configuration from {confyaml}")
+    conf = yaml.safe_load(open(confyaml).read())
+    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
+    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    return conf
+
+
+def default_vals_per_class():
+    """
+    Multiprocess will instantly deadlock if a lambda or any callable not defined on the top level of the module is given
+    as the 'factory' argument to defaultdict - but we have to give it *some* callable that defines the behavior when the key
+    is not present in the dictionary, so this returns the default "vals_per_class" if a class is encountered that is not
+    specified in the configuration file. I don't think there's an easy way to make this user-settable, unfortunately
+    """
+    return 0
+
+def pregen_one_sample(dataloader, batch_size, output_dir):
+    """
+    Pregenerate tensors for a single sample
+    """
+    TRUNCATE_LEN = 148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
+    uid = "".join(random.choices(ascii_letters + digits, k=8))
+    src_prefix = "src"
+    tgt_prefix = "tgkmers"
+    tn_prefix = "tntgt"
+
+    logger.info(f"Saving tensors from {dataloader.bam} to {output_dir}/ with uid: {uid}")
+    for i, (src, tgt, tntgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
+        tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
+        logger.info(f"Saving batch {i} with uid {uid}")
+        logger.info(f"Src dtype is {src.dtype}")
+
+        # For debugging on only!
+        #uid = Path(dataloader.bam).name.replace(".cram", "")
+
+        for data, prefix in zip([src, tgt_kmers, tntgt],
+                                [src_prefix, tgt_prefix, tn_prefix]):
+            with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
+                torch.save(data, fh)
+
+def pregen(config, **kwargs):
+    """
+    Pre-generate tensors from BAM files + labels and save them in 'datadir' for quicker use in training
+    (this takes a long time)
+    """
+    conf = load_conf(config)
+    batch_size = kwargs.get('batch_size', 64)
+    reads_per_pileup = kwargs.get('read_depth', 150)
+    samples_per_pos = kwargs.get('samples_per_pos', 2)
+    processes = kwargs.get('threads', 1)
+    jitter = kwargs.get('jitter', 0)
+
+    vals_per_class = defaultdict(default_vals_per_class)
+    vals_per_class.update(conf['vals_per_class'])
+
+    logger.info(f"Full config: {conf}")
+    output_dir = Path(kwargs.get('dir'))
+
+    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
+    dataloaders = [
+            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class, max_jitter_bases=jitter)
+        for c in conf['data']
+    ]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Submitting {len(dataloaders)} jobs with {processes} process(es)")
+
+    if processes == 1:
+        for dl in dataloaders:
+            pregen_one_sample(dl, batch_size, output_dir)
+
+    else:
+        futures = []
+        with ProcessPoolExecutor(max_workers=processes) as executor:
+            for dl in dataloaders:
+                futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
+        for fut in futures:
+            fut.result()
 
 
 def find_sus_regions(bam, bed, reference, threads):

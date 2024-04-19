@@ -362,8 +362,7 @@ def _process_sample(args):
         var_freq_file = pysam.VariantFile(var_freq_file)
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
-    tp_feats = []
-    fp_feats = []
+    allfeats = []
     featstrs = []
     labels = []
     max_tp_snvs = 10000
@@ -392,7 +391,7 @@ def _process_sample(args):
                         logger.warning(f"Couldn't find true pos match for {var}")
                         continue
                     feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
-                    tp_feats.append(feats)
+                    allfeats.append(feats)
                     featstrs.append(fstr)
                     labels.append(1)
                     if is_snv(var):
@@ -411,17 +410,15 @@ def _process_sample(args):
                     logger.warning(f"Couldn't find FP match for find variant {var}")
                     continue
                 feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
-                fp_feats.append(feats)
+                allfeats.append(feats)
                 featstrs.append(fstr)
                 labels.append(0)
 
-    logger.info(f"Done with {sample} : TPs: {len(tp_feats)} FPs: {len(fp_feats)}")
-    return tp_feats, fp_feats, featstrs, labels
+    logger.info(f"Done with {sample} : TPs: {sum(labels)} FPs: {np.sum(1 - np.array(labels))}")
+    return allfeats, featstrs, labels
 
 
 def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
-    alltps = []
-    allfps = []
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -438,9 +435,9 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps'), var_freq_file) for sample in conf.keys()))
 
     y = []
-    for tpfeats, fpfeats, fstrs, labs in results:
-        alltps.extend(tpfeats)
-        allfps.extend(fpfeats)
+    feats = []
+    for samplefeats, fstrs, labs in results:
+        feats += samplefeats
         y.extend(labs)
         if feat_fh:
             for fstr in fstrs:
@@ -454,14 +451,13 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     if label_fh:
         label_fh.close()
 
-
-    logger.info(f"Loaded {len(alltps)} TP and {len(allfps)} FPs")
-    feats = alltps + allfps
+    y = np.array(y)
+    logger.info(f"Loaded {np.sum(1 - y)} TP and {np.sum(y)} FPs")
 
     feat_train, feat_test, lab_train, lab_test = train_test_split(feats, y, test_size=0.1)
     print(f"Test set size: {len(lab_test)}")
-    #clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
-    clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
+    clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
+    #clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
     
     clf.fit(feat_train, lab_train)
 
@@ -500,7 +496,7 @@ def predict_one_record(loaded_model, var_rec, aln, **kwargs):
     :return: classifier quality
     """
     feats = var_feats(var_rec, aln, None)
-    logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
+    #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):
         prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
         return prediction[0, 1]

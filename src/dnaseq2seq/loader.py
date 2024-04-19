@@ -18,8 +18,8 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 
-import util
-import pregen
+from dnaseq2seq import util
+from dnaseq2seq import pregen
 
 class ReadLoader:
     """
@@ -312,37 +312,4 @@ class PregenLoader:
         self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix) # Search for new data with every iteration ?
         for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
             yield result
-
-
-
-
-# def make_loader(bampath, refpath, csv, max_reads_per_aln, samples_per_pos, max_to_load=1e9):
-#     allsrc = []
-#     alltgt = []
-#     count = 0
-#     seq_len = 150
-#     logger.info(f"Creating new data loader from {bampath}")
-#     counter = defaultdict(int)
-#     classes = []
-#     for enc, tgt, row in load_from_csv(bampath, refpath, csv, max_reads_per_aln=max_reads_per_aln, samples_per_pos=samples_per_pos):
-#         status, vtype = row.status, row.vtype
-#         label_class = "-".join((status, vtype))
-#         classes.append(label_class)
-#         counter[label_class] += 1
-#         src, tgt = trim_pileuptensor(enc, tgt.unsqueeze(0), seq_len)
-#         assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
-#         assert tgt.shape[1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[1]} but should be {seq_len}"
-#         allsrc.append(src)
-#         alltgt.append(tgt)
-#         count += 1
-#         if count % 100 == 0:
-#             logger.info(f"Loaded {count} tensors from {csv}")
-#         if count == max_to_load:
-#             logger.info(f"Stopping tensor load after {max_to_load}")
-#             break
-#     logger.info(f"Loaded {count} tensors from {csv}")
-#     logger.info("Class breakdown is: " + " ".join(f"{k}={v}" for k,v in counter.items()))
-#     weights = np.array([1.0 / counter[c] for c in classes])
-#     return WeightedLoader(torch.stack(allsrc), torch.stack(alltgt).long(), weights, DEVICE)
-
 
