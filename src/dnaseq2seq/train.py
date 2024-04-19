@@ -18,10 +18,10 @@ import torch.cuda.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
-import vcf
-import loader
-import util
-from model import VarTransformer
+from dnaseq2seq import vcf
+from dnaseq2seq import loader
+from dnaseq2seq import util
+from dnaseq2seq.model import VarTransformer
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
 formatter = logging.Formatter(LOG_FORMAT)
