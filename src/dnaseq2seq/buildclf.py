@@ -436,8 +436,6 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
 
     y = []
     feats = []
-    tpcount = 0
-    fpcount = 0
     for samplefeats, fstrs, labs in results:
         feats += samplefeats
         y.extend(labs)
