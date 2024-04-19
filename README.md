@@ -9,7 +9,13 @@ any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or deci
 quality cutoffs, read counts, allele frequencies, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
-#### A note on earlier versions
+
+## What's new with version 1.1
+
+Jenever 1.1 has much improved calling performance compared to version 1.0, due to a better parallelization strategy for region encoding & calling. Variant detection accuracy should be about the same as 1.0. Also fixes a minor regression which occurred when some fixes were made to the phasing logic. The regression caused the features used in the classifier model to be incorrect in a small fraction of variants, resulting in quality scores that were too high and decreased precision (~0.1% of variants were affected). 
+
+
+#### A note on Jovian
 
 An earlier version of this tool, called Jovian, was made available in 2022 (see [preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for details).
 Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
