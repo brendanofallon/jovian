@@ -9,8 +9,7 @@ import random
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import List, Optional, Callable
-import heapq
+from typing import List, Callable
 
 import torch
 import torch.multiprocessing as mp
@@ -18,11 +17,11 @@ import queue
 import pysam
 import numpy as np
 
-from model import VarTransformer
-import buildclf
-import vcf
-import util
-import bam
+from dnaseq2seq.model import VarTransformer
+from dnaseq2seq import buildclf
+from dnaseq2seq import vcf
+from dnaseq2seq import util
+from dnaseq2seq import bam
 
 logger = logging.getLogger(__name__)
 
@@ -535,12 +534,12 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
 
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             bp = sum(d['region'][2] - d['region'][1] for d in datas)
             bp_processed += bp
             logger.info(
-                f"Calling variants near {datas[-1]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {util.format_bp(bp_processed)}"
+                f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
             )
+            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
