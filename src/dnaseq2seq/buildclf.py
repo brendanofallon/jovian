@@ -6,7 +6,8 @@ import numpy as np
 import bisect
 import pysam
 import pickle
-#import sklearn
+
+# import sklearn
 import multiprocessing as mp
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -19,9 +20,9 @@ import argparse
 
 logger = logging.getLogger(__name__)
 
-SUPPORTS_REF=0
-SUPPORTS_ALT=1
-SUPPORTS_OTHER=2
+SUPPORTS_REF = 0
+SUPPORTS_ALT = 1
+SUPPORTS_OTHER = 2
 
 
 class CigarOperator(Enum):
@@ -36,11 +37,14 @@ class CigarOperator(Enum):
     BAM_CDIFF = 8  # 'X'
     BAM_CBACK = 9  # 'B'
 
+
 class OffsetOutOfBoundsException(Exception):
     """
     Raised when computing read position offset if we end up with an invalid value
     """
+
     pass
+
 
 def trim_suffix(ref, alt):
     r = ref
@@ -80,13 +84,12 @@ def find_var(varfile, chrom, pos, ref, alt):
     ref, alt = trim_suffix(ref, alt)
     poffset, trimref, trimalt = trim_prefix(ref, alt)
     pos = pos + poffset
-    for var in varfile.fetch(chrom, pos-5, pos+3):
+    for var in varfile.fetch(chrom, pos - 5, pos + 3):
         for i, varalt in enumerate(var.alts):
             varref, varalt = trim_suffix(var.ref, varalt)
             offset, r, a = trim_prefix(varref, varalt)
             if var.pos + offset == pos and r == trimref and a == trimalt:
                 return var, i
-
 
 
 @lru_cache(maxsize=1000000)
@@ -95,12 +98,13 @@ def var_af(varfile, chrom, pos, ref, alt):
     af = 0.0
     if result is not None:
         var, alt_index = result
-        af = var.info['AF'][alt_index]
+        af = var.info["AF"][alt_index]
         if af is None or "PASS" not in var.filter:
             af = 0.0
         else:
             af = float(af)
     return af
+
 
 def get_query_pos(read, ref_pos):
     """
@@ -113,14 +117,21 @@ def get_query_pos(read, ref_pos):
     """
     ref_mapping = read.get_reference_positions()
     if not ref_mapping:
-        raise OffsetOutOfBoundsException('ref_mapping is empty for read {}'.format(read))
+        raise OffsetOutOfBoundsException(
+            "ref_mapping is empty for read {}".format(read)
+        )
     offset = bisect.bisect_left(ref_mapping, ref_pos)
     if offset > len(ref_mapping):
-        raise OffsetOutOfBoundsException('offset {} > len(ref_mapping): {}'.format(offset, len(ref_mapping)))
+        raise OffsetOutOfBoundsException(
+            "offset {} > len(ref_mapping): {}".format(offset, len(ref_mapping))
+        )
     elif ref_pos < ref_mapping[0]:
-        raise OffsetOutOfBoundsException('ref_pos {} < ref_mapping[0] {}'.format(ref_pos, ref_mapping[0]))
+        raise OffsetOutOfBoundsException(
+            "ref_pos {} < ref_mapping[0] {}".format(ref_pos, ref_mapping[0])
+        )
 
     return offset
+
 
 def cigop_at_offset(read, offset):
     """
@@ -131,7 +142,9 @@ def cigop_at_offset(read, offset):
     for cigop, length in read.cigartuples:
         if offset <= length:
             return cigop, length
-        elif cigop != CigarOperator.BAM_CINS.value: # Insertions dont count against ref bases so dont subtract them
+        elif (
+            cigop != CigarOperator.BAM_CINS.value
+        ):  # Insertions dont count against ref bases so dont subtract them
             offset -= length
     return -1, -1
 
@@ -152,7 +165,7 @@ def read_support(read, offset, ref, alt):
             return SUPPORTS_OTHER
     elif len(ref) > 0 and len(alt) == 0:
         # Deletion...
-        cigop, length = cigop_at_offset(read, offset+1)
+        cigop, length = cigop_at_offset(read, offset + 1)
         if cigop == CigarOperator.BAM_CDEL.value and length == len(ref):
             return SUPPORTS_ALT
         elif cigop == CigarOperator.BAM_CDEL.value and length != len(ref):
@@ -171,15 +184,13 @@ def read_support(read, offset, ref, alt):
     else:
         # Multinucleotide var - look to see if the X bases match ref or alt, where X is min length of ref, alt
         # Since we trim matches bases on ref and alt this seems OK
-        bases = read.query_sequence[offset:offset + min(len(ref), len(alt))]
+        bases = read.query_sequence[offset : offset + min(len(ref), len(alt))]
         if bases == ref:
             return SUPPORTS_REF
         elif bases == alt:
             return SUPPORTS_ALT
         else:
             return SUPPORTS_OTHER
-
-
 
 
 def bamfeats(var, aln):
@@ -196,7 +207,7 @@ def bamfeats(var, aln):
         return 0, 0, 0, 0, 0, 0, 0
 
     varstart = var.start + pos_offset
-    for read in aln.fetch(var.chrom, var.start-1, var.start+1):
+    for read in aln.fetch(var.chrom, var.start - 1, var.start + 1):
         try:
             offset = get_query_pos(read, varstart)
             support_val = read_support(read, offset, trimref, trimalt)
@@ -223,30 +234,33 @@ def bamfeats(var, aln):
     return tot_reads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt
 
 
-
 def var_feats(var, aln, var_freq_file):
     feats = []
-    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
+    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(
+        var, aln
+    )
     if amreads > 0:
         vaf = (pos_alt + neg_alt) / amreads
     else:
-        vaf = -1.0 # In some important / complex cases we can't find any reads, and setting vaf = -1 flags these?
+        vaf = (
+            -1.0
+        )  # In some important / complex cases we can't find any reads, and setting vaf = -1 flags these?
 
     feats.append(var.qual)
     feats.append(len(var.ref))
     feats.append(max(len(a) for a in var.alts))
-    feats.append(min(var.info['QUALS']))
-    feats.append(max(var.info['QUALS']))
-    feats.append(var.info['WIN_VAR_COUNT'][0])
-    feats.append(var.info['WIN_CIS_COUNT'][0])
-    #feats.append(var.info['WIN_TRANS_COUNT'][0]) # Not used in latest lcbm model
-    feats.append(var.info['STEP_COUNT'][0])
-    feats.append(var.info['CALL_COUNT'][0])
-    feats.append(min(var.info['WIN_OFFSETS']))
-    feats.append(max(var.info['WIN_OFFSETS']))
-    feats.append(var.samples[0]['DP'])
-    #feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
-    feats.append(1 if 0 in var.samples[0]['GT'] else 0)
+    feats.append(min(var.info["QUALS"]))
+    feats.append(max(var.info["QUALS"]))
+    feats.append(var.info["WIN_VAR_COUNT"][0])
+    feats.append(var.info["WIN_CIS_COUNT"][0])
+    # feats.append(var.info['WIN_TRANS_COUNT'][0]) # Not used in latest lcbm model
+    feats.append(var.info["STEP_COUNT"][0])
+    feats.append(var.info["CALL_COUNT"][0])
+    feats.append(min(var.info["WIN_OFFSETS"]))
+    feats.append(max(var.info["WIN_OFFSETS"]))
+    feats.append(var.samples[0]["DP"])
+    # feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
+    feats.append(1 if 0 in var.samples[0]["GT"] else 0)
     feats.append(vaf)
     feats.append(amreads)
     feats.append(pos_alt + neg_alt)
@@ -255,41 +269,47 @@ def var_feats(var, aln, var_freq_file):
 
 def feat_names():
     return [
-            "qual",
-            "ref_len",
-            "alt_len",
-            "min_qual",
-            "max_qual",
-            "var_count",
-            "cis_count",
-            #"trans_count",
-            "step_count",
-            "call_count",
-            "min_win_offset",
-            "max_win_offset",
-            "dp",
-            #"af",
-            "het",
-            "vaf",
-            "vafreads",
-            "altreads",
-          #  "strandbias_stat",
-        ]
+        "qual",
+        "ref_len",
+        "alt_len",
+        "min_qual",
+        "max_qual",
+        "var_count",
+        "cis_count",
+        # "trans_count",
+        "step_count",
+        "call_count",
+        "min_win_offset",
+        "max_win_offset",
+        "dp",
+        # "af",
+        "het",
+        "vaf",
+        "vafreads",
+        "altreads",
+        #  "strandbias_stat",
+    ]
 
 
 def varstr(var):
     return f"{var.chrom}:{var.pos}-{var.ref}-{var.alts[0]}"
 
+
 def is_snv(var):
     return len(var.ref) == 1 and len(var.alts[0]) == 1
+
 
 def is_del(var):
     return len(var.ref) > 1 and len(var.alts[0]) == 1
 
+
 def is_ins(var):
     return len(var.ref) == 1 and len(var.alts[0]) > 1
 
-def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins=float("inf"), skip=0):
+
+def vcf_sampling_iter(
+    vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins=float("inf"), skip=0
+):
     snvcount = 0
     delcount = 0
     inscount = 0
@@ -316,10 +336,12 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
 
         yield var
 
+
 def rec_extract_feats(var, aln, var_freq_file):
     feats = var_feats(var, aln, var_freq_file)
     fstr = ",".join(str(x) for x in [varstr(var)] + list(feats))
     return feats, fstr
+
 
 def extract_feats(vcf, aln, var_freq_file):
     allfeats = []
@@ -333,9 +355,9 @@ def extract_feats(vcf, aln, var_freq_file):
 
 def save_model(mdl, path):
     logger.info(f"Saving model to {path}")
-    with open(path, 'wb') as fh:
+    with open(path, "wb") as fh:
         pickle.dump(mdl, fh)
-        
+
 
 def load_model(path):
     logger.info(f"Loading model from {path}")
@@ -344,16 +366,18 @@ def load_model(path):
         bst.load_model(path)
         return bst
     else:
-        with open(path, 'rb') as fh:
+        with open(path, "rb") as fh:
             return pickle.load(fh)
+
 
 def _find_var(chrom, pos, ref, alts, vcf):
     assert type(alts) == tuple, "alts must be a tuple"
     alts = set(alts)
-    for v in vcf.fetch(chrom, pos-2, pos+2):
+    for v in vcf.fetch(chrom, pos - 2, pos + 2):
         if v.chrom == chrom and v.pos == pos and v.ref == ref and set(v.alts) == alts:
             return v
     return None
+
 
 def _process_sample(args):
     sample, bampath, reference_filename, varoutputs, tps, fps, var_freq_file = args
@@ -376,16 +400,18 @@ def _process_sample(args):
         tpfile = pysam.VariantFile(tp)
         fpfile = pysam.VariantFile(fp)
         for var in pysam.VariantFile(outputfile):
-            base = var.info.get('BASE', '')
+            base = var.info.get("BASE", "")
             if "CA" in base:
                 continue
-            call = var.info.get('CALL')
+            call = var.info.get("CALL")
             if call is None:
                 continue
-            if call == 'TP' and random.random() < tp_downsample_freq:
-                if ((is_snv(var) and tpsnvs < max_tp_snvs)
-                        or (is_ins(var) and tpins < max_tp_ins)
-                        or (is_del(var) and tpdels < max_tp_dels)):
+            if call == "TP" and random.random() < tp_downsample_freq:
+                if (
+                    (is_snv(var) and tpsnvs < max_tp_snvs)
+                    or (is_ins(var) and tpins < max_tp_ins)
+                    or (is_del(var) and tpdels < max_tp_dels)
+                ):
                     tpvar = _find_var(var.chrom, var.pos, var.ref, var.alts, tpfile)
                     if tpvar is None:
                         logger.warning(f"Couldn't find true pos match for {var}")
@@ -400,11 +426,13 @@ def _process_sample(args):
                         tpins += 1
                     elif is_del(var):
                         tpdels += 1
-            elif call == 'FP':
-                alleles = list(var.samples['CALLS']['GT'])
-                #print(f"Looking at {str(var).strip()}, alleles are: {alleles}")
-                alts = tuple(var.alleles[a] for a in alleles if (a is not None) and a != 0 ) # Half calls like ./1 have None as an allele
-                #print(f"     parsed alts: {alts}")
+            elif call == "FP":
+                alleles = list(var.samples["CALLS"]["GT"])
+                # print(f"Looking at {str(var).strip()}, alleles are: {alleles}")
+                alts = tuple(
+                    var.alleles[a] for a in alleles if (a is not None) and a != 0
+                )  # Half calls like ./1 have None as an allele
+                # print(f"     parsed alts: {alts}")
                 fpvar = _find_var(var.chrom, var.pos, var.ref, alts, fpfile)
                 if fpvar is None:
                     logger.warning(f"Couldn't find FP match for find variant {var}")
@@ -414,11 +442,20 @@ def _process_sample(args):
                 featstrs.append(fstr)
                 labels.append(0)
 
-    logger.info(f"Done with {sample} : TPs: {sum(labels)} FPs: {np.sum(1 - np.array(labels))}")
+    logger.info(
+        f"Done with {sample} : TPs: {sum(labels)} FPs: {np.sum(1 - np.array(labels))}"
+    )
     return allfeats, featstrs, labels
 
 
-def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
+def train_model(
+    conf,
+    threads,
+    var_freq_file,
+    feat_csv=None,
+    labels_csv=None,
+    reference_filename=None,
+):
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -432,7 +469,21 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         label_fh = None
 
     with mp.Pool(threads) as pool:
-        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps'), var_freq_file) for sample in conf.keys()))
+        results = pool.map(
+            _process_sample,
+            (
+                (
+                    sample,
+                    conf[sample]["bam"],
+                    reference_filename,
+                    conf[sample].get("vars"),
+                    conf[sample].get("tps"),
+                    conf[sample].get("fps"),
+                    var_freq_file,
+                )
+                for sample in conf.keys()
+            ),
+        )
 
     y = []
     feats = []
@@ -454,16 +505,27 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
     y = np.array(y)
     logger.info(f"Loaded {np.sum(1 - y)} TP and {np.sum(y)} FPs")
 
-    feat_train, feat_test, lab_train, lab_test = train_test_split(feats, y, test_size=0.1)
+    feat_train, feat_test, lab_train, lab_test = train_test_split(
+        feats, y, test_size=0.1
+    )
     print(f"Test set size: {len(lab_test)}")
-    clf = RandomForestClassifier(n_estimators=100, max_depth=25, random_state=0, max_features=None, class_weight="balanced", n_jobs=threads)
-    #clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
-    
+    clf = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=25,
+        random_state=0,
+        max_features=None,
+        class_weight="balanced",
+        n_jobs=threads,
+    )
+    # clf = XGBClassifier(n_estimators=100, max_depth=10, learning_rate=1, objective='binary:logistic')
+
     clf.fit(feat_train, lab_train)
 
-    preds = clf.predict_proba(feat_test)[:,1]
+    preds = clf.predict_proba(feat_test)[:, 1]
     threshold = 0.1
-    ppv, ppa, fscore, support = precision_recall_fscore_support(lab_test, preds > threshold)
+    ppv, ppa, fscore, support = precision_recall_fscore_support(
+        lab_test, preds > threshold
+    )
     print(f"Metrics at threshold : {threshold}")
     print(f"PPA : {ppa[1] :.5f}")
     print(f"PPV : {ppv[1] :.5f}")
@@ -474,17 +536,17 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
 
 def predict(model, vcf, **kwargs):
     model = load_model(model)
-    bam = pysam.AlignmentFile(kwargs.get('bam'))
+    bam = pysam.AlignmentFile(kwargs.get("bam"))
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
-    if kwargs.get('freq_file'):
-        var_freq_file = pysam.VariantFile(kwargs.get('freq_file'))
+    if kwargs.get("freq_file"):
+        var_freq_file = pysam.VariantFile(kwargs.get("freq_file"))
     else:
         var_freq_file = None
-    print(vcf.header, end='')
+    print(vcf.header, end="")
     for var in vcf:
         proba = predict_one_record(model, var, bam, var_freq_file)
         var.qual = proba
-        print(var, end='')
+        print(var, end="")
 
 
 def predict_one_record(loaded_model, var_rec, aln, **kwargs):
@@ -496,7 +558,7 @@ def predict_one_record(loaded_model, var_rec, aln, **kwargs):
     :return: classifier quality
     """
     feats = var_feats(var_rec, aln, None)
-    #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
+    # logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):
         prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
         return prediction[0, 1]
@@ -509,27 +571,35 @@ def predict_one_record(loaded_model, var_rec, aln, **kwargs):
 def train(conf, output, **kwargs):
     logger.info(f"Loading configuration from {conf}")
     conf = yaml.safe_load(open(conf).read())
-    model = train_model(conf, 
-            threads=kwargs.get('threads'), 
-            var_freq_file=kwargs.get('freq_file'),
-            feat_csv=kwargs.get('feat_csv'),
-            labels_csv=kwargs.get('labels_csv'),
-            reference_filename=kwargs.get('reference'))
+    model = train_model(
+        conf,
+        threads=kwargs.get("threads"),
+        var_freq_file=kwargs.get("freq_file"),
+        feat_csv=kwargs.get("feat_csv"),
+        labels_csv=kwargs.get("labels_csv"),
+        reference_filename=kwargs.get("reference"),
+    )
     save_model(model, output)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-t", "--threads", help="Number of threads to use", type=int, default=-1) # -1 means all threads
-    
+    parser.add_argument(
+        "-t", "--threads", help="Number of threads to use", type=int, default=-1
+    )  # -1 means all threads
+
     subparser = parser.add_subparsers()
 
     trainparser = subparser.add_parser("train", help="Train a new model")
     trainparser.add_argument("-c", "--conf", help="Configuration file")
-    trainparser.add_argument("-t", "--threads", help="thread count", default=24, type=int)
+    trainparser.add_argument(
+        "-t", "--threads", help="thread count", default=24, type=int
+    )
     trainparser.add_argument("-o", "--output", help="Output path")
     trainparser.add_argument("-r", "--reference", help="Reference genome fasta")
-    trainparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
+    trainparser.add_argument(
+        "-f", "--freq-file", help="Variant frequency file (Gnomad or similar)"
+    )
     trainparser.add_argument("--feat-csv", help="Feature dump CSV")
     trainparser.add_argument("--labels-csv", help="Label dump CSV")
     trainparser.set_defaults(func=train)
@@ -537,7 +607,9 @@ def main():
     predictparser = subparser.add_parser("predict", help="Predict")
     predictparser.add_argument("-m", "--model", help="Model file")
     predictparser.add_argument("-b", "--bam", help="Path to the bam")
-    predictparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
+    predictparser.add_argument(
+        "-f", "--freq-file", help="Variant frequency file (Gnomad or similar)"
+    )
     predictparser.add_argument("-v", "--vcf", help="Input VCF")
     predictparser.set_defaults(func=predict)
 
@@ -546,14 +618,16 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(format='[%(asctime)s]  %(name)s  %(levelname)s  %(message)s',
-                    datefmt='%m-%d %H:%M:%S',
-                    level=logging.INFO)
+    logging.basicConfig(
+        format="[%(asctime)s]  %(name)s  %(levelname)s  %(message)s",
+        datefmt="%m-%d %H:%M:%S",
+        level=logging.INFO,
+    )
 
     main()
 
-    #aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
-    #vcf = pysam.VariantFile("test.vcf")
-    #var = next(vcf)
-    #x = bamfeats(var, aln)
-   # print(x)
+    # aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    # vcf = pysam.VariantFile("test.vcf")
+    # var = next(vcf)
+    # x = bamfeats(var, aln)
+# print(x)

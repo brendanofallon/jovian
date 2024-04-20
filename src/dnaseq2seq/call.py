@@ -1,4 +1,3 @@
-
 import os
 import time
 
@@ -26,18 +25,25 @@ from dnaseq2seq import bam
 logger = logging.getLogger(__name__)
 
 
-DEVICE = torch.device("cuda") if hasattr(torch, 'cuda') and torch.cuda.is_available() else torch.device("cpu")
+DEVICE = (
+    torch.device("cuda")
+    if hasattr(torch, "cuda") and torch.cuda.is_available()
+    else torch.device("cpu")
+)
 
 import warnings
-warnings.filterwarnings(action='ignore')
+
+warnings.filterwarnings(action="ignore")
 
 REGION_ERROR_TOKEN = "error"
+
 
 class RegionStopSignal:
 
     def __init__(self, total_sus_regions, total_sus_bp):
         self.tot_sus_regions = total_sus_regions
         self.tot_sus_bp = total_sus_bp
+
 
 class CallingStopSignal:
 
@@ -46,6 +52,7 @@ class CallingStopSignal:
         self.sus_region_count = sus_region_count
         self.sus_region_bp = sus_region_bp
 
+
 class CallingErrorSignal:
 
     def __init__(self, errormsg):
@@ -53,8 +60,8 @@ class CallingErrorSignal:
 
 
 def randchars(n=6):
-    """ Generate a random string of letters and numbers """
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
+    """Generate a random string of letters and numbers"""
+    return "".join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
@@ -72,8 +79,12 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
-    assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
-    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter', multiple_iterators=False):
+    assert (
+        len(refseq) == stop - start
+    ), f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
+    for col in aln.pileup(
+        chrom, start=start, stop=stop, stepper="nofilter", multiple_iterators=False
+    ):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
         if start <= col.reference_pos < stop:
@@ -87,7 +98,9 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
                 if read.query_position is not None:
                     base = read.alignment.query_sequence[read.query_position]
-                    if base != refbase:  # May want to check quality before adding a mismatch?
+                    if (
+                        base != refbase
+                    ):  # May want to check quality before adding a mismatch?
                         base_mismatches += 1
 
                 if indel_count > 1 or base_mismatches > 2:
@@ -95,39 +108,41 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                     break
 
 
-
 def load_model(model_path):
     """
     Load model from given path and return it in .eval() mode
     """
     model_info = torch.load(model_path, map_location=DEVICE)
-    statedict = model_info['model']
-    modelconf = model_info['conf']
+    statedict = model_info["model"]
+    modelconf = model_info["conf"]
     new_state_dict = {}
     for key in statedict.keys():
-      new_key = key.replace('_orig_mod.', '')
-      new_state_dict[new_key] = statedict[key]
+        new_key = key.replace("_orig_mod.", "")
+        new_state_dict[new_key] = statedict[key]
     statedict = new_state_dict
 
-    model = VarTransformer(read_depth=modelconf['max_read_depth'],
-                           feature_count=modelconf['feats_per_read'],
-                           kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
-                           n_encoder_layers=modelconf['encoder_layers'],
-                           n_decoder_layers=modelconf['decoder_layers'],
-                           embed_dim_factor=modelconf['embed_dim_factor'],
-                           encoder_attention_heads=modelconf['encoder_attention_heads'],
-                           decoder_attention_heads=modelconf['decoder_attention_heads'],
-                           d_ff=modelconf['dim_feedforward'],
-                           device=DEVICE)
+    model = VarTransformer(
+        read_depth=modelconf["max_read_depth"],
+        feature_count=modelconf["feats_per_read"],
+        kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
+        n_encoder_layers=modelconf["encoder_layers"],
+        n_decoder_layers=modelconf["decoder_layers"],
+        embed_dim_factor=modelconf["embed_dim_factor"],
+        encoder_attention_heads=modelconf["encoder_attention_heads"],
+        decoder_attention_heads=modelconf["decoder_attention_heads"],
+        d_ff=modelconf["dim_feedforward"],
+        device=DEVICE,
+    )
 
     model.load_state_dict(statedict)
 
     model.eval()
     model.to(DEVICE)
-    
+
     model = torch.compile(model, fullgraph=True)
-    
+
     return model
+
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
@@ -144,13 +159,23 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     return [
         (chrom, window_idx, start, end)
         for start, end in util.cluster_positions(
-            gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
+            gen_suspicious_spots(
+                bamfile, chrom, window_start, window_end, reference_fasta
+            ),
             maxdist=maxdist,
         )
     ]
 
 
-def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str, classifier_path=None, **kwargs):
+def call(
+    model_path: str,
+    bam: str,
+    bed: str,
+    reference_fasta: str,
+    vcf_out: str,
+    classifier_path=None,
+    **kwargs,
+):
     """
     Use model in statedict to call variants in bam in genomic regions in bed file.
     Steps:
@@ -172,26 +197,30 @@ def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str
     np.random.seed(seed)
     random.seed(seed)
 
-    torch.set_num_threads(1) # Per-process ?
-    mp.set_start_method('spawn')
+    torch.set_num_threads(1)  # Per-process ?
+    mp.set_start_method("spawn")
     start_time = time.perf_counter()
-    threads = kwargs.get('threads', 1)
-    max_batch_size = kwargs.get('max_batch_size', 64)
+    threads = kwargs.get("threads", 1)
+    max_batch_size = kwargs.get("max_batch_size", 64)
     logger.info(f"Using {threads} threads for encoding")
     logger.info(f"Found torch device: {DEVICE}")
 
-    if 'cuda' in str(DEVICE):
+    if "cuda" in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
-            logger.info(f"Using CUDA device {idev} {torch.cuda.get_device_name({idev})}")
+            logger.info(
+                f"Using CUDA device {idev} {torch.cuda.get_device_name({idev})}"
+            )
 
     logger.info(f"The model will be loaded from path {model_path}")
 
-    vcf_header_extras = kwargs.get('cmdline')
+    vcf_header_extras = kwargs.get("cmdline")
 
     assert Path(model_path).is_file(), f"Model file {model_path} isn't a regular file"
     assert Path(bam).is_file(), f"Alignment file {bam} isn't a regular file"
     assert Path(bed).is_file(), f"BED file {bed} isn't a regular file"
-    assert Path(reference_fasta).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
+    assert Path(
+        reference_fasta
+    ).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
 
     call_vars_in_parallel(
         bampath=bam,
@@ -209,11 +238,17 @@ def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str
     end_time = time.perf_counter()
     elapsed_seconds = end_time - start_time
     if elapsed_seconds > 3600:
-        logger.info(f"Total running time of call subcommand is: {elapsed_seconds / 3600 :.2f} hours")
+        logger.info(
+            f"Total running time of call subcommand is: {elapsed_seconds / 3600 :.2f} hours"
+        )
     elif elapsed_seconds > 120:
-        logger.info(f"Total running time of call subcommand is: {elapsed_seconds / 60 :.2f} minutes")
+        logger.info(
+            f"Total running time of call subcommand is: {elapsed_seconds / 60 :.2f} minutes"
+        )
     else:
-        logger.info(f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds")
+        logger.info(
+            f"Total running time of call subcommand is: {elapsed_seconds :.2f} seconds"
+        )
 
 
 def region_priority(region_data: dict, chrom_order: List[str]) -> int:
@@ -221,13 +256,21 @@ def region_priority(region_data: dict, chrom_order: List[str]) -> int:
     Returns the priority value for the given region tensor
     Smaller-valued items are grabbed first by a PriorityQueue
     """
-    chrom, start, end = region_data['region']
+    chrom, start, end = region_data["region"]
     idx = chrom_order.index(chrom)
     return int(1e9 * idx + start)
 
 
 def call_vars_in_parallel(
-    bampath, bed, refpath, model_path, classifier_path, threads, max_batch_size, vcf_out, vcf_header_extras,
+    bampath,
+    bed,
+    refpath,
+    model_path,
+    classifier_path,
+    threads,
+    max_batch_size,
+    vcf_out,
+    vcf_header_extras,
 ):
     """
     Call variants in asynchronous fashion. There are three types of Processes that communicate via two mp.Queues
@@ -245,29 +288,63 @@ def call_vars_in_parallel(
 
     """
 
-    regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
-    region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
+    regions_queue = mp.Queue(
+        maxsize=1024
+    )  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
+    tensors_queue = mp.Queue(
+        maxsize=1024
+    )  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    region_keepalive_queue = (
+        mp.Queue()
+    )  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
     tot_regions, tot_bases = util.count_bed(bed)
     bed_chrom_order = util.unique_chroms(bed)
     priority_func = partial(region_priority, chrom_order=bed_chrom_order)
 
-    logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {bed}")
+    logger.info(
+        f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {bed}"
+    )
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
-    region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
+    region_finder = mp.Process(
+        target=find_regions, args=(regions_queue, bed, bampath, refpath, threads)
+    )
     region_finder.start()
 
-    region_workers = [mp.Process(target=generate_tensors,
-                                 args=(regions_queue, tensors_queue, bampath, refpath, region_keepalive_queue))
-                      for _ in range(threads)]
+    region_workers = [
+        mp.Process(
+            target=generate_tensors,
+            args=(
+                regions_queue,
+                tensors_queue,
+                bampath,
+                refpath,
+                region_keepalive_queue,
+            ),
+        )
+        for _ in range(threads)
+    ]
 
     for p in region_workers:
         p.start()
 
-    model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
+    model_proc = mp.Process(
+        target=accumulate_regions_and_call,
+        args=(
+            model_path,
+            tensors_queue,
+            priority_func,
+            refpath,
+            bampath,
+            classifier_path,
+            max_batch_size,
+            vcf_out,
+            vcf_header_extras,
+            threads,
+            region_keepalive_queue,
+        ),
+    )
     model_proc.start()
 
     region_finder.join()
@@ -281,19 +358,20 @@ def call_vars_in_parallel(
     logger.info("All done")
 
 
-
 def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     """
     Read the input BED formatted file and merge / split the regions into big chunks
     Then find regions that may contain a variant, and add all of these
     to the region_queue
     """
-    torch.set_num_threads(2) # Must be here for it to work for this process
+    torch.set_num_threads(2)  # Must be here for it to work for this process
     region_count = 0
     tot_size_bp = 0
     sus_region_bp = 0
     sus_region_count = 0
-    for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
+    for idx, (chrom, window_start, window_end) in enumerate(
+        util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)
+    ):
         region_count += 1
         tot_size_bp += window_end - window_start
 
@@ -315,7 +393,16 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
         regionq.put(RegionStopSignal(sus_region_count, sus_region_bp))
 
 
-def encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size, window_step):
+def encode_region(
+    bampath,
+    refpath,
+    region,
+    max_read_depth,
+    window_size,
+    min_reads,
+    batch_size,
+    window_step,
+):
     """
     Encode the reads in the given region and save the data along with the region and start offsets to a file
     and return the absolute path of the file
@@ -329,33 +416,55 @@ def encode_region(bampath, refpath, region, max_read_depth, window_size, min_rea
     all_encoded = []
     all_starts = []
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
-                                                     window_size=window_size, min_reads=min_reads, batch_size=batch_size, window_step=window_step):
+    for encoded_region, start_positions in _encode_region(
+        aln,
+        reference,
+        chrom,
+        start,
+        end,
+        max_read_depth,
+        window_size=window_size,
+        min_reads=min_reads,
+        batch_size=batch_size,
+        window_step=window_step,
+    ):
         all_encoded.append(encoded_region)
         all_starts.extend(start_positions)
-    logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
+    logger.debug(
+        f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows"
+    )
     if len(all_encoded) > 1:
         encoded = torch.concat(all_encoded, dim=0)
     elif len(all_encoded) == 1:
         encoded = all_encoded[0]
     else:
-        logger.error(f"Uh oh, did not find any encoded paths!, region is {chrom}:{start}-{end}")
+        logger.error(
+            f"Uh oh, did not find any encoded paths!, region is {chrom}:{start}-{end}"
+        )
         return None
 
     data = {
-        'encoded_pileup': encoded,
-        'region': (chrom, start, end),
-        'start_positions': all_starts,
+        "encoded_pileup": encoded,
+        "region": (chrom, start, end),
+        "start_positions": all_starts,
     }
     return data
 
 
-def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, keepalive_queue: mp.Queue, max_read_depth=150, window_size=150):
+def generate_tensors(
+    region_queue: mp.Queue,
+    output_queue: mp.Queue,
+    bampath,
+    refpath,
+    keepalive_queue: mp.Queue,
+    max_read_depth=150,
+    window_size=150,
+):
     """
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
     """
-    min_reads = 5 # Abort if there are fewer than this many reads
-    batch_size = 32 # Tensors hold this many regions
+    min_reads = 5  # Abort if there are fewer than this many reads
+    batch_size = 32  # Tensors hold this many regions
     window_step = 25
     torch.set_num_threads(2)  # Must be here for it to work for this process
 
@@ -364,34 +473,57 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
         region = region_queue.get()
         if isinstance(region, RegionStopSignal):
             logger.debug("Region worker found end token")
-            output_queue.put(CallingStopSignal(regions_submitted=encoded_region_count, sus_region_count=region.tot_sus_regions, sus_region_bp=region.tot_sus_bp))
+            output_queue.put(
+                CallingStopSignal(
+                    regions_submitted=encoded_region_count,
+                    sus_region_count=region.tot_sus_regions,
+                    sus_region_bp=region.tot_sus_bp,
+                )
+            )
             break
         else:
             logger.debug(f"Encoding region {region}")
             try:
-                data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
+                data = encode_region(
+                    bampath,
+                    refpath,
+                    region,
+                    max_read_depth,
+                    window_size,
+                    min_reads,
+                    batch_size=batch_size,
+                    window_step=window_step,
+                )
                 if data is not None:
-                    data['encoded_pileup'].share_memory_()
+                    data["encoded_pileup"].share_memory_()
                     encoded_region_count += 1
-                    logger.debug(f"Putting new data item into queue, region is {data['region']}")
+                    logger.debug(
+                        f"Putting new data item into queue, region is {data['region']}"
+                    )
                     output_queue.put(data)
                 else:
                     logger.warning(f"Whoa, got back None from encode_region")
             except Exception as ex:
                 output_queue.put(CallingErrorSignal(errormsg=str(ex)))
                 raise ex
-    
-    # It is CRITICAL to keep these processes alive, even after they're done doing everything. Pytorch will clean up the 
+
+    # It is CRITICAL to keep these processes alive, even after they're done doing everything. Pytorch will clean up the
     # the tensors *that have already been queued* when these processes die, even if the tensors haven't been processed yet
     # This will lead to errors when the calling process polls the queue, leading to missed variant calls. Instead, we wait for
     # the calling process to put a signal into the 'keepalive' queue to signal that it is all done and we can finally exit
-    logger.debug(f"Polling keepalive queue after generating {encoded_region_count} tensors")
+    logger.debug(
+        f"Polling keepalive queue after generating {encoded_region_count} tensors"
+    )
     result = keepalive_queue.get()
-    logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
+    logger.info(
+        f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions"
+    )
 
 
 @torch.no_grad()
-def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_template, max_batch_size):
+def call_multi_paths(
+    datas, model, reference, aln, classifier_model, vcf_template, max_batch_size
+):
     """
     Call variants from the encoded regions and return them as a list of variant records suitable for writing to a VCF file
     No more than max_batch_size are processed in a single batch
@@ -410,10 +542,12 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
 
     for data in datas:
         # Load the data, parsing location + encoded data from file
-        chrom, start, end = data['region']
-        batch_encoded.append(data['encoded_pileup'])
-        batch_start_pos.extend(data['start_positions'])
-        batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
+        chrom, start, end = data["region"]
+        batch_encoded.append(data["encoded_pileup"])
+        batch_start_pos.extend(data["start_positions"])
+        batch_regions.extend(
+            (chrom, start, end) for _ in range(len(data["start_positions"]))
+        )
         window_count += len(batch_start_pos)
         if len(batch_start_pos) > min_samples_callbatch:
             batch_count += 1
@@ -422,11 +556,19 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
             else:
                 allencoded = batch_encoded[0]
             allencoded = allencoded.float()
-            hap0, hap1= call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
-                                        max_batch_size)
+            hap0, hap1 = call_and_merge(
+                allencoded,
+                batch_start_pos,
+                batch_regions,
+                model,
+                reference,
+                max_batch_size,
+            )
 
             var_records.extend(
-                vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template)
+                vars_hap_to_records(
+                    hap0, hap1, aln, reference, classifier_model, vcf_template
+                )
             )
             batch_encoded = []
             batch_start_pos = []
@@ -440,9 +582,13 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
         else:
             allencoded = batch_encoded[0]
         allencoded = allencoded.float()
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+        hap0, hap1 = call_and_merge(
+            allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size
+        )
         var_records.extend(
-            vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template)
+            vars_hap_to_records(
+                hap0, hap1, aln, reference, classifier_model, vcf_template
+            )
         )
 
     call_elapsed = datetime.datetime.now() - call_start
@@ -452,17 +598,19 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
     return var_records
 
 
-def accumulate_regions_and_call(modelpath: str,
-                                inputq: mp.Queue,
-                                priority_func: Callable,
-                                refpath: str,
-                                bampath: str,
-                                classifier_path,
-                                max_batch_size: int,
-                                vcf_out_path: str,
-                                header_extras: str,
-                                n_region_workers: int,
-                                keepalive_queue: mp.Queue):
+def accumulate_regions_and_call(
+    modelpath: str,
+    inputq: mp.Queue,
+    priority_func: Callable,
+    refpath: str,
+    bampath: str,
+    classifier_path,
+    max_batch_size: int,
+    vcf_out_path: str,
+    header_extras: str,
+    n_region_workers: int,
+    keepalive_queue: mp.Queue,
+):
     """
     Continually poll the input queue to find new encoded regions, and call variants over those regions
     This function is typically called inside a subprocess and runs until it finds a None entry in the queue
@@ -477,8 +625,10 @@ def accumulate_regions_and_call(modelpath: str,
     else:
         classifier = None
 
-    vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=header_extras)
-    vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
+    vcf_header = vcf.create_vcf_header(
+        sample_name="sample", lowcov=20, cmdline=header_extras
+    )
+    vcf_template = pysam.VariantFile("/dev/null", mode="w", header=vcf_header)
     logger.info(f"Writing variants to {Path(vcf_out_path).absolute()}")
 
     vcf_out = open(vcf_out_path, "w")
@@ -494,7 +644,9 @@ def accumulate_regions_and_call(modelpath: str,
     # Not sure what the optimum is here - we accumulate tensors until we have at least this many, then process them in batches
     # If this number is too large, we will wait for too long before submitting the next batch to the GPU
     # If its to small, then we end up sending lots of tiny little batches to the GPU, which also isn't efficient
-    max_datas = n_region_workers * 4 # Bigger numbers here use more memory but help ensure we produce sorted outputs
+    max_datas = (
+        n_region_workers * 4
+    )  # Bigger numbers here use more memory but help ensure we produce sorted outputs
     n_finished_workers = 0
     max_consecutive_timeouts = 10
     timeouts = 0
@@ -504,7 +656,9 @@ def accumulate_regions_and_call(modelpath: str,
     vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=10000)
     while True:
         try:
-            data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
+            data = inputq.get(
+                timeout=10
+            )  # Timeout is in seconds, we count these and error out if there are too many
             timeouts = 0
         except queue.Empty:
             timeouts += 1
@@ -512,14 +666,18 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"Got a timeout in model queue, have {timeouts} total")
         except FileNotFoundError as ex:
             # This happens when region workers exit prematurely, it's bad
-            logger.warning(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
+            logger.warning(
+                f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}"
+            )
             raise ex
         except Exception as ex:
             logger.error(f"Exception polling calling input queue: {ex}")
             raise ex
 
         if isinstance(data, CallingErrorSignal):
-            logger.error(f"Calling worker discovered an error token: {data.err}, we are shutting down")
+            logger.error(
+                f"Calling worker discovered an error token: {data.err}, we are shutting down"
+            )
             break
 
         if not isinstance(data, CallingStopSignal) and data is not None:
@@ -528,18 +686,34 @@ def accumulate_regions_and_call(modelpath: str,
             datas.append(data)
 
         if data is None:
-            logger.info(f"Hmm, got None from the calling input queue, this doesn't seem right")
+            logger.info(
+                f"Hmm, got None from the calling input queue, this doesn't seem right"
+            )
 
-        if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
-            logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
-            datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
+        if (isinstance(data, CallingStopSignal) and len(datas)) or len(
+            datas
+        ) > max_datas:
+            logger.debug(
+                f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far"
+            )
+            datas = sorted(
+                datas, key=priority_func
+            )  # Sorting data chunks here helps ensure sorted output
 
-            bp = sum(d['region'][2] - d['region'][1] for d in datas)
+            bp = sum(d["region"][2] - d["region"][1] for d in datas)
             bp_processed += bp
             logger.info(
                 f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
             )
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            records = call_multi_paths(
+                datas,
+                model,
+                reference,
+                aln,
+                classifier,
+                vcf_template,
+                max_batch_size=max_batch_size,
+            )
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
@@ -548,19 +722,27 @@ def accumulate_regions_and_call(modelpath: str,
             datas = []
 
         if timeouts == max_consecutive_timeouts:
-            logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
+            logger.error(
+                f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue"
+            )
             break
 
         if type(data) == CallingStopSignal:
             n_finished_workers += 1
             tot_regions_submitted += data.regions_submitted
-            logger.debug(f"Found a stop token, {n_finished_workers} of {n_region_workers} are done, tot regions submitted: {tot_regions_submitted}, tot processed: {regions_processed}")
+            logger.debug(
+                f"Found a stop token, {n_finished_workers} of {n_region_workers} are done, tot regions submitted: {tot_regions_submitted}, tot processed: {regions_processed}"
+            )
 
         if n_finished_workers == n_region_workers:
-            logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
+            logger.debug(
+                f"All region workers are done, datas length is {len(datas)}, exiting.."
+            )
             break
 
-    logger.info(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
+    logger.info(
+        f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions"
+    )
     for i in range(n_region_workers):
         logger.debug(f"Sending kill msg to region {i}")
         keepalive_queue.put(None)
@@ -592,32 +774,46 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     :param max_batch_size: Maximum number of regions to call in one go
     :returns Dict[(chrom, start, end)] -> List[proto vars] for the variants found in each region
     """
-    logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
+    logger.info(
+        f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}"
+    )
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
-    #mid_dist = int(np.mean(dists))
-    #logger.info(f"Dists: {dists} mid dist: {mid_dist}")
+    # mid_dist = int(np.mean(dists))
+    # logger.info(f"Dists: {dists} mid dist: {mid_dist}")
     # Identify distinct sub-batches for calling. In the future we might populate this with different indexes
     # Setting everything to 0 effectively turns it off for now
     subbatch_idx = np.zeros(len(dists), dtype=int)
-    #subbatch_idx = (dists > mid_dist).astype(np.int_)
-    #logger.info('\n'.join(f"{b, d}" for b,d in zip(subbatch_idx, dists)))
+    # subbatch_idx = (dists > mid_dist).astype(np.int_)
+    # logger.info('\n'.join(f"{b, d}" for b,d in zip(subbatch_idx, dists)))
     byregion = defaultdict(list)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
-    #logger.info(f"Dists: {dists}")
-    #median_dist = np.median(dists)
+    # logger.info(f"Dists: {dists}")
+    # median_dist = np.median(dists)
 
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
         subbatch = batch[torch.tensor(which), :, :, :]
-        subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
-        subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
-        subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        subbatch_offsets = [b for i, b in zip(subbatch_idx, batch_offsets) if i == sbi]
+        subbatch_dists = [d for i, d in zip(subbatch_idx, dists) if i == sbi]
+        subbatch_regions = [r for i, r in zip(subbatch_idx, regions) if i == sbi]
         max_dist = max(subbatch_dists)
         logger.debug(f"Max dist for sub-batch {sbi} : {max_dist}")
-        n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
+        n_output_toks = min(
+            150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1
+        )
 
-        logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
-        batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
+        logger.debug(
+            f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}"
+        )
+        batchvars = call_batch(
+            subbatch,
+            subbatch_offsets,
+            subbatch_regions,
+            model,
+            reference,
+            n_output_toks,
+            max_batch_size=max_batch_size,
+        )
         logger.debug(f"Called {len(batchvars)} in {subbatch_regions}")
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
@@ -648,31 +844,31 @@ def merge_multialts(v0, v1):
 
     """
     assert v0.pos == v1.pos
-    #assert v0.het and v1.het
+    # assert v0.het and v1.het
     if v0.ref == v1.ref:
         v0.alts = (v0.alts[0], v1.alts[0])
         v0.qual = (v0.qual + v1.qual) / 2  # Average quality??
-        v0.samples['sample']['GT'] = (1,2)
+        v0.samples["sample"]["GT"] = (1, 2)
         return v0
 
     else:
         shorter, longer = sorted([v0, v1], key=lambda x: len(x.ref))
-        extra_ref = longer.ref[len(shorter.ref):]
+        extra_ref = longer.ref[len(shorter.ref) :]
         newalt = shorter.alts[0] + extra_ref
         longer.alts = (longer.alts[0], newalt)
         longer.qual = (longer.qual + shorter.qual) / 2
-        longer.samples['sample']['GT'] = (1, 2)
+        longer.samples["sample"]["GT"] = (1, 2)
         return longer
 
 
 def het(rec):
-    return rec.samples[0]['GT'] == (0,1) or rec.samples[0]['GT'] == (1,0)
+    return rec.samples[0]["GT"] == (0, 1) or rec.samples[0]["GT"] == (1, 0)
 
 
 def merge_overlaps(overlaps, min_qual):
     """
-     Attempt to merge overlapping VCF records in a sane way
-     As a special case if there is only one input record we just return that
+    Attempt to merge overlapping VCF records in a sane way
+    As a special case if there is only one input record we just return that
     """
     if len(overlaps) == 1:
         return [overlaps[0]]
@@ -685,14 +881,18 @@ def merge_overlaps(overlaps, min_qual):
         return []
 
     result = []
-    overlaps = sorted(overlaps, key=lambda x: x.qual, reverse=True)[0:2]  # Two highest quality alleles
-    overlaps[0].samples['sample']['GT'] = (None, 1)
-    overlaps[1].samples['sample']['GT'] = (1, None)
+    overlaps = sorted(overlaps, key=lambda x: x.qual, reverse=True)[
+        0:2
+    ]  # Two highest quality alleles
+    overlaps[0].samples["sample"]["GT"] = (None, 1)
+    overlaps[1].samples["sample"]["GT"] = (1, None)
     result.extend(sorted(overlaps, key=lambda x: x.pos))
     return result
 
 
-def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
+def collect_phasegroups(
+    vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100
+):
     """
     Construct VcfVar objects with phase from Variant dict objects, assuming we can only
     correctly phase Variants within 'minimum_safe_distance' bp
@@ -711,10 +911,7 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
         chrom, pos, ref, alt = k
         if (chrom != prevchrom) or (pos - prevpos > minimum_safe_distance):
             vcf_vars = vcf.construct_vcfvars(
-                vars_hap0=group0,
-                vars_hap1=group1,
-                aln=aln,
-                reference=reference
+                vars_hap0=group0, vars_hap1=group1, aln=aln, reference=reference
             )
             all_vcf_vars.extend(vcf_vars)
 
@@ -733,16 +930,15 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
         prevchrom = chrom
 
     vcf_vars = vcf.construct_vcfvars(
-        vars_hap0=group0,
-        vars_hap1=group1,
-        aln=aln,
-        reference=reference
+        vars_hap0=group0, vars_hap1=group1, aln=aln, reference=reference
     )
     all_vcf_vars.extend(vcf_vars)
     return all_vcf_vars
 
 
-def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template):
+def vars_hap_to_records(
+    vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template
+):
     """
     Convert variant haplotype objects to variant records
     """
@@ -752,7 +948,9 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
 
-    vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
+    vcf_vars = collect_phasegroups(
+        vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100
+    )
 
     # covert variants to pysam vcf records
     vcf_records = [
@@ -776,7 +974,7 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
     for rec in vcf_records[1:]:
         if overlaps and util.records_overlap(overlaps[-1], rec):
             overlaps.append(rec)
-        elif overlaps: #
+        elif overlaps:  #
             result = merge_overlaps(overlaps, min_qual=min_merge_qual)
             merged.extend(result)
             overlaps = [rec]
@@ -799,12 +997,16 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     seq_preds = None
     probs = None
     start = 0
-    
+
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
-        with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
-            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
-                                            n_output_toks=n_output_toks, device=DEVICE)
+        with torch.amp.autocast(device_type="cuda", enabled=enable_amp):
+            preds, prbs = util.predict_sequence(
+                encoded_reads[start:end, :, :, :].to(DEVICE),
+                model,
+                n_output_toks=n_output_toks,
+                device=DEVICE,
+            )
         if seq_preds is None:
             seq_preds = preds
         else:
@@ -817,15 +1019,21 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     return seq_preds, probs
 
 
-def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks, max_batch_size):
+def call_batch(
+    encoded_reads, offsets, regions, model, reference, n_output_toks, max_batch_size
+):
     """
     Call variants in a batch (list) of regions, by running a forward pass of the model and
     then aligning the predicted sequences to the reference genome and picking out any
     mismatching parts
     :returns : List of variants called in both haplotypes for every item in the batch as a list of 2-tuples
     """
-    assert encoded_reads.shape[0] == len(regions), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
-    assert len(offsets) == len(regions), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
+    assert encoded_reads.shape[0] == len(
+        regions
+    ), f"Expected the same number of reads as regions, but got {encoded_reads.shape[0]} reads and {len(regions)}"
+    assert len(offsets) == len(
+        regions
+    ), f"Should be as many offsets as regions, but found {len(offsets)} and {len(regions)}"
 
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
@@ -838,10 +1046,18 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 
         refseq = reference.fetch(chrom, offset, offset + len(hap0))
-        vars_hap0 = list(v for v in vcf.aln_to_vars(refseq, hap0, chrom, offset, probs=probs0) if start <= v.pos <= end)
-        vars_hap1 = list(v for v in vcf.aln_to_vars(refseq, hap1, chrom, offset, probs=probs1) if start <= v.pos <= end)
-        #print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
-        #calledvars.append((vars_hap0, vars_hap1))
+        vars_hap0 = list(
+            v
+            for v in vcf.aln_to_vars(refseq, hap0, chrom, offset, probs=probs0)
+            if start <= v.pos <= end
+        )
+        vars_hap1 = list(
+            v
+            for v in vcf.aln_to_vars(refseq, hap1, chrom, offset, probs=probs1)
+            if start <= v.pos <= end
+        )
+        # print(f"Offset: {offset}\twindow {start}-{end} frame: {start % 4} hap0: {vars_hap0}\n       hap1: {vars_hap1}")
+        # calledvars.append((vars_hap0, vars_hap1))
         calledvars.append((vars_hap0[0:5], vars_hap1[0:5]))
 
     return calledvars
@@ -853,10 +1069,23 @@ def add_ref_bases(encbases, reference, chrom, start, end, max_read_depth):
     """
     refseq = reference.fetch(chrom, start, end)
     ref_encoded = bam.string_to_tensor(refseq)
-    return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[:, 0:max_read_depth, :]
+    return torch.cat((ref_encoded.unsqueeze(1), encbases), dim=1)[
+        :, 0:max_read_depth, :
+    ]
 
 
-def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_size=150, min_reads=5, batch_size=64, window_step=25):
+def _encode_region(
+    aln,
+    reference,
+    chrom,
+    start,
+    end,
+    max_read_depth,
+    window_size=150,
+    min_reads=5,
+    batch_size=64,
+    window_step=25,
+):
     """
     Generate batches of tensors that encode read data from the given genomic region, along with position information. Each
     batch of tensors generated should be suitable for input into a forward pass of the model - but the data will be on the
@@ -878,7 +1107,9 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     :param window_size: Size of region in bp to generate for each item
     :returns: Generator for tuples of (batch tensor, list of start positions)
     """
-    window_start = int(start - 0.7 * window_size)  # We start with regions a bit upstream of the focal / target region
+    window_start = int(
+        start - 0.7 * window_size
+    )  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
     readwindow = bam.ReadWindow(aln, chrom, start - 150, end + window_size)
@@ -886,13 +1117,21 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     returned_count = 0
     while window_start <= (end - 0.2 * window_size):
         try:
-            #logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
-            enc_reads = readwindow.get_window(window_start, window_start + window_size, max_reads=max_read_depth)
-            encoded_with_ref = add_ref_bases(enc_reads, reference, chrom, window_start, window_start + window_size,
-                                             max_read_depth=max_read_depth)
+            # logger.debug(f"Getting reads from  readwindow: {window_start} - {window_start + window_size}")
+            enc_reads = readwindow.get_window(
+                window_start, window_start + window_size, max_reads=max_read_depth
+            )
+            encoded_with_ref = add_ref_bases(
+                enc_reads,
+                reference,
+                chrom,
+                window_start,
+                window_start + window_size,
+                max_read_depth=max_read_depth,
+            )
             batch.append(encoded_with_ref)
             batch_offsets.append(window_start)
-            #logger.debug(f"Added item to batch from window_start {window_start}")
+            # logger.debug(f"Added item to batch from window_start {window_start}")
         except bam.LowReadCountException:
             logger.info(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
@@ -908,12 +1147,16 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
 
     # Last few
     if batch:
-        encodedreads = torch.stack(batch, dim=0).cpu() # Keep encoded tensors on cpu for now
+        encodedreads = torch.stack(
+            batch, dim=0
+        ).cpu()  # Keep encoded tensors on cpu for now
         returned_count += 1
         yield encodedreads, batch_offsets
 
     if not returned_count:
-        logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
+        logger.info(
+            f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data"
+        )
 
 
 def resolve_haplotypes(genos):
@@ -930,7 +1173,10 @@ def resolve_haplotypes(genos):
     :returns : Two-tuple of dicts of variants, each representing one haplotype
     """
     # All unique variant keys, sorted by pos
-    allvars = sorted(list(v for g in genos for v in g[0]) + list(v for g in genos for v in g[1]), key=lambda v: v.pos)
+    allvars = sorted(
+        list(v for g in genos for v in g[0]) + list(v for g in genos for v in g[1]),
+        key=lambda v: v.pos,
+    )
     allkeys = set()
     varsnodups = []
     for v in allvars:
@@ -969,11 +1215,17 @@ def resolve_haplotypes(genos):
             for g in genos:
                 g0keys = [v.key for v in g[0]]
                 g1keys = [v.key for v in g[1]]
-                if (p.key in g0keys and prev_het.key in g0keys) or (p.key in g1keys and prev_het.key in g1keys):
+                if (p.key in g0keys and prev_het.key in g0keys) or (
+                    p.key in g1keys and prev_het.key in g1keys
+                ):
                     cis += 1
-                elif (p.key in g0keys and prev_het.key in g1keys) or (p.key in g1keys and prev_het.key in g0keys):
+                elif (p.key in g0keys and prev_het.key in g1keys) or (
+                    p.key in g1keys and prev_het.key in g0keys
+                ):
                     trans += 1
-            if trans >= cis: # If there's a tie, assume trans. This covers the case where cis==0 and trans==0, because trans is safer
+            if (
+                trans >= cis
+            ):  # If there's a tie, assume trans. This covers the case where cis==0 and trans==0, because trans is safer
                 results[1 - prev_het_index].append(p)
                 prev_het = p
                 prev_het_index = 1 - prev_het_index
@@ -990,4 +1242,3 @@ def resolve_haplotypes(genos):
     for v in results[1]:
         allvars1[v.key] = [t for t in allvars if t.key == v.key]
     return allvars0, allvars1
-

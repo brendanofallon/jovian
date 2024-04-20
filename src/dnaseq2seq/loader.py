@@ -1,4 +1,3 @@
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,6 +20,7 @@ import torch.multiprocessing as mp
 import util
 import pregen
 
+
 class ReadLoader:
     """
     The simplest loader, this one just has a src and tgt tensor and iterates over them
@@ -39,7 +39,9 @@ class ReadLoader:
     def iter_once(self, batch_size):
         offset = 0
         while offset < self.src.shape[0]:
-            yield self.src[offset:offset + batch_size, :, :, :].to(self.device), self.tgt[offset:offset + batch_size, :, :].to(self.device), None, None
+            yield self.src[offset : offset + batch_size, :, :, :].to(
+                self.device
+            ), self.tgt[offset : offset + batch_size, :, :].to(self.device), None, None
             offset += batch_size
 
 
@@ -50,7 +52,17 @@ class LazyLoader:
     Useful for 'pre-gen' where we just want to iterate over everything once and save it to a file
     """
 
-    def __init__(self, bam, bed, vcf, reference, reads_per_pileup, samples_per_pos, vals_per_class, max_jitter_bases):
+    def __init__(
+        self,
+        bam,
+        bed,
+        vcf,
+        reference,
+        reads_per_pileup,
+        samples_per_pos,
+        vals_per_class,
+        max_jitter_bases,
+    ):
         self.bam = bam
         self.bed = bed
         self.vcf = vcf
@@ -62,23 +74,26 @@ class LazyLoader:
 
     def iter_once(self, batch_size):
         logger.info(f"Encoding tensors from {self.bam} and {self.vcf}")
-        for src, tgt, vaftgt, varsinfo in pregen.encode_chunks(self.bam,
-                                                        self.reference,
-                                                        self.bed,
-                                                        self.vcf,
-                                                        batch_size,
-                                                        self.reads_per_pileup,
-                                                        self.samples_per_pos,
-                                                        self.vals_per_class,
-                                                        max_to_load=1e9,
-                                                        max_jitter_bases=self.max_jitter_bases):
+        for src, tgt, vaftgt, varsinfo in pregen.encode_chunks(
+            self.bam,
+            self.reference,
+            self.bed,
+            self.vcf,
+            batch_size,
+            self.reads_per_pileup,
+            self.samples_per_pos,
+            self.vals_per_class,
+            max_to_load=1e9,
+            max_jitter_bases=self.max_jitter_bases,
+        ):
             yield src, tgt, vaftgt, varsinfo
 
 
-
 def decomp_single(path):
-    with open(path, 'rb') as fh:
-        return torch.load(io.BytesIO(lz4.frame.decompress(fh.read())), map_location='cpu')
+    with open(path, "rb") as fh:
+        return torch.load(
+            io.BytesIO(lz4.frame.decompress(fh.read())), map_location="cpu"
+        )
 
 
 def decompress_multi_ppe(paths, threads):
@@ -108,9 +123,9 @@ def decompress_multi_ppe(paths, threads):
         logger.info(f"Got : {r}")
         result.append(r)
 
-    #for i, r in enumerate(result):
+    # for i, r in enumerate(result):
     #    logger.info(f"Result item {i}: {r.shape}")
-        
+
     elapsed = datetime.now() - start
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
@@ -126,12 +141,12 @@ def decompress_multi_map(paths, threads):
     """
     torch.set_num_threads(1)
     start = datetime.now()
-    #decompressed = []
+    # decompressed = []
     with mp.Pool(threads) as pool:
         result = pool.map(decomp_single, paths)
-    
-    #result = [torch.load(d, map_location='cpu') for d in decompressed]
-           
+
+    # result = [torch.load(d, map_location='cpu') for d in decompressed]
+
     elapsed = datetime.now() - start
     logger.info(
         f"Decompressed {len(result)} items in {elapsed.total_seconds():.3f} seconds ({elapsed.total_seconds() / len(result):.3f} secs per item)"
@@ -147,15 +162,15 @@ def decomp_profile(paths, threads):
     load_sum = timedelta(0)
     for path in paths:
         start = datetime.now()
-        with open(path, 'rb') as fh:
+        with open(path, "rb") as fh:
             r = fh.read()
         read_dt = datetime.now()
         d = io.BytesIO(lz4.frame.decompress(r))
         decomp_dt = datetime.now()
-        t = torch.load(d, map_location='cpu')
+        t = torch.load(d, map_location="cpu")
         load_dt = datetime.now()
-        result.append(t)        
-        
+        result.append(t)
+
         read_sum = read_sum + (read_dt - start)
         decomp_sum = decomp_sum + (decomp_dt - read_dt)
         load_sum = load_sum + (load_dt - decomp_dt)
@@ -163,11 +178,16 @@ def decomp_profile(paths, threads):
     tot = read_sum + decomp_sum + load_sum
     logger.info(f"Decomped {len(paths)} items")
     logger.info(f"Total decomp time (secs): {tot.total_seconds() :.6f}")
-    logger.info(f"Read frac: {read_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
-    logger.info(f"Decomp frac: {decomp_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
-    logger.info(f"Load frac: {load_sum.total_seconds() / tot.total_seconds() * 100 :.3f}")
+    logger.info(
+        f"Read frac: {read_sum.total_seconds() / tot.total_seconds() * 100 :.3f}"
+    )
+    logger.info(
+        f"Decomp frac: {decomp_sum.total_seconds() / tot.total_seconds() * 100 :.3f}"
+    )
+    logger.info(
+        f"Load frac: {load_sum.total_seconds() / tot.total_seconds() * 100 :.3f}"
+    )
     return result
-
 
 
 def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
@@ -180,7 +200,7 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
     for i in range(0, len(pathpairs), max_decomped):
         logger.info(f"Decompressing {i}-{i + max_decomped} files of {len(pathpairs)}")
         decomp_start = datetime.now()
-        paths = pathpairs[i:i + max_decomped]
+        paths = pathpairs[i : i + max_decomped]
         decomped = decompress_multi_map(chain.from_iterable(paths), threads)
         decomp_end = datetime.now()
         decomp_time = (decomp_end - decomp_start).total_seconds()
@@ -216,8 +236,8 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
 
         if remain:
             # The remaining data points will be in next batch.
-            src = [src_t[nbatch * batch_size:]]
-            tgt = [tgt_t[nbatch * batch_size:]]
+            src = [src_t[nbatch * batch_size :]]
+            tgt = [tgt_t[nbatch * batch_size :]]
         else:
             src, tgt = [], []
 
@@ -232,30 +252,45 @@ def iterate_dir(device, pathpairs, batch_size, max_decomped, threads):
         )
     logger.info(f"Done iterating data")
 
+
 def load_files(datadir, src_prefix="src", tgt_prefix=""):
     pathpairs = util.find_files(datadir, src_prefix, tgt_prefix)
     logger.info(f"Loaded {len(pathpairs)} from {datadir}")
     random.shuffle(pathpairs)
     return pathpairs
 
+
 class CurriculumLoader:
 
-    def __init__(self, device, datadirs, switchpoints, threads, max_decomped_batches=10):
+    def __init__(
+        self, device, datadirs, switchpoints, threads, max_decomped_batches=10
+    ):
         self.device = device
         self.datadirs = datadirs
         self.switchpoints = switchpoints
         self.threads = threads
 
-
     def iter_once(self, batch_size):
         self.load_files()  # Search for new data with every iteration ?
-        for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
+        for result in iterate_dir(
+            self.device, self.pathpairs, batch_size, self.max_decomped, self.threads
+        ):
             yield result
 
 
 class PregenLoader:
 
-    def __init__(self, device, datadir, threads, max_decomped_batches=10, src_prefix="src", tgt_prefix="tgt", vaftgt_prefix="vaftgt", pathpairs=None):
+    def __init__(
+        self,
+        device,
+        datadir,
+        threads,
+        max_decomped_batches=10,
+        src_prefix="src",
+        tgt_prefix="tgt",
+        vaftgt_prefix="vaftgt",
+        pathpairs=None,
+    ):
         """
         Create a new loader that reads tensors from a 'pre-gen' directory
         :param device: torch.device
@@ -269,22 +304,23 @@ class PregenLoader:
         self.src_prefix = src_prefix
         self.tgt_prefix = tgt_prefix
         if pathpairs and datadir:
-            raise ValueError(f"Both datadir and pathpairs specified for PregenLoader - please choose just one")
+            raise ValueError(
+                f"Both datadir and pathpairs specified for PregenLoader - please choose just one"
+            )
         if pathpairs:
             self.pathpairs = pathpairs
         else:
             self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix)
-            
+
         self.threads = threads
-        self.max_decomped = max_decomped_batches # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
+        self.max_decomped = max_decomped_batches  # Max number of decompressed items to store at once - increasing this uses more memory, but allows increased parallelization
         logger.info(f"Creating PreGen data loader with {self.threads} threads")
         logger.info(f"Found {len(self.pathpairs)} batches in {datadir}")
         logger.info(f"Possible sharing strategies: {mp.get_all_sharing_strategies()}")
-        #mp.set_sharing_strategy("file_system")
+        # mp.set_sharing_strategy("file_system")
         logger.info(f"Current sharing strategy: {mp.get_sharing_strategy()}")
         if not self.pathpairs:
             raise ValueError(f"Could not find any files in {datadir}")
-
 
     def retain_val_samples(self, fraction):
         """
@@ -309,7 +345,10 @@ class PregenLoader:
         sequentially
         :param batch_size: The number of samples in a minibatch.
         """
-        self.pathpairs = load_files(self.datadir, self.src_prefix, self.tgt_prefix) # Search for new data with every iteration ?
-        for result in iterate_dir(self.device, self.pathpairs, batch_size, self.max_decomped, self.threads):
+        self.pathpairs = load_files(
+            self.datadir, self.src_prefix, self.tgt_prefix
+        )  # Search for new data with every iteration ?
+        for result in iterate_dir(
+            self.device, self.pathpairs, batch_size, self.max_decomped, self.threads
+        ):
             yield result
-

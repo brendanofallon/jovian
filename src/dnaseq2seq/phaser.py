@@ -1,4 +1,3 @@
-
 from itertools import product, permutations
 from skbio.alignment import StripedSmithWaterman
 import logging
@@ -20,19 +19,25 @@ class Haplotype(object):
         self.raw_read_support = raw_read_support
 
     def __eq__(self, other):
-        return self.score == other.score and self.seq == other.seq and self.allele_indices == other.allele_indices
+        return (
+            self.score == other.score
+            and self.seq == other.seq
+            and self.allele_indices == other.allele_indices
+        )
 
     def __hash__(self):
         return sum([hash(self.score), hash(self.seq), hash(self.allele_indices)])
 
     def __str__(self):
-        return "{} : {} : {}".format(self.allele_indices, self.score, self.seq[0:min(6, len(self.seq))])
+        return "{} : {} : {}".format(
+            self.allele_indices, self.score, self.seq[0 : min(6, len(self.seq))]
+        )
 
     def all_ref(self):
         """
         Return true this haplotype represents all reference alleles
         """
-        return all(i==0 for i in self.allele_indices)
+        return all(i == 0 for i in self.allele_indices)
 
 
 class Genotype(object):
@@ -43,8 +48,8 @@ class Genotype(object):
     def __eq__(self, other):
         if not len(self.haplotypes) == len(other.haplotypes):
             return False
-        for a,b in zip(self.haplotypes, other.haplotypes):
-            if not a==b:
+        for a, b in zip(self.haplotypes, other.haplotypes):
+            if not a == b:
                 return False
         return True
 
@@ -75,14 +80,13 @@ class Genotype(object):
         return None
 
 
-
-def trim_common_prefix(a,b):
+def trim_common_prefix(a, b):
     """
     Remove the longest string that starts both a and b and return its length and the trimmed a and b
     :return: Tuple of prefix length, trimmed a, trimmed b
     """
-    if min(len(a), len(b))==0:
-        return 0,a,b
+    if min(len(a), len(b)) == 0:
+        return 0, a, b
     for idx in range(min(len(a), len(b))):
         if a[idx] != b[idx]:
             return idx, a[idx:], b[idx:]
@@ -90,16 +94,16 @@ def trim_common_prefix(a,b):
     return idx, a[idx:], b[idx:]
 
 
-def trim_common_suffix(a,b):
+def trim_common_suffix(a, b):
     """
     Trim the longest string that appears at the end of both a and b,
     :return: Tuple of number of bases trimmed, and a and b with the sequence removed
     """
     idx = -1
     for idx in range(1, min(len(a), len(b))):
-        if a[len(a)-idx] != b[len(b)-idx]:
-            return idx-1, a[0:len(a)-idx+1], b[0:len(b)-idx+1]
-    return idx+1, a[0:len(a)-idx-1], b[0:len(b)-idx-1]
+        if a[len(a) - idx] != b[len(b) - idx]:
+            return idx - 1, a[0 : len(a) - idx + 1], b[0 : len(b) - idx + 1]
+    return idx + 1, a[0 : len(a) - idx - 1], b[0 : len(b) - idx - 1]
 
 
 def construct_haplotype(variants, allele_indexes, ref_sequence, ref_offset):
@@ -116,11 +120,15 @@ def construct_haplotype(variants, allele_indexes, ref_sequence, ref_offset):
     seq = ref_sequence
     for var, allele_index in zip(variants, allele_indexes):
         trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
-        vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
+        vref_start = (
+            var.start - ref_offset + displacement + trim
+        )  # Start is 0-indexed, pos is 1-indexed
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
         displacement += len(valt) - len(vref)
-    return Haplotype(score=-1.0, seq=seq, allele_indices=allele_indexes, raw_read_support=-1)
+    return Haplotype(
+        score=-1.0, seq=seq, allele_indices=allele_indexes, raw_read_support=-1
+    )
 
 
 def gen_genotype_combos(variants):
@@ -137,13 +145,17 @@ def gen_genotype_combos(variants):
 
      TODO: Test on multiallelic variants
     """
-    gts = [permutations(v.samples[0]['GT']) for v in variants] # List of tuples of genotypes
+    gts = [
+        permutations(v.samples[0]["GT"]) for v in variants
+    ]  # List of tuples of genotypes
     combos = []
     gtset = set()
     for combo in product(*gts):
         flt_combo = []
         for k in combo:
-            flt_combo.append(tuple(j if j is not None else 0 for j in k)) # Convert half-calls to hets?
+            flt_combo.append(
+                tuple(j if j is not None else 0 for j in k)
+            )  # Convert half-calls to hets?
         gt = sorted([k for k in zip(*flt_combo)])
 
         sgt = str(gt)
@@ -154,7 +166,6 @@ def gen_genotype_combos(variants):
         combos.append(gt)
 
     return combos
-
 
 
 def hap_is_possible(hap, variants):
@@ -213,10 +224,16 @@ def eliminate_incompatible_haps(genotypes, variants):
     """
     ok_genotypes = []
     for geno in genotypes:
-        if all(hap_is_possible(hap.allele_indices, variants) for hap in geno.haplotypes):
+        if all(
+            hap_is_possible(hap.allele_indices, variants) for hap in geno.haplotypes
+        ):
             ok_genotypes.append(geno)
         else:
-            logging.debug("Eliminating genotype {} since it contains at least one impossible haplotype near position {}:{}".format(geno, variants[0].chrom, variants[0].pos))
+            logging.debug(
+                "Eliminating genotype {} since it contains at least one impossible haplotype near position {}:{}".format(
+                    geno, variants[0].chrom, variants[0].pos
+                )
+            )
     return ok_genotypes
 
 
@@ -234,7 +251,7 @@ def gen_seqs_multi(ref_sequence, region_start, variants):
             raise ValueError("Variants are on different chroms")
 
     if not variants == sorted(variants, key=lambda v: v.start):
-        raise ValueError('Input variants must be sorted by start coordinate')
+        raise ValueError("Input variants must be sorted by start coordinate")
 
     # We want to create all possible haplotypes given the variants. If both are hets and unphased, this means 4
     # (ref, ref), (ref, alt), (alt, ref), and (alt, alt)
@@ -245,7 +262,10 @@ def gen_seqs_multi(ref_sequence, region_start, variants):
 
     all_genos = []
     for gt_indexes in geno_gen:
-        haps = [construct_haplotype(variants, idx, ref_sequence, region_start) for idx in gt_indexes]
+        haps = [
+            construct_haplotype(variants, idx, ref_sequence, region_start)
+            for idx in gt_indexes
+        ]
         all_genos.append(Genotype(haplotypes=haps))
 
     # Remove any genotypes that contain 'incompatible' haplotypes (those that have two overlapping alleles)
@@ -264,18 +284,16 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
     :param variants: List of pysam variant records
     :return: List of genotypes with scores, each genotype contains list of haplotypes (with scores)
     """
-    ploidy = len(variants[0].samples[0]['GT'])
-    if any(len(v.samples[0]['GT']) != ploidy for v in variants):
-        raise ValueError("All variants must have the same ploidy to generate genotypes, sorry")
+    ploidy = len(variants[0].samples[0]["GT"])
+    if any(len(v.samples[0]["GT"]) != ploidy for v in variants):
+        raise ValueError(
+            "All variants must have the same ploidy to generate genotypes, sorry"
+        )
 
     genotypes = gen_seqs_multi(ref_sequence, region_start, variants)
-    read_support = [
-        0 for gt in genotypes
-        for _ in range(len(gt.haplotypes))
-    ]
+    read_support = [0 for gt in genotypes for _ in range(len(gt.haplotypes))]
     ssws = [
-        [StripedSmithWaterman(hap.seq) for hap in gts.haplotypes]
-        for gts in genotypes
+        [StripedSmithWaterman(hap.seq) for hap in gts.haplotypes] for gts in genotypes
     ]
 
     ref_start = min(v.start for v in variants)
@@ -284,21 +302,27 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
     try:
         read_iterator = aln.fetch(variants[0].chrom, ref_start, ref_end)
     except KeyError:
-        read_iterator = aln.fetch(variants[0].chrom.replace("chr", ""), ref_start, ref_end)
+        read_iterator = aln.fetch(
+            variants[0].chrom.replace("chr", ""), ref_start, ref_end
+        )
 
     for read in read_iterator:
-        #print(f"read start: {read.reference_start} end: {read.reference_end}")
+        # print(f"read start: {read.reference_start} end: {read.reference_end}")
         # Skip reads that don't overlap the whole region of interest
-        if read.reference_start is None \
-                or read.reference_end is None \
-                or read.reference_start > ref_start \
-                or read.reference_end < ref_end:
+        if (
+            read.reference_start is None
+            or read.reference_end is None
+            or read.reference_start > ref_start
+            or read.reference_end < ref_end
+        ):
             continue
 
         # readscores is a list of the alignment score for every haplotype across all genotypes
-        readscores = [hap_ssw(read.seq).optimal_alignment_score
-                      for gt_scores, genotype_aligners in zip(read_support, ssws)
-                      for hap_ssw in genotype_aligners]
+        readscores = [
+            hap_ssw(read.seq).optimal_alignment_score
+            for gt_scores, genotype_aligners in zip(read_support, ssws)
+            for hap_ssw in genotype_aligners
+        ]
 
         maxscore = max(readscores)
         best_indices = [i for i, score in enumerate(readscores) if score == maxscore]
@@ -310,13 +334,13 @@ def score_genotypes(aln, ref_sequence, region_start, variants):
     scoresum = sum(read_support)
     if scoresum == 0:
         return []
-    scores = [s/scoresum for s in read_support]
+    scores = [s / scoresum for s in read_support]
 
     # Assign scores to haplotypes
     # Pretty fragile - assumes this will iterate over haplotypes in same order as alignment function above,
     # which isn't guaranteed
     for i, gt in zip(range(0, len(scores), ploidy), genotypes):
-        for j, hap in zip(range(i, i+ploidy), gt.haplotypes):
+        for j, hap in zip(range(i, i + ploidy), gt.haplotypes):
             hap.score = scores[j]
             hap.raw_read_support = read_support[j]
 
@@ -337,7 +361,9 @@ def project_vars(variants, allele_indexes, ref_sequence, ref_offset):
     seq = ref_sequence
     for var, allele_index in zip(variants, allele_indexes):
         trim, vref, valt = trim_common_prefix(var.ref, var.alleles[allele_index])
-        vref_start = var.start - ref_offset + displacement + trim  # Start is 0-indexed, pos is 1-indexed
+        vref_start = (
+            var.start - ref_offset + displacement + trim
+        )  # Start is 0-indexed, pos is 1-indexed
         assert vref_start >= 0, f"Negative start coord for variant {var}!"
         vref_end = vref_start + len(vref)
         seq = seq[0:vref_start] + valt + seq[vref_end:]
@@ -360,48 +386,43 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
     if len(variants) == 0:
         return hap0, hap1
 
-    het_count = sum(1 if len(set(v.samples[0]['GT']))>1 else 0 for v in variants )
+    het_count = sum(1 if len(set(v.samples[0]["GT"])) > 1 else 0 for v in variants)
 
     if het_count == 0:  # Every variant is homozygous
-        hap_alt = project_vars(variants,
-                               [1] * len(variants),
-                               ref_sequence,
-                               region_start)
+        hap_alt = project_vars(
+            variants, [1] * len(variants), ref_sequence, region_start
+        )
         return hap_alt, hap_alt
 
     elif het_count == 1 and len(variants) == 1:
-        hap0 = project_vars(variants,
-                               [variants[0].samples[0]['GT'][0]],
-                               ref_sequence,
-                               region_start)
-        hap1 = project_vars(variants,
-                               [variants[0].samples[0]['GT'][1]],
-                               ref_sequence,
-                               region_start)
+        hap0 = project_vars(
+            variants, [variants[0].samples[0]["GT"][0]], ref_sequence, region_start
+        )
+        hap1 = project_vars(
+            variants, [variants[0].samples[0]["GT"][1]], ref_sequence, region_start
+        )
         return hap0, hap1
 
     elif het_count == 1 and len(variants) > 1:
         # All homs except 1 het
-        hap0_indices = [v.samples[0]['GT'][0] for v in variants]
-        hap1_indices = [v.samples[0]['GT'][1] for v in variants]
+        hap0_indices = [v.samples[0]["GT"][0] for v in variants]
+        hap1_indices = [v.samples[0]["GT"][1] for v in variants]
 
-        hap0 = project_vars(variants,
-                            hap0_indices,
-                            ref_sequence,
-                            region_start)
-        hap1 = project_vars(variants,
-                            hap1_indices,
-                            ref_sequence,
-                            region_start)
+        hap0 = project_vars(variants, hap0_indices, ref_sequence, region_start)
+        hap1 = project_vars(variants, hap1_indices, ref_sequence, region_start)
         return hap0, hap1
 
     else:
-        ref_start = min(v.start for v in variants if len(set(v.samples[0]['GT']))>1)
-        ref_end = max(v.start + len(v.ref) for v in variants if len(set(v.samples[0]['GT']))>1)
+        ref_start = min(v.start for v in variants if len(set(v.samples[0]["GT"])) > 1)
+        ref_end = max(
+            v.start + len(v.ref) for v in variants if len(set(v.samples[0]["GT"])) > 1
+        )
         if ref_end - ref_start > 100:
-            raise ValueError(f"Variants are too far apart to phase, skipping {chrom}:{region_start}-{region_end}")
+            raise ValueError(
+                f"Variants are too far apart to phase, skipping {chrom}:{region_start}-{region_end}"
+            )
         genotypes = score_genotypes(bam, ref_sequence, region_start, variants)
-        best_genotype = genotypes[0] # They come back ordered by score
+        best_genotype = genotypes[0]  # They come back ordered by score
         return best_genotype.haplotypes[0].seq, best_genotype.haplotypes[1].seq
 
 
@@ -437,27 +458,26 @@ def parse_rows_classes(bed):
     return rows, idxs, class_names
 
 
-        
-
-
-
 def main():
 
-    ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    vcf = pysam.VariantFile("/Volumes/Share/genomics/GIAB/4.2.1/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")
+    ref = pysam.FastaFile(
+        "/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta"
+    )
+    vcf = pysam.VariantFile(
+        "/Volumes/Share/genomics/GIAB/4.2.1/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz"
+    )
     bam = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram")
 
-
-    chrom = '21'
+    chrom = "21"
     start = 20576974
-    end =   20577105
+    end = 20577105
     variants = list(v for v in vcf.fetch(chrom, start, end))
 
     hap0, hap1 = gen_haplotypes(bam, ref, chrom, start, end, variants)
     print(hap0)
     print(hap1)
-    print("".join( ' ' if a==b else '*' for a,b in zip(hap0, hap1)))
+    print("".join(" " if a == b else "*" for a, b in zip(hap0, hap1)))
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

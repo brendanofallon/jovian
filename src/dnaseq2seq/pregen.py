@@ -1,5 +1,3 @@
-
-
 from functools import partial
 from collections import defaultdict
 import multiprocessing as mp
@@ -29,8 +27,8 @@ logger = logging.getLogger(__name__)
 def load_conf(confyaml):
     logger.info(f"Loading configuration from {confyaml}")
     conf = yaml.safe_load(open(confyaml).read())
-    assert 'reference' in conf, "Expected 'reference' entry in training configuration"
-    assert 'data' in conf, "Expected 'data' entry in training configuration"
+    assert "reference" in conf, "Expected 'reference' entry in training configuration"
+    assert "data" in conf, "Expected 'data' entry in training configuration"
     return conf
 
 
@@ -43,29 +41,34 @@ def default_vals_per_class():
     """
     return 0
 
+
 def pregen_one_sample(dataloader, batch_size, output_dir):
     """
     Pregenerate tensors for a single sample
     """
-    TRUNCATE_LEN = 148 # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
+    TRUNCATE_LEN = 148  # Truncate target sequence in bases to this length, which should be evenly divisible from kmer length
     uid = "".join(random.choices(ascii_letters + digits, k=8))
     src_prefix = "src"
     tgt_prefix = "tgkmers"
     tn_prefix = "tntgt"
 
-    logger.info(f"Saving tensors from {dataloader.bam} to {output_dir}/ with uid: {uid}")
+    logger.info(
+        f"Saving tensors from {dataloader.bam} to {output_dir}/ with uid: {uid}"
+    )
     for i, (src, tgt, tntgt, varsinfo) in enumerate(dataloader.iter_once(batch_size)):
         tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:TRUNCATE_LEN]).float()
         logger.info(f"Saving batch {i} with uid {uid}")
         logger.info(f"Src dtype is {src.dtype}")
 
         # For debugging on only!
-        #uid = Path(dataloader.bam).name.replace(".cram", "")
+        # uid = Path(dataloader.bam).name.replace(".cram", "")
 
-        for data, prefix in zip([src, tgt_kmers, tntgt],
-                                [src_prefix, tgt_prefix, tn_prefix]):
+        for data, prefix in zip(
+            [src, tgt_kmers, tntgt], [src_prefix, tgt_prefix, tn_prefix]
+        ):
             with lz4.frame.open(output_dir / f"{prefix}_{uid}-{i}.pt.lz4", "wb") as fh:
                 torch.save(data, fh)
+
 
 def pregen(config, **kwargs):
     """
@@ -73,22 +76,33 @@ def pregen(config, **kwargs):
     (this takes a long time)
     """
     conf = load_conf(config)
-    batch_size = kwargs.get('batch_size', 64)
-    reads_per_pileup = kwargs.get('read_depth', 150)
-    samples_per_pos = kwargs.get('samples_per_pos', 2)
-    processes = kwargs.get('threads', 1)
-    jitter = kwargs.get('jitter', 0)
+    batch_size = kwargs.get("batch_size", 64)
+    reads_per_pileup = kwargs.get("read_depth", 150)
+    samples_per_pos = kwargs.get("samples_per_pos", 2)
+    processes = kwargs.get("threads", 1)
+    jitter = kwargs.get("jitter", 0)
 
     vals_per_class = defaultdict(default_vals_per_class)
-    vals_per_class.update(conf['vals_per_class'])
+    vals_per_class.update(conf["vals_per_class"])
 
     logger.info(f"Full config: {conf}")
-    output_dir = Path(kwargs.get('dir'))
+    output_dir = Path(kwargs.get("dir"))
 
-    logger.info(f"Generating training data using config from {config} vals_per_class: {vals_per_class}")
+    logger.info(
+        f"Generating training data using config from {config} vals_per_class: {vals_per_class}"
+    )
     dataloaders = [
-            loader.LazyLoader(c['bam'], c['bed'], c['vcf'], conf['reference'], reads_per_pileup, samples_per_pos, vals_per_class, max_jitter_bases=jitter)
-        for c in conf['data']
+        loader.LazyLoader(
+            c["bam"],
+            c["bed"],
+            c["vcf"],
+            conf["reference"],
+            reads_per_pileup,
+            samples_per_pos,
+            vals_per_class,
+            max_jitter_bases=jitter,
+        )
+        for c in conf["data"]
     ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +116,9 @@ def pregen(config, **kwargs):
         futures = []
         with ProcessPoolExecutor(max_workers=processes) as executor:
             for dl in dataloaders:
-                futures.append(executor.submit(pregen_one_sample, dl, batch_size, output_dir))
+                futures.append(
+                    executor.submit(pregen_one_sample, dl, batch_size, output_dir)
+                )
         for fut in futures:
             fut.result()
 
@@ -128,16 +144,20 @@ def trim_pileuptensor(src, tgt, width):
     :param tgt: Target tensor of shape [haplotype, sequence]
     :param width: Size to trim to
     """
-    assert src.shape[0] == tgt.shape[-1], f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
+    assert (
+        src.shape[0] == tgt.shape[-1]
+    ), f"Unequal src and target lengths ({src.shape[0]} vs. {tgt.shape[-1]}), not sure how to deal with this :("
     if src.shape[0] < width:
-        z = torch.zeros(width - src.shape[0], src.shape[1], src.shape[2], dtype=src.dtype)
+        z = torch.zeros(
+            width - src.shape[0], src.shape[1], src.shape[2], dtype=src.dtype
+        )
         src = torch.cat((src, z))
         t = torch.zeros(tgt.shape[0], width - tgt.shape[1]).long()
         tgt = torch.cat((tgt, t), dim=1)
     else:
         start = src.shape[0] // 2 - width // 2
-        src = src[start:start+width, :, :]
-        tgt = tgt[:, start:start+width]
+        src = src[start : start + width, :, :]
+        tgt = tgt[:, start : start + width]
 
     return src, tgt
 
@@ -185,23 +205,31 @@ def resample_classes(classes, class_names, rows, vals_per_class):
 
     for name in class_names.values():
         if name not in vals_per_class:
-            logger.warning(f"Class name '{name}' not found in vals per class, will select default of {vals_per_class['asldkjas']} items from class {name}")
+            logger.warning(
+                f"Class name '{name}' not found in vals per class, will select default of {vals_per_class['asldkjas']} items from class {name}"
+            )
 
     result_rows = []
     result_classes = []
     for clz, classrows in byclass.items():
 
         # If there are MORE instances on this class than we want, grab a random sample of them
-        logger.info(f"Variant class {class_names[clz]} contains {len(classrows)} variants")
+        logger.info(
+            f"Variant class {class_names[clz]} contains {len(classrows)} variants"
+        )
         if len(classrows) > vals_per_class[class_names[clz]]:
-            logger.info(f"Randomly sampling {vals_per_class[class_names[clz]]} variants for variant class {class_names[clz]}")
+            logger.info(
+                f"Randomly sampling {vals_per_class[class_names[clz]]} variants for variant class {class_names[clz]}"
+            )
             rows = random.sample(classrows, vals_per_class[class_names[clz]])
             result_rows.extend(rows)
             result_classes.extend([clz] * vals_per_class[class_names[clz]])
         else:
             # If there are FEWER instances of the class than we want, then loop over them
             # repeatedly - no random sampling since that might ignore a few of the precious few samples we do have
-            logger.info(f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class[class_names[clz]]} {class_names[clz]} variants")
+            logger.info(
+                f"Loop over {len(classrows)} variants repeatedly to generate {vals_per_class[class_names[clz]]} {class_names[clz]} variants"
+            )
             for i in range(vals_per_class[class_names[clz]]):
                 result_classes.append(clz)
                 idx = i % len(classrows)
@@ -230,7 +258,16 @@ def upsample_labels(bed, vals_per_class):
     return rows
 
 
-def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per_pos, vals_per_class, max_jitter_bases=0):
+def load_from_csv(
+    bampath,
+    refpath,
+    bed,
+    vcfpath,
+    max_reads_per_aln,
+    samples_per_pos,
+    vals_per_class,
+    max_jitter_bases=0,
+):
     """
     Generator for encoded pileups, reference, and alt sequences obtained from a
     alignment (BAM) and labels csv file. This performs some class normalized by upsampling / downsampling
@@ -248,11 +285,15 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     vcf = pysam.VariantFile(vcfpath)
 
     upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)
-    logger.info(f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}")
+    logger.info(
+        f"Will save {len(upsampled_labels)} with up to {samples_per_pos} samples per site from {bed}"
+    )
     for region in upsampled_labels:
         chrom, start, end = region[0:3]
         rowlabel = region[3]
-        row_is_tn = rowlabel.strip().startswith("tn-") # Indicator for whether this row contains any variants
+        row_is_tn = rowlabel.strip().startswith(
+            "tn-"
+        )  # Indicator for whether this row contains any variants
 
         # Add some jitter?
         if max_jitter_bases > 0:
@@ -260,17 +301,15 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
             start, end = start + jitter, end + jitter
 
         variants = list(vcf.fetch(chrom, start, end))
-        #logger.info(f"Number of variants in {chrom}:{start}-{end} : {len(variants)}")
+        # logger.info(f"Number of variants in {chrom}:{start}-{end} : {len(variants)}")
         try:
-            for encoded, (minref, maxref) in encode_and_downsample(chrom,
-                                                 start,
-                                                 end,
-                                                 bam,
-                                                 refgenome,
-                                                 max_reads_per_aln,
-                                                 samples_per_pos):
+            for encoded, (minref, maxref) in encode_and_downsample(
+                chrom, start, end, bam, refgenome, max_reads_per_aln, samples_per_pos
+            ):
 
-                hap0, hap1 = phaser.gen_haplotypes(bam, refgenome, chrom, minref, maxref + 100, variants)
+                hap0, hap1 = phaser.gen_haplotypes(
+                    bam, refgenome, chrom, minref, maxref + 100, variants
+                )
                 regionsize = end - start
                 midstart = max(0, start - minref)
                 midend = midstart + regionsize
@@ -284,16 +323,31 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
                 if encoded.shape[0] != tgt_haps.shape[-1]:
                     # This happens sometimes at the edges of regions where the reads only overlap a few bases at
                     # the start of the region.. raising an exception just causes this region to be skipped
-                    raise ValueError(f"src shape {encoded.shape} doesn't match haplotype shape {tgt_haps.shape}, skipping")
+                    raise ValueError(
+                        f"src shape {encoded.shape} doesn't match haplotype shape {tgt_haps.shape}, skipping"
+                    )
 
                 yield encoded, tgt_haps, region, row_is_tn
 
         except Exception as ex:
-            logger.warning(f"Error encoding position {chrom}:{start}-{end} for bam: {bampath}, skipping it: {ex}")
+            logger.warning(
+                f"Error encoding position {chrom}:{start}-{end} for bam: {bampath}, skipping it: {ex}"
+            )
             tb.print_exc()
 
 
-def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, samples_per_pos, vals_per_class, max_to_load=1e9, max_jitter_bases=0):
+def encode_chunks(
+    bampath,
+    refpath,
+    bed,
+    vcf,
+    chunk_size,
+    max_reads_per_aln,
+    samples_per_pos,
+    vals_per_class,
+    max_to_load=1e9,
+    max_jitter_bases=0,
+):
     """
     Generator for creating batches of src, tgt (data and label) tensors from a CSV file
 
@@ -312,37 +366,52 @@ def encode_chunks(bampath, refpath, bed, vcf, chunk_size, max_reads_per_aln, sam
     varsinfo = []
     count = 0
     seq_len = 150
-    logger.info(f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}")
-    for enc, tgt, region, tnlabel in load_from_csv(bampath, refpath, bed, vcf,
-                                          max_reads_per_aln=max_reads_per_aln,
-                                          samples_per_pos=samples_per_pos,
-                                          vals_per_class=vals_per_class,
-                                          max_jitter_bases=max_jitter_bases):
+    logger.info(
+        f"Creating new data loader from {bampath}, vals_per_class: {vals_per_class}"
+    )
+    for enc, tgt, region, tnlabel in load_from_csv(
+        bampath,
+        refpath,
+        bed,
+        vcf,
+        max_reads_per_aln=max_reads_per_aln,
+        samples_per_pos=samples_per_pos,
+        vals_per_class=vals_per_class,
+        max_jitter_bases=max_jitter_bases,
+    ):
         src, tgt = trim_pileuptensor(enc, tgt, seq_len)
         src = ensure_dim(src, seq_len, max_reads_per_aln)
         allrowtn.append(tnlabel)
-        assert src.shape[0] == seq_len, f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
-        assert tgt.shape[-1] == seq_len, f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[-1]} but should be {seq_len}"
+        assert (
+            src.shape[0] == seq_len
+        ), f"Src tensor #{count} had incorrect shape after trimming, found {src.shape[0]} but should be {seq_len}"
+        assert (
+            tgt.shape[-1] == seq_len
+        ), f"Tgt tensor #{count} had incorrect shape after trimming, found {tgt.shape[-1]} but should be {seq_len}"
         allsrc.append(src)
         alltgt.append(tgt)
 
         count += 1
 
         if count == max_to_load:
-            #logger.info(f"Stopping tensor load after {max_to_load}")
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(allrowtn), varsinfo
+            # logger.info(f"Stopping tensor load after {max_to_load}")
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(
+                allrowtn
+            ), varsinfo
             break
 
         if len(allsrc) >= chunk_size:
-            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(allrowtn), varsinfo
+            yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(
+                allrowtn
+            ), varsinfo
             allsrc = []
             alltgt = []
             allrowtn = []
             varsinfo = []
 
     if len(allsrc):
-        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(allrowtn), varsinfo
+        yield torch.stack(allsrc).char(), torch.stack(alltgt).long(), torch.tensor(
+            allrowtn
+        ), varsinfo
 
     logger.info(f"Done loading {count} tensors from {bampath}")
-
-

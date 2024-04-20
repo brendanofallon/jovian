@@ -19,9 +19,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 logger = logging.getLogger(__name__)
 
-INDEX_TO_BASE = [
-    'A', 'C', 'G', 'T'
-]
+INDEX_TO_BASE = ["A", "C", "G", "T"]
 
 
 def make_kmer_lookups(size):
@@ -35,17 +33,20 @@ def make_kmer_lookups(size):
     str2index = {}
     index2str = [None] * (len(bases) ** size)
     for i, combo in enumerate(itertools.product(*baselist)):
-        s = ''.join(combo)
+        s = "".join(combo)
         str2index[s] = i
         index2str[i] = s
     return str2index, index2str
 
+
 TGT_KMER_SIZE = 4
 s2i, i2s = make_kmer_lookups(TGT_KMER_SIZE)
-KMER_COUNT = 4 ** TGT_KMER_SIZE
-FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
-START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
-START_TOKEN[:, FEATURE_DIM-1] = 1
+KMER_COUNT = 4**TGT_KMER_SIZE
+FEATURE_DIM = (
+    KMER_COUNT + 4
+)  # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
+START_TOKEN = torch.zeros((1, FEATURE_DIM), dtype=float)
+START_TOKEN[:, FEATURE_DIM - 1] = 1
 
 
 def format_bp(bp):
@@ -63,6 +64,7 @@ def format_bp(bp):
     except:
         return bp
 
+
 def read_bed_regions(bedpath: Path):
     """
     Generate chrom, start, end regions from a BED formatted file
@@ -74,7 +76,9 @@ def read_bed_regions(bedpath: Path):
                 continue
             toks = line.split("\t")
             chrom, start, end = toks[0], int(toks[1]), int(toks[2])
-            assert end > start, f"End position {end} must be strictly greater start {start}"
+            assert (
+                end > start
+            ), f"End position {end} must be strictly greater start {start}"
             yield chrom, start, end
 
 
@@ -140,9 +144,7 @@ def log_timer(func):
             fname = func.__name__
         except:
             fname = "?"
-        logger.debug(
-            f"Function {fname} completed in {elapsed.total_seconds()} seconds"
-        )
+        logger.debug(f"Function {fname} completed in {elapsed.total_seconds()} seconds")
         return result
 
     return wrapper
@@ -150,31 +152,31 @@ def log_timer(func):
 
 def var_type(variant):
     if len(variant.ref) == 1 and len(variant.alt) == 1:
-        return 'snv'
+        return "snv"
     elif len(variant.ref) == 0 and len(variant.alt) > 0:
-        return 'ins'
+        return "ins"
     elif len(variant.ref) > 0 and len(variant.alt) == 0:
-        return 'del'
+        return "del"
     elif len(variant.ref) > 0 and len(variant.alt) > 0:
-        return 'mnv'
+        return "mnv"
     print(f"Whoa, unknown variant type: {variant}")
-    return 'unknown'
+    return "unknown"
 
 
 def concat_metafile(sample_metafile, dest_metafh):
     """
-    Concate the given sample metadata file to destination metadata file. 
+    Concate the given sample metadata file to destination metadata file.
     The sample metadata file is also removed as a side effect!
 
     :param smaple_metafile: the path of sample metadata
     :param dest_metafh: the file handle of destination metadata file.
     """
-    with open(sample_metafile, 'rb') as sample_fh:
+    with open(sample_metafile, "rb") as sample_fh:
         shutil.copyfileobj(sample_fh, dest_metafh)
     os.unlink(sample_metafile)
 
 
-def find_files(datadir, src_prefix='src', tgt_prefix='tgt'):
+def find_files(datadir, src_prefix="src", tgt_prefix="tgt"):
     """
     Examine files in datadir and match up all src / tgt / vaftgt files and store them as tuples in a list
     :returns : List of (src, tgt, vaftgt) tuples of matched files
@@ -184,9 +186,12 @@ def find_files(datadir, src_prefix='src', tgt_prefix='tgt'):
     pairs = []
     for src in allsrc:
         suffix = src.name.split("_")[-1]
-        pairs.append((src,
-                     f"{datadir}/{tgt_prefix}_{suffix}",
-                      ))
+        pairs.append(
+            (
+                src,
+                f"{datadir}/{tgt_prefix}_{suffix}",
+            )
+        )
     return pairs
 
 
@@ -202,7 +207,7 @@ def tensor_from_gzip(path, device):
 def tensor_from_file(path, device):
     with open(path, "rb") as fh:
         data = fh.read()
-    if str(path).endswith('.lz4'):
+    if str(path).endswith(".lz4"):
         return tensor_from_lz4(data, device)
     else:
         return torch.load(path, map_location=device)
@@ -212,14 +217,14 @@ def sortreads(reads):
     return sorted(reads, key=lambda r: r.reference_start)
 
 
-def unzip_load(path, device='cpu'):
+def unzip_load(path, device="cpu"):
     """
-    Read the given file and load then tensor it contains, 
+    Read the given file and load then tensor it contains,
     If path has a .gz suffix, ungzip it first then load
     :returns: torch.Tensor read from file
     """
-    if str(path).endswith('.gz'):
-        with gzip.open(path, 'rb') as fh:
+    if str(path).endswith(".gz"):
+        with gzip.open(path, "rb") as fh:
             return torch.load(fh, map_location=device)
     else:
         return torch.load(path, map_location=device)
@@ -234,7 +239,9 @@ def readstr(t):
             output.append(".")
         else:
             output.append(INDEX_TO_BASE[np.argmax(t[pos, 0:4])])
-            if t.shape[-1] > 4 and t[pos, -1] == 1: # Clip flag is set, which means emit lowercase
+            if (
+                t.shape[-1] > 4 and t[pos, -1] == 1
+            ):  # Clip flag is set, which means emit lowercase
                 output[-1] = output[-1].lower()
 
     return "".join(output)
@@ -248,7 +255,6 @@ def to_pileup(data, altmask=None):
     return "\n".join(pileup)
 
 
-
 def print_pileup(path, idx, **kwargs):
     """
     Utility for printing a single encoded region as text
@@ -258,7 +264,7 @@ def print_pileup(path, idx, **kwargs):
     suffix = path.name.split("_")[-1]
     tgtpath = path.parent / f"tgt_{suffix}"
     if tgtpath.exists():
-        tgt = tensor_from_file(tgtpath, device='cpu')
+        tgt = tensor_from_file(tgtpath, device="cpu")
         logger.info(f"Found target file: {tgtpath}, loaded tensor of shape {tgt.shape}")
         for i in range(tgt.shape[1]):
             t = tgt[idx, i, :]
@@ -267,11 +273,12 @@ def print_pileup(path, idx, **kwargs):
     else:
         logger.info(f"No tgt file found (look for {tgtpath})")
 
-    src = tensor_from_file(path, device='cpu')
+    src = tensor_from_file(path, device="cpu")
     logger.info(f"Loaded tensor with shape {src.shape}")
     s = to_pileup(src[idx, :, :, :])
-    #print(src[idx, 5, 0:10, :])
+    # print(src[idx, 5, 0:10, :])
     print(s)
+
 
 def predprobs(t):
     t = t.detach().cpu().numpy()
@@ -308,7 +315,12 @@ def count_bed(bedpath):
 
 
 def _varkey(variant):
-    return variant.chrom, variant.pos, variant.ref, ",".join(str(s) for s in variant.alts)
+    return (
+        variant.chrom,
+        variant.pos,
+        variant.ref,
+        ",".join(str(s) for s in variant.alts),
+    )
 
 
 def check_overlap(interval1, interval2):
@@ -321,7 +333,7 @@ def check_overlap(interval1, interval2):
 
 
 def records_overlap(rec1, rec2):
-    """ True if the two records share any reference bases """
+    """True if the two records share any reference bases"""
     return check_overlap(
         (rec1.pos, rec1.pos + (len(rec1.ref) - len(rec1.alts[0]))),
         (rec2.pos, rec2.pos + (len(rec2.ref) - len(rec2.alts[0]))),
@@ -339,7 +351,12 @@ def merge_overlapping_regions(regions):
     merged = [regions[0]]
     for region in regions[1:]:
         if region[0] == merged[-1][0] and region[2] <= merged[-1][3]:
-            merged[-1] = (merged[-1][0], merged[-1][1], merged[-1][2], max(region[3], merged[-1][3]))
+            merged[-1] = (
+                merged[-1][0],
+                merged[-1][1],
+                merged[-1][2],
+                max(region[3], merged[-1][3]),
+            )
         else:
             merged.append(region)
     return merged
@@ -354,7 +371,7 @@ def kmer_preds_to_seq(preds, i2s):
 
 
 def kmer_idx_to_str(kmer_idx, i2s):
-    return ''.join(i2s[i] for i in kmer_idx)
+    return "".join(i2s[i] for i in kmer_idx)
 
 
 def bases_to_kvec(bases, s2i, kmersize=4):
@@ -363,7 +380,7 @@ def bases_to_kvec(bases, s2i, kmersize=4):
     """
     indices = []
     for i in range(0, len(bases), kmersize):
-        kmer = bases[i:i+kmersize]
+        kmer = bases[i : i + kmersize]
         indices.append(s2i[kmer])
     return indices
 
@@ -402,7 +419,7 @@ def expand_to_bases(vals, expansion_factor=TGT_KMER_SIZE):
     """
     Replicate each item in vals by expansion_factor times successively and return them in a list
     """
-    return list(chain(*([k]*expansion_factor for k in vals)))
+    return list(chain(*([k] * expansion_factor for k in vals)))
 
 
 def predict_sequence(src, model, n_output_toks, device):
@@ -412,29 +429,40 @@ def predict_sequence(src, model, n_output_toks, device):
     if isinstance(model, nn.DataParallel) or isinstance(model, DistributedDataParallel):
         model = model.module
     start = time.perf_counter()
-    predictions = torch.stack((START_TOKEN, START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
+    predictions = (
+        torch.stack((START_TOKEN, START_TOKEN), dim=0)
+        .expand(src.shape[0], -1, -1, -1)
+        .float()
+        .to(device)
+    )
     probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
     mem = model.encode(src)
     encode = time.perf_counter()
     encode_elapsed = encode - start
     step_time = time.perf_counter()
     for i in range(n_output_toks + 1):
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(
+            predictions.shape[-2]
+        ).to(device)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         new_probs, tophit = torch.max(new_preds, dim=-1)
         p = torch.nn.functional.one_hot(tophit, num_classes=FEATURE_DIM)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
-        logger.debug(f"Prediction step {i} time: {time.perf_counter() - step_time :.5f}")
+        logger.debug(
+            f"Prediction step {i} time: {time.perf_counter() - step_time :.5f}"
+        )
         step_time = time.perf_counter()
     decode_elapsed = time.perf_counter() - encode
-    logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
+    logger.debug(
+        f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}"
+    )
     return predictions[:, :, 1:, :], probs[:, :, 1:]
 
 
 class VariantSortedBuffer:
-    """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
-    
+    """Holds a list of variants in a buffer and sorts them before writing to an output stream"""
+
     def __init__(self, outputfh, buff_size=500, capacity_factor=10):
         self.outputfh = outputfh
         self.buff_size = buff_size
@@ -448,9 +476,9 @@ class VariantSortedBuffer:
         try:
             return int(c)
         except:
-            if c == 'X':
+            if c == "X":
                 return 50
-            elif c == 'Y':
+            elif c == "Y":
                 return 60
             else:
                 return 100 + ord(c[0])
@@ -463,11 +491,11 @@ class VariantSortedBuffer:
 
     def _dumphalf(self):
         self._sort()
-        for v in self.buffer[0:len(self.buffer)//self.capacity_factor]:
+        for v in self.buffer[0 : len(self.buffer) // self.capacity_factor]:
             self.outputfh.write(str(v))
             self.lastpos = v.pos
             self.lastchrom = v.chrom
-        self.buffer = self.buffer[len(self.buffer)//self.capacity_factor:]
+        self.buffer = self.buffer[len(self.buffer) // self.capacity_factor :]
         try:
             self.outputfh.flush()
         except:
@@ -489,7 +517,9 @@ class VariantSortedBuffer:
     def put(self, v):
         self.buffer.append(v)
         if v.pos < self.lastpos and v.chrom == self.lastchrom:
-            raise ValueError(f"Ahh, just got variant with position {v.pos} but we've already emitted a variant with position {self.lastpos}")
+            raise ValueError(
+                f"Ahh, just got variant with position {v.pos} but we've already emitted a variant with position {self.lastpos}"
+            )
 
         if len(self.buffer) > self.buff_size:
             self._dumphalf()
@@ -497,8 +527,6 @@ class VariantSortedBuffer:
     def put_all(self, items):
         for v in items:
             self.put(v)
-
-
 
 
 class WarmupCosineLRScheduler:
@@ -523,13 +551,15 @@ class WarmupCosineLRScheduler:
     def get_lr(self):
         # 1) linear warmup for warmup_iters steps
         if self.iters < self.warmup_iters:
-            lr = self.max_lr * (self.iters+1) / (self.warmup_iters)
+            lr = self.max_lr * (self.iters + 1) / (self.warmup_iters)
         # 2) if it > lr_decay_iters, return min learning rate
         elif self.iters > self.lr_decay_iters:
             lr = self.min_lr
         else:
-           # 3) in between, use cosine decay down to min learning rate
-            decay_ratio = (self.iters - self.warmup_iters) / (self.lr_decay_iters - self.warmup_iters)
+            # 3) in between, use cosine decay down to min learning rate
+            decay_ratio = (self.iters - self.warmup_iters) / (
+                self.lr_decay_iters - self.warmup_iters
+            )
             assert 0 <= decay_ratio <= 1
             coeff = 0.5 * (1.0 + np.cos(np.pi * decay_ratio))  # coeff ranges 0..1
             lr = self.min_lr + coeff * (self.max_lr - self.min_lr)
