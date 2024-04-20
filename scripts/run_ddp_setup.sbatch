@@ -37,6 +37,7 @@ GIT_BRANCH="better_parallel_call"
 
 export RUN_NAME="100M_good44"
 
+
 cd $ROOT_DIR
 mkdir -p $RUN_NAME
 cd $RUN_NAME
