@@ -84,6 +84,31 @@ class TrainLogger:
         self._flush_and_fsync()
 
 
+@torch.no_grad
+def swap_haps_loss(preds, tgt, criterion):
+    """
+    Compute the CE loss between the predictions and the targets for both haplotype configiurations
+    Swap prediction haplotypes (second prediction dim) if it leads to a lower loss
+    ** Swaps Predictions IN PLACE, but still returns them **
+
+    :param preds: Predicted tensor with dim [batch, haplotype, seq, kmer]
+    :param tgt: Target tensors, with dim [batch, haplotype, tgt kmer]
+    :param criterion: Loss function
+    :returns predictions with some haplotypes swapped
+    """
+    swaps = 0
+    for b in range(preds.shape[0]):
+        loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                          tgt[b, :, :].flatten())
+        loss2 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
+                          tgt[b, torch.tensor([1, 0]), :].flatten())
+
+        if loss2.mean() < loss1.mean():
+            preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
+            swaps += 1
+
+    return preds
+
 
 def compute_twohap_loss(preds, tgt, criterion):
     """
@@ -92,17 +117,7 @@ def compute_twohap_loss(preds, tgt, criterion):
     Finally, re-compute loss with the new configuration for all samples and return it, storing gradients this time
     """
     # Compute losses in both configurations, and use the best
-    with torch.no_grad():
-        swaps = 0
-        for b in range(preds.shape[0]):
-            loss1 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
-                              tgt[b, :, :].flatten())
-            loss2 = criterion(preds[b, :, :, :].flatten(start_dim=0, end_dim=1),
-                              tgt[b, torch.tensor([1, 0]), :].flatten())
-
-            if loss2.mean() < loss1.mean():
-                preds[b, :, :, :] = preds[b, torch.tensor([1, 0]), :]
-                swaps += 1
+    preds, swaps = swap_haps_loss(preds, tgt, criterion)
 
     return criterion(preds.flatten(start_dim=0, end_dim=2), tgt.flatten()), swaps
 
