@@ -9,8 +9,7 @@ import random
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import List, Optional, Callable
-import heapq
+from typing import List, Callable
 
 import torch
 import torch.multiprocessing as mp
@@ -18,11 +17,11 @@ import queue
 import pysam
 import numpy as np
 
-from model import VarTransformer
-import buildclf
-import vcf
-import util
-import bam
+from dnaseq2seq.model import VarTransformer
+from dnaseq2seq import buildclf
+from dnaseq2seq import vcf
+from dnaseq2seq import util
+from dnaseq2seq import bam
 
 logger = logging.getLogger(__name__)
 
@@ -535,12 +534,12 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
 
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
             bp = sum(d['region'][2] - d['region'][1] for d in datas)
             bp_processed += bp
             logger.info(
-                f"Calling variants near {datas[-1]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {util.format_bp(bp_processed)}"
+                f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
             )
+            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
@@ -582,7 +581,8 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     Note that this function contains additional, unused logic to divide batch up into smaller regions and send those
     through the model individually. This might be useful if different regions require very different numbers of predicted
     tokens, for instance. However, since the time spent in forward passes of the model are almost constant in batch size
-    this doesn't offer much speedup in a naive implementation.
+    this doesn't offer much speedup in a naive implementation (but since we don't do KV caching during decoding the cost
+    for generating additional tokens increases linearly in the total token count... so maybe it makes sense to do this?)
 
     :param batch: Tensor of encoded regions
     :param batch_offsets: List of start positions, must have same length as batch.shape[0]
@@ -594,20 +594,26 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     """
     logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
-
+    #mid_dist = int(np.mean(dists))
+    #logger.info(f"Dists: {dists} mid dist: {mid_dist}")
     # Identify distinct sub-batches for calling. In the future we might populate this with different indexes
     # Setting everything to 0 effectively turns it off for now
     subbatch_idx = np.zeros(len(dists), dtype=int)
-
+    #subbatch_idx = (dists > mid_dist).astype(np.int_)
+    #logger.info('\n'.join(f"{b, d}" for b,d in zip(subbatch_idx, dists)))
     byregion = defaultdict(list)
-    max_dist = max(dists)
     # n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max(dists) // util.TGT_KMER_SIZE + 1)
+    #logger.info(f"Dists: {dists}")
+    #median_dist = np.median(dists)
+
     for sbi in range(max(subbatch_idx) + 1):
         which = np.where(subbatch_idx == sbi)[0]
         subbatch = batch[torch.tensor(which), :, :, :]
         subbatch_offsets = [b for i,b in zip(subbatch_idx, batch_offsets) if i == sbi]
         subbatch_dists =   [d for i,d in zip(subbatch_idx, dists) if i == sbi]
         subbatch_regions = [r for i,r in zip(subbatch_idx, regions) if i == sbi]
+        max_dist = max(subbatch_dists)
+        logger.debug(f"Max dist for sub-batch {sbi} : {max_dist}")
         n_output_toks = min(150 // util.TGT_KMER_SIZE - 1, max_dist // util.TGT_KMER_SIZE + 1)
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
@@ -687,6 +693,12 @@ def merge_overlaps(overlaps, min_qual):
 
 
 def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100):
+    """
+    Construct VcfVar objects with phase from Variant dict objects, assuming we can only
+    correctly phase Variants within 'minimum_safe_distance' bp
+
+    :returns: List of VcfVar objects
+    """
     allkeys = list(k for k in vars_hap0.keys()) + list(k for k in vars_hap1.keys())
     allkeys = sorted(set(allkeys), key=lambda x: x[1])
 

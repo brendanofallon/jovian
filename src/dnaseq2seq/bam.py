@@ -7,13 +7,11 @@ import torch
 import logging
 from collections import defaultdict
 
-import util
+from dnaseq2seq import util
 
 logger = logging.getLogger(__name__)
 
 FEATURE_NUM=10
-
-#EMPTY_TENSOR = torch.zeros(10)
 
 
 
@@ -107,7 +105,7 @@ class ReadWindow:
         window_size = end - start
         t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            encoded = self.cache[read].char()
+            encoded = self.cache[read].char() # Char is the same as int8
             enc_start_offset = max(0,  start - readstart)
             enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
             t_start_offset = max(0, readstart - start)

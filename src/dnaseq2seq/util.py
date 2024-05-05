@@ -416,14 +416,17 @@ def predict_sequence(src, model, n_output_toks, device):
     probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
     mem = model.encode(src)
     encode = time.perf_counter()
+    encode_elapsed = encode - start
+    step_time = time.perf_counter()
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         new_probs, tophit = torch.max(new_preds, dim=-1)
-        p = torch.nn.functional.one_hot(tophit, num_classes=260)
+        p = torch.nn.functional.one_hot(tophit, num_classes=FEATURE_DIM)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
-    encode_elapsed = encode - start
+        logger.debug(f"Prediction step {i} time: {time.perf_counter() - step_time :.5f}")
+        step_time = time.perf_counter()
     decode_elapsed = time.perf_counter() - encode
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]

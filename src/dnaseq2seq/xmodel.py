@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import Tensor
 import math
 
@@ -45,7 +46,8 @@ class XVarTransformer(nn.Module):
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
         self.fc2 = nn.Linear(self.read_depth * self.fc1_hidden, self.embed_dim)
 
-        self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
+        self.converter0 = nn.Linear(self.embed_dim, self.kmer_dim)
+        self.converter1 = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
         self.tgt_pos_encoder = PositionalEncoding(self.kmer_dim, batch_first=True, max_len=500).to(self.device)
 
@@ -106,23 +108,16 @@ class XVarTransformer(nn.Module):
         src = src.flatten(start_dim=2)
         src = self.elu(self.fc2(src))
         mem = self.encoder(src)
-        return mem
+        mem_proj0 = self.converter0(mem)
+        mem_proj1 = self.converter1(mem)
+        return torch.stack((mem_proj0, mem_proj1), dim=1)
 
     def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-        mem_proj = self.converter(mem)
+
         tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
         tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
-
-        # assert tgt_mask.shape[0] == tgt.shape[0], "Mask must have batch dimension equal to batch size"
-        # if tgt_mask.dtype != torch.bool:
-        #     tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1], dtype=torch.bool).unsqueeze(0).expand(tgt.shape[0], -1, -1).to(self.device)
-        # The magic of DataParallel mistakenly modifies the first dimension of the tgt mask when running on multi-GPU setups
-        # This hack just forces it to be a square again
-        # if tgt_mask.shape[0] != tgt_mask.shape[1]:
-        #     tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_mask.shape[1]).to(self.device)
-            #logger.info(f"Forcing tgt mask shapre to be {tgt_mask.shape}, input enc shape is: {mem.shape}")
-        h0, _ = self.decoder0(tgt0, context=mem_proj)
-        h1, _ = self.decoder1(tgt1, context=mem_proj)
+        h0, _ = self.decoder0(tgt0, context=mem[:, 0, :, :])
+        h1, _ = self.decoder1(tgt1, context=mem[:, 1, :, :])
         h0 = self.softmax(h0)
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)
@@ -131,6 +126,18 @@ class XVarTransformer(nn.Module):
         mem = self.encode(src)
         result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         return result
+
+    def generate_haplotypes(self, src, n_output_toks, device):
+        model = self
+        if isinstance(model, nn.DataParallel) or isinstance(model, DDP):
+            model = model.module
+        mem = model.encode(src)
+
+        predictions = torch.stack((util.START_TOKEN, util.START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
+
+        haptoks0 = self.decoder0.generate(predictions, src[:, 0, :, :], seq_len=n_output_toks, temperature=0, context=mem)
+
+        return haptoks0
 
 
 class NoLossAutoregressiveWrapper(AutoregressiveWrapper):
@@ -193,28 +200,14 @@ def main():
                            d_ff=128,
                            device='cpu')
 
-    nmodel = VarTransformer(read_depth=150,
-                           feature_count=10,
-                           kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
-                           n_encoder_layers=3,
-                           n_decoder_layers=3,
-                           embed_dim_factor=40,
-                           encoder_attention_heads=8,
-                           decoder_attention_heads=4,
-                           d_ff=128,
-                           device='cpu')
-
     x = torch.rand(3, 2, 150, 10)
     tgtkmers = F.one_hot(torch.randint(0, util.FEATURE_DIM, (3, 2, 150)), num_classes=util.FEATURE_DIM)
-
     tgt_mask = nn.Transformer.generate_square_subsequent_mask(150, dtype=torch.bool)
-    y = xmodel(x, tgtkmers, tgt_mask)
-    print(y.shape)
-    print(y[0, 0, 0, 0:10])
 
-    y2 = nmodel(x, tgtkmers, tgt_mask)
-    print(y2.shape)
-    print(y2[0, 0, 0, 0:10])
+
+    toks = xmodel.generate_haplotypes(x, 6, 'cpu')
+    print(toks.shape)
+
 
 
 if __name__=="__main__":

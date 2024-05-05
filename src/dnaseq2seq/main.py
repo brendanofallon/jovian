@@ -11,7 +11,7 @@ import sklearn
 import argparse
 
 from dnaseq2seq import __version__ as VERSION
-import util as util
+from dnaseq2seq import util as util
 
 logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s',
                     datefmt='%m-%d %H:%M:%S',
@@ -23,15 +23,15 @@ logging.basicConfig(format='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  
 logger = logging.getLogger(__name__)
 
 def do_pregen(*args, **kwargs):
-    from pregen import pregen
+    from dnaseq2seq.pregen import pregen
     pregen(*args, **kwargs)
 
 def do_call(*args, **kwargs):
-    from call import call
+    from dnaseq2seq.call import call
     call(*args, **kwargs)
 
 def do_train(*args, **kwargs):
-    from train import train
+    from dnaseq2seq.train import train
     train(*args, **kwargs)
 
 
