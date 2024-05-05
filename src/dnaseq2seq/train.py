@@ -21,7 +21,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import vcf
 import loader
 import util
-from model import VarTransformer
+# from model import VarTransformer
+from xmodel import XVarTransformer
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
 formatter = logging.Formatter(LOG_FORMAT)
@@ -376,7 +377,7 @@ def load_model(modelconf, ckpt):
             logger.warning(f"Found model conf AND a checkpoint with model conf - using the model params from checkpoint")
             modelconf = ckpt['conf']
 
-    model = VarTransformer(read_depth=modelconf['max_read_depth'],
+    model = XVarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
                            kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
                            n_encoder_layers=modelconf['encoder_layers'],
@@ -397,8 +398,8 @@ def load_model(modelconf, ckpt):
     #model.fc1.requires_grad_(False)
     #model.fc2.requires_grad_(False)
     
-    logger.info("Compiling model...")
-    model = torch.compile(model)
+    # logger.info("Compiling model...")
+    # model = torch.compile(model)
     
     if USE_DDP:
         rank = dist.get_rank()
