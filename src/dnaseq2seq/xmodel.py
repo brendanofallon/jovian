@@ -80,8 +80,7 @@ class XVarTransformer(nn.Module):
                 cross_attend=True,
             ),
         )
-        normalmodel0.token_emb = Identity()  # Identity func, but takes arbitrary args that do nothing
-        normalmodel0.pos_emb = Identity()
+        normalmodel0.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)  # Identity func, but takes arbitrary args that do nothing
         normalmodel1 = TransformerWrapper(
             num_tokens=util.FEATURE_DIM,
             max_seq_len=500,
@@ -93,9 +92,7 @@ class XVarTransformer(nn.Module):
                 cross_attend=True,
             ),
         )
-        normalmodel1.token_emb = Identity()
-        normalmodel1.pos_emb = Identity()
-
+        normalmodel1.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)
         self.decoder0 = NoLossAutoregressiveWrapper(normalmodel0)
         self.decoder1 = NoLossAutoregressiveWrapper(normalmodel1)
 
@@ -112,32 +109,33 @@ class XVarTransformer(nn.Module):
         mem_proj1 = self.converter1(mem)
         return torch.stack((mem_proj0, mem_proj1), dim=1)
 
-    def decode(self, mem, tgt, tgt_mask, tgt_key_padding_mask=None):
-
-        tgt0 = self.tgt_pos_encoder(tgt[:, 0, :, :])
-        tgt1 = self.tgt_pos_encoder(tgt[:, 1, :, :])
+    def decode(self, mem, tgt):
+        tgt0 = tgt[:, 0, :]
+        tgt1 = tgt[:, 1, :]
         h0, _ = self.decoder0(tgt0, context=mem[:, 0, :, :])
         h1, _ = self.decoder1(tgt1, context=mem[:, 1, :, :])
         h0 = self.softmax(h0)
         h1 = self.softmax(h1)
         return torch.stack((h0, h1), dim=1)
 
-    def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None):
+    def forward(self, src, tgt):
         mem = self.encode(src)
-        result = self.decode(mem, tgt, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        result = self.decode(mem, tgt)
         return result
 
-    def generate_haplotypes(self, src, n_output_toks, device):
+    def generate_haplotypes(self, src, n_output_toks):
         model = self
         if isinstance(model, nn.DataParallel) or isinstance(model, DDP):
             model = model.module
-        mem = model.encode(src)
+        device = model.device
+        mem = model.encode(src.to(device))
 
-        predictions = torch.stack((util.START_TOKEN, util.START_TOKEN), dim=0).expand(src.shape[0], -1, -1, -1).float().to(device)
+        preds0 = torch.zeros((src.shape[0], 1)).long().to(device) # These are token indices not one-hot encoded values
+        haptoks0 = self.decoder0.generate(preds0, seq_len=n_output_toks, temperature=0, context=mem[:, 0, :, :])
 
-        haptoks0 = self.decoder0.generate(predictions, src[:, 0, :, :], seq_len=n_output_toks, temperature=0, context=mem)
-
-        return haptoks0
+        preds1 = torch.zeros((src.shape[0], 1)).long().to(device)
+        haptoks1 = self.decoder1.generate(preds1, seq_len=n_output_toks, temperature=0, context=mem[:, 1, :, :])
+        return torch.stack( (haptoks0, haptoks1), dim=1)
 
 
 class NoLossAutoregressiveWrapper(AutoregressiveWrapper):
@@ -169,22 +167,35 @@ class NoLossAutoregressiveWrapper(AutoregressiveWrapper):
 
         return logits, cache
 
+class OnehotEmbedder(nn.Module):
+
+    def __init__(self, num_classes):
+        super().__init__()
+        self.num_classes = num_classes
+
+    def forward(self, x):
+        assert x.dtype == torch.long
+        return F.one_hot(x, num_classes=self.num_classes)
+
 def main():
     # dec = Decoder(
-    #     dim=128,
+    #     dim=260,
     #     depth=4,
     #     heads=8,
     #     attn_dropout=0.1,
     #     cross_attend=True,
     # )
     # normalmodel = TransformerWrapper(
-    #     num_tokens=100,
-    #     max_seq_len=128,
+    #     num_tokens=260,
+    #     max_seq_len=500,
     #     attn_layers=dec,
     # )
+    # normalmodel.token_emb = OnehotEmbedder(num_classes=util.FEATURE_DIM) # I guess should match decoder model dim
+    # # normalmodel.pos_emb = Identity()
     # normal_autregwrap = AutoregressiveWrapper(normalmodel)
-    # context = torch.rand(3, 13, 128)
-    # x = torch.randint(0, 100, (3,5))
+    # context = torch.rand(3, 150, util.FEATURE_DIM).float()
+    # x = torch.randint(0, 100, (3,1)).long()
+    # print(f"pred shape: {x.shape} context shape: {context.shape}")
     # result = normal_autregwrap.generate(x, seq_len=4, temperature=0, context=context)
     # print(result.shape)
     # return
@@ -200,13 +211,18 @@ def main():
                            d_ff=128,
                            device='cpu')
 
-    x = torch.rand(3, 2, 150, 10)
-    tgtkmers = F.one_hot(torch.randint(0, util.FEATURE_DIM, (3, 2, 150)), num_classes=util.FEATURE_DIM)
-    tgt_mask = nn.Transformer.generate_square_subsequent_mask(150, dtype=torch.bool)
+
+    tgtkmers = torch.randint(0, util.FEATURE_DIM, (3, 2, 150))
+    # tgt_mask = nn.Transformer.generate_square_subsequent_mask(150, dtype=torch.bool)
 
 
-    toks = xmodel.generate_haplotypes(x, 6, 'cpu')
-    print(toks.shape)
+    x = torch.rand(3, 150, 150, 10)  # [batch, seq, read, feature]
+    y = xmodel(x, tgtkmers)
+    print(y.shape)
+
+
+    haps = xmodel.generate_haplotypes(x, 6)
+    print(haps.shape)
 
 
 

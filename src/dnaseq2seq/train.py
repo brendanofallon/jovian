@@ -121,15 +121,16 @@ def train_n_samples(model, optimizer, criterion, loader_iter, num_samples, lr_sc
     for batch, (src, tgt_kmers, tgtvaf, altmask, log_info) in enumerate(loader_iter):
         logger.debug("Got batch from loader...")
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
-        tgt_kmers_input = tgt_kmers[:, :, :-1]
+
+        tgt_kmers_input = tgt_kmer_idx[:, :, :-1]
         tgt_expected = tgt_kmer_idx[:, :, 1:]
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
+        # tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_kmers_input.shape[-2]).to(DEVICE)
 
         optimizer.zero_grad()
         logger.debug("Forward pass...")
 
         with amp.autocast(enabled=enable_amp): # dtype is bfloat16 by default
-            seq_preds = model(src, tgt_kmers_input, tgt_mask)
+            seq_preds = model(src, tgt_kmers_input)
 
             logger.debug(f"Computing loss...")
             loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
@@ -182,20 +183,18 @@ def add_result_dicts(src, add):
 
 def _calc_hap_accuracy(src, seq_preds, tgt, result_totals):
     # Compute val accuracy
-    match = (torch.argmax(seq_preds[:, :, :].flatten(start_dim=0, end_dim=1),
-                             dim=1) == tgt[:, :].flatten()
-                ).float().mean()
+    match = (seq_preds.flatten(start_dim=0, end_dim=1) == tgt[:, :].flatten()).float().mean()
 
     var_count = 0
 
     for b in range(src.shape[0]):
-        predstr = util.kmer_preds_to_seq(seq_preds[b, :, 0:util.KMER_COUNT], util.i2s)
+        predstr = util.kmer_idx_to_str(seq_preds[b, :], util.i2s)
         tgtstr = util.kmer_idx_to_str(tgt[b, :], util.i2s)
         vc = len(list(vcf.aln_to_vars(tgtstr, predstr, chrom='X'))) # chrom arbitrary, required for building variant objs
         var_count += vc
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
-        vartype_count = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :, 0:util.KMER_COUNT], counts=init_count_dict())
+        vartype_count = eval_prediction(util.readstr(src[b, :, 0, :]), tgtstr, seq_preds[b, :], counts=init_count_dict())
         result_totals = add_result_dicts(result_totals, vartype_count)
 
     return match, var_count, result_totals
@@ -216,7 +215,7 @@ def eval_prediction(refseqstr, altseq, predictions, counts):
         known_vars.append(v)
 
     pred_vars = []
-    predstr = util.kmer_preds_to_seq(predictions[:, 0:util.KMER_COUNT], util.i2s)
+    predstr = util.kmer_idx_to_str(predictions, util.i2s)
     for v in vcf.aln_to_vars(refseqstr, predstr, chrom='X'):
         pred_vars.append(v)
 
@@ -262,19 +261,25 @@ def calc_val_accuracy(loader, model, criterion):
         for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
             total_batches += 1
             tot_samples += src.shape[0]
-            seq_preds, probs = util.predict_sequence(src, model, n_output_toks=37, device=DEVICE) # 150 // 4 = 37, this will need to be changed if we ever want to change the output length
+            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+            tgt_kmers_input = tgt_kmer_idx[:, :, :-1]
+            tgt_expected = tgt_kmer_idx[:, :, 1:]
 
-            #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
-            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
-            j = tgt_kmer_idx.shape[-1]
-            seq_preds = seq_preds[:, :, 0:j, :] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
+            seq_preds = model(src, tgt_kmers_input)
+            loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
 
-            loss, swaps = compute_twohap_loss(seq_preds, tgt_kmer_idx, criterion)
             loss_tot += loss
             swap_tot += swaps
 
-            midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, seq_preds[:, 0, :, :], tgt_kmer_idx[:, 0, :], result_totals0)
-            midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, seq_preds[:, 1, :, :], tgt_kmer_idx[:, 1, :], result_totals1)
+            pred_toks = model.generate_haplotypes(src, n_output_toks=37)
+            probs = -1 * torch.ones_like(pred_toks)
+            #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
+            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
+            j = tgt_kmer_idx.shape[-1]
+            pred_toks = pred_toks[:, :, 0:j] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
+
+            midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, pred_toks[:, 0, :], tgt_kmer_idx[:, 0, :], result_totals0)
+            midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, pred_toks[:, 1, :], tgt_kmer_idx[:, 1, :], result_totals1)
             match_sum0 += midmatch0
             match_sum1 += midmatch1
 

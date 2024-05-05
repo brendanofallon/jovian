@@ -17,7 +17,7 @@ import queue
 import pysam
 import numpy as np
 
-from dnaseq2seq.model import VarTransformer
+from dnaseq2seq.xmodel import XVarTransformer
 from dnaseq2seq import buildclf
 from dnaseq2seq import vcf
 from dnaseq2seq import util
@@ -805,6 +805,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
             preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
                                             n_output_toks=n_output_toks, device=DEVICE)
+            preds = model.generate
         if seq_preds is None:
             seq_preds = preds
         else:
