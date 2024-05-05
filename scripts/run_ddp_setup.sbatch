@@ -5,8 +5,8 @@
 #SBATCH --account=arup-gpu-np
 #SBATCH --partition=arup-gpu-np
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=2
-#SBATCH --gres=gpu:2
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=14-0
@@ -33,9 +33,9 @@ echo "MASTER_ADDR="$MASTER_ADDR
 ROOT_DIR=/uufs/chpc.utah.edu/common/home/arup-storage4/brendan/variant_transformer_runs/
 REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
-GIT_BRANCH="better_parallel_call"
+GIT_BRANCH="xformers"
 
-export RUN_NAME="100M_good44"
+export RUN_NAME="xformer_smalltest"
 
 
 cd $ROOT_DIR
