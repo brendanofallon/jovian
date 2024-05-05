@@ -244,6 +244,9 @@ def calc_val_accuracy(loader, model, criterion):
     :param valpaths: List of paths to (src, tgt) saved tensors
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
+    if isinstance(model, nn.DataParallel) or isinstance(model, DDP):
+        model = model.module
+
     model.eval()
     with torch.no_grad():
         match_sum0 = 0

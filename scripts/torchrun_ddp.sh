@@ -7,7 +7,7 @@ RUN_NOTES="$4"
 
 
 RUNCMD="jovian/src/dnaseq2seq/main.py train \
-    --conf $HOME/src/jovian/train_conf_100M.yaml \
+    --conf $HOME/src/jovian/train_conf_30M.yaml \
     -o ${RUN_NAME}.model \
     --run-name $RUN_NAME"
 
