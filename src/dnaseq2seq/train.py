@@ -234,7 +234,7 @@ def eval_prediction(refseqstr, altseq, predictions, counts):
     return counts
 
 
-
+@torch.no_grad()
 def calc_val_accuracy(loader, model, criterion):
     """
     Compute accuracy (fraction of predicted bases that match actual bases),
@@ -245,47 +245,46 @@ def calc_val_accuracy(loader, model, criterion):
     :returns : Average model accuracy across all validation sets, vaf MSE 
     """
     model.eval()
-    with torch.no_grad():
-        match_sum0 = 0
-        match_sum1 = 0
-        result_totals0 = init_count_dict()
-        result_totals1 = init_count_dict()
+    match_sum0 = 0
+    match_sum1 = 0
+    result_totals0 = init_count_dict()
+    result_totals1 = init_count_dict()
 
-        var_counts_sum0 = 0
-        var_counts_sum1 = 0
-        tot_samples = 0
-        total_batches = 0
-        loss_tot = 0
+    var_counts_sum0 = 0
+    var_counts_sum1 = 0
+    tot_samples = 0
+    total_batches = 0
+    loss_tot = 0
 
-        swap_tot = 0
-        for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
-            total_batches += 1
-            tot_samples += src.shape[0]
-            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
-            tgt_kmers_input = tgt_kmer_idx[:, :, :-1]
-            tgt_expected = tgt_kmer_idx[:, :, 1:]
+    swap_tot = 0
+    for src, tgt_kmers, vaf, *_ in loader.iter_once(64):
+        total_batches += 1
+        tot_samples += src.shape[0]
+        tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)
+        tgt_kmers_input = tgt_kmer_idx[:, :, :-1]
+        tgt_expected = tgt_kmer_idx[:, :, 1:]
 
-            seq_preds = model(src, tgt_kmers_input)
-            loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
+        seq_preds = model(src, tgt_kmers_input)
+        loss, swaps = compute_twohap_loss(seq_preds, tgt_expected, criterion)
 
-            loss_tot += loss
-            swap_tot += swaps
+        loss_tot += loss
+        swap_tot += swaps
 
-            pred_toks = model.generate_haplotypes(src, n_output_toks=37)
-            probs = -1 * torch.ones_like(pred_toks)
-            #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
-            tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
-            j = tgt_kmer_idx.shape[-1]
-            pred_toks = pred_toks[:, :, 0:j] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
+        pred_toks = model.generate_haplotypes(src, n_output_toks=37)
+        probs = -1 * torch.ones_like(pred_toks)
+        #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
+        tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
+        j = tgt_kmer_idx.shape[-1]
+        pred_toks = pred_toks[:, :, 0:j] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
 
-            midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, pred_toks[:, 0, :], tgt_kmer_idx[:, 0, :], result_totals0)
-            midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, pred_toks[:, 1, :], tgt_kmer_idx[:, 1, :], result_totals1)
-            match_sum0 += midmatch0
-            match_sum1 += midmatch1
+        midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, pred_toks[:, 0, :], tgt_kmer_idx[:, 0, :], result_totals0)
+        midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, pred_toks[:, 1, :], tgt_kmer_idx[:, 1, :], result_totals1)
+        match_sum0 += midmatch0
+        match_sum1 += midmatch1
 
-            var_counts_sum0 += varcount0
-            var_counts_sum1 += varcount1
-                
+        var_counts_sum0 += varcount0
+        var_counts_sum1 += varcount1
+
     return (match_sum0 / total_batches,
             match_sum1 / total_batches,
             var_counts_sum0 / tot_samples,
