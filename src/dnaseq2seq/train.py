@@ -274,11 +274,16 @@ def calc_val_accuracy(loader, model, criterion):
         swap_tot += swaps
 
         pred_toks = model.generate_haplotypes(src, n_output_toks=37)
-        probs = -1 * torch.ones_like(pred_toks)
+
         #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
+
         tgt_kmer_idx = torch.argmax(tgt_kmers, dim=-1)[:, :, 1:]
         j = tgt_kmer_idx.shape[-1]
-        pred_toks = pred_toks[:, :, 0:j] # tgt_kmer_idx might be a bit shorter if the sequence is truncated
+
+        # Need to clamp this because there's the number of kmers (util.KMER_COUNT, often 256) may be less
+        # than util.FEATURE_DIM, which is often 260, so in rare cases we might get a prediction that can't be
+        # converted into a kmer
+        pred_toks = torch.clamp(pred_toks[:, :, 0:j] , max=util.KMER_COUNT) # tgt_kmer_idx might be a bit shorter if the sequence is truncated
 
         midmatch0, varcount0, results_totals0 = _calc_hap_accuracy(src, pred_toks[:, 0, :], tgt_kmer_idx[:, 0, :], result_totals0)
         midmatch1, varcount1, results_totals1 = _calc_hap_accuracy(src, pred_toks[:, 1, :], tgt_kmer_idx[:, 1, :], result_totals1)
