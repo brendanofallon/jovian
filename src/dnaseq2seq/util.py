@@ -354,7 +354,10 @@ def kmer_preds_to_seq(preds, i2s):
 
 
 def kmer_idx_to_str(kmer_idx, i2s):
-    return ''.join(i2s[i] for i in kmer_idx)
+    try:
+        return ''.join(i2s[i] for i in kmer_idx)
+    except Exception as ex:
+        raise ValueErro(f"Exception decoding kmers: {ex}\n kmer indices are {kmer_idx}")
 
 
 def bases_to_kvec(bases, s2i, kmersize=4):
