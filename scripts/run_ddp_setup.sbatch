@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="xformers"
 
-export RUN_NAME="xformer2_smalltest"
+export RUN_NAME="xformer3_smalltest"
 
 
 cd $ROOT_DIR
