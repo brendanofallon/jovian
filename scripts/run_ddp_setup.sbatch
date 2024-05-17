@@ -6,7 +6,7 @@
 #SBATCH --partition=arup-gpu-np
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=14-0
@@ -35,7 +35,7 @@ REPO_BASE=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/
 
 GIT_BRANCH="master"
 
-export RUN_NAME="30M_perftest"
+export RUN_NAME="good44_e280_ft"
 
 
 cd $ROOT_DIR
