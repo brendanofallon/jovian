@@ -47,7 +47,7 @@ class DNAseq2seqInstallCommand(install):
 
 
 def parse_version():
-    with open("dnaseq2seq/__init__.py", "r") as fd:
+    with open("src/dnaseq2seq/__init__.py", "r") as fd:
         version = re.search(
             r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', fd.read(), re.MULTILINE
         ).group(1)
@@ -60,12 +60,7 @@ setup(
     name="jenever",
     version=parse_version(),
     packages=packages,
-    package_dir={"dnaseq2seq": "dnaseq2seq"},
-    package_data={
-        "dnaseq2seq": ["test/resources/*", ],
-        "": ["*v.yaml", "*.tsv", "*.txt"],
-    },  # TODO add test documents with schema samples
-    include_package_data=True,
+    package_dir={"": "src"},
     url="https://github.com/ARUP-NGS/jenever",
     license="",
     install_requires=requires,
@@ -73,7 +68,7 @@ setup(
         [console_scripts]
         jenever=dnaseq2seq.main:main""",  # {alias}={module}:{function}  #
     scripts=[
-        "dnaseq2seq/main.py",
+        "src/dnaseq2seq/main.py",
     ],
     cmdclass={"install": DNAseq2seqInstallCommand},
     tests_require=["pytest"],

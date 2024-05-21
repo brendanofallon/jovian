@@ -8,12 +8,12 @@ import torch.nn as nn
 import numpy as np
 import gzip
 import lz4.frame
-import pysam
 import io
 from pathlib import Path
 import logging
 import shutil
 from itertools import chain
+from typing import List, Tuple
 
 from torch.nn.parallel import DistributedDataParallel
 
@@ -23,28 +23,6 @@ INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
-def log_timer(func):
-    """
-    A decorator which when applied will make the total time taken to complete the function
-    appear as a log message when the function completes
-    :param func:
-    :return: Decorator
-    """
-
-    def wrapper(*args, **kwargs):
-        starttime = datetime.now()
-        result = func(*args, **kwargs)
-        elapsed = datetime.now() - starttime
-        try:
-            fname = func.__name__
-        except:
-            fname = "?"
-        logger.debug(
-            f"Function {fname} completed in {elapsed.total_seconds()} seconds"
-        )
-        return result
-
-    return wrapper
 
 def make_kmer_lookups(size):
     """
@@ -68,6 +46,106 @@ KMER_COUNT = 4 ** TGT_KMER_SIZE
 FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
 START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
 START_TOKEN[:, FEATURE_DIM-1] = 1
+
+
+def format_bp(bp):
+    try:
+        bp = int(bp)
+        if bp < 10000:
+            return f"{bp:,}"
+        elif bp < 1000000:
+            return f"{round(bp/1000, 2):,} Kb"
+        elif bp < 1e9:
+            return f"{round(bp/1e6, 2):,} MB"
+        else:
+            return f"{round(bp/1e9, 2):,} GB"
+
+    except:
+        return bp
+
+def read_bed_regions(bedpath: Path):
+    """
+    Generate chrom, start, end regions from a BED formatted file
+    """
+    with open(bedpath) as fh:
+        for line in fh:
+            line = line.strip()
+            if len(line) == 0 or line.startswith("#"):
+                continue
+            toks = line.split("\t")
+            chrom, start, end = toks[0], int(toks[1]), int(toks[2])
+            assert end > start, f"End position {end} must be strictly greater start {start}"
+            yield chrom, start, end
+
+
+def split_large_regions(regions: List[Tuple[str, int, int]], max_region_size: int):
+    """
+    Split any regions greater than max_region_size into regions smaller than max_region_size
+    """
+    for chrom, start, end in regions:
+        while start < end:
+            yield chrom, start, min(end, start + max_region_size)
+            start += max_region_size
+
+
+def cluster_positions(poslist: List[int], maxdist: int = 100, pad_bases=8):
+    """
+    Iterate over the given list of positions (numbers), and generate ranges containing
+    positions not greater than 'maxdist' in size
+    """
+    cluster = []
+    for pos in poslist:
+        if len(cluster) == 0 or pos - min(cluster) < maxdist:
+            cluster.append(pos)
+        else:
+            yield min(cluster) - pad_bases, max(cluster) + pad_bases
+            cluster = [pos]
+
+    if len(cluster) == 1:
+        yield cluster[0] - pad_bases, cluster[0] + pad_bases
+    elif len(cluster) > 1:
+        yield min(cluster) - pad_bases, max(cluster) + pad_bases
+
+
+def unique_chroms(bed: Path) -> List[str]:
+    """
+    Returns a list of unique chromosomes from the input file, in order first
+    encountered in file
+    """
+    chroms = []
+    with open(bed) as fh:
+        for line in fh:
+            if line.startswith("#") or len(line.strip()) == 0:
+                continue
+            else:
+                chrom = line.strip().split("\t")[0]
+                if chrom not in chroms:
+                    chroms.append(chrom)
+    return chroms
+
+
+def log_timer(func):
+    """
+    A decorator which when applied will make the total time taken to complete the function
+    appear as a log message when the function completes
+    :param func:
+    :return: Decorator
+    """
+
+    def wrapper(*args, **kwargs):
+        starttime = datetime.now()
+        result = func(*args, **kwargs)
+        elapsed = datetime.now() - starttime
+        try:
+            fname = func.__name__
+        except:
+            fname = "?"
+        logger.debug(
+            f"Function {fname} completed in {elapsed.total_seconds()} seconds"
+        )
+        return result
+
+    return wrapper
 
 
 def var_type(variant):
@@ -170,6 +248,31 @@ def to_pileup(data, altmask=None):
     return "\n".join(pileup)
 
 
+
+def print_pileup(path, idx, **kwargs):
+    """
+    Utility for printing a single encoded region as text
+    """
+    path = Path(path)
+
+    suffix = path.name.split("_")[-1]
+    tgtpath = path.parent / f"tgt_{suffix}"
+    if tgtpath.exists():
+        tgt = tensor_from_file(tgtpath, device='cpu')
+        logger.info(f"Found target file: {tgtpath}, loaded tensor of shape {tgt.shape}")
+        for i in range(tgt.shape[1]):
+            t = tgt[idx, i, :]
+            bases = tgt_str(tgt[idx, i, :])
+            print(bases)
+    else:
+        logger.info(f"No tgt file found (look for {tgtpath})")
+
+    src = tensor_from_file(path, device='cpu')
+    logger.info(f"Loaded tensor with shape {src.shape}")
+    s = to_pileup(src[idx, :, :, :])
+    #print(src[idx, 5, 0:10, :])
+    print(s)
+
 def predprobs(t):
     t = t.detach().cpu().numpy()
     output = []
@@ -182,98 +285,40 @@ def predprobs(t):
 
 
 def tgt_str(seq):
+    """
+    Convert a list of base indices into a string and return it
+    """
     return "".join(INDEX_TO_BASE[b] for b in seq)
 
 
-def correctstr(seq, predseq):
-    seq = "".join(INDEX_TO_BASE[b] for b in seq)
-    output = "".join('*' if a==b else 'x' for a,b in zip(seq, predseq))
-    return output
-
-
-def writeseqtensor(t):
-    assert len(t.shape) == 2, f"Expected 2-dimensional input"
-    for pos in range(t.shape[0]):
-        clip = 1 if t[pos, 7] else 0
-        print(clip, end="")
-    print()
-    for pos in range(t.shape[0]):
-        refmatch = 1 if t[pos, 6] else 0
-        print(refmatch, end="")
-    print()
-    for pos in range(t.shape[0]):
-        if torch.sum(t[pos, 0:4]) == 0:
-            base = '.'
-        elif torch.sum(t[pos, 0:4]) < 0:
-            base = '-'
-        else:
-            base = INDEX_TO_BASE[torch.argmax(t[pos, 0:4])]
-        print(f"{base}", end="")
-    print()
-
-
-def count_bases(bedpath):
+def count_bed(bedpath):
     """
     Return total number of bases in a BED file
     """
-    tot = 0
+    tot_bases = 0
+    tot_regions = 0
     with open(bedpath) as fh:
         for line in fh:
-            if len(line.strip())==0 or line.startswith("#"):
+            if len(line.strip()) == 0 or line.startswith("#"):
                 continue
             toks = line.split("\t")
-            tot += int(toks[2]) - int(toks[1])
-    return tot
+            tot_regions += 1
+            tot_bases += int(toks[2]) - int(toks[1])
+    return tot_regions, tot_bases
 
 
-def sort_chrom_vcf(input_vcf, dest):
-    """
-    Sort variants found in the given vcf file and write them to the given destination file
-    Raises an exception if not all variants are on the same chromosome
-    """
-    vcf = pysam.VariantFile(input_vcf)
-    chrom = None
-    with open(dest, "w") as ofh:
-        ofh.write(str(vcf.header))
-        for var in sorted(vcf.fetch(), key=lambda x: x.pos):
-            if chrom is None:
-                chrom = var.chrom
-            else:
-                assert var.chrom == chrom, f"Variants must be on same chromsome, but found {var} which is not on chrom {chrom}"
-            ofh.write(str(var))
-
-        
 def _varkey(variant):
     return variant.chrom, variant.pos, variant.ref, ",".join(str(s) for s in variant.alts)
 
 
-def dedup_vcf(input_vcf, dest):
-    """
-    Iterate a VCF file and remove any variants that duplicates in terms of chrom/pos/ref/alt
-    Requires input VCF to be sorted
-    """
-    vcf = pysam.VariantFile(input_vcf)
-    clump = []
-    with open(dest, "w") as ofh:
-        ofh.write(str(vcf.header))
-        for var in vcf.fetch():
-            if len(clump) == 0:
-                clump.append(var)
-            else:
-                if _varkey(var) == _varkey(clump[0]):
-                    clump.append(var)
-                else:
-                    # Big question here: Which variant to write if there are duplicates found?
-                    # Currently we just write the first one, but maybe we could be smarter
-                    ofh.write(str(clump[0]))
-                    clump = [var]
-        if clump:
-            ofh.write(str(clump[0]))
-
 def check_overlap(interval1, interval2):
+    """
+    Return True if the intervals overlap
+    """
     start1, end1 = interval1
     start2, end2 = interval2
     return not (end1 < start2 or end2 < start1)
+
 
 def records_overlap(rec1, rec2):
     """ True if the two records share any reference bases """
@@ -281,6 +326,7 @@ def records_overlap(rec1, rec2):
         (rec1.pos, rec1.pos + (len(rec1.ref) - len(rec1.alts[0]))),
         (rec2.pos, rec2.pos + (len(rec2.ref) - len(rec2.alts[0]))),
     )
+
 
 def merge_overlapping_regions(regions):
     """
@@ -301,7 +347,7 @@ def merge_overlapping_regions(regions):
 
 def kmer_preds_to_seq(preds, i2s):
     """
-    Return a sequence of bases from the given predictions
+    Return a sequence of bases from the given prediction tensor
     """
     m = torch.argmax(preds, dim=-1).cpu().detach().numpy()
     return kmer_idx_to_str(m, i2s)
@@ -312,7 +358,9 @@ def kmer_idx_to_str(kmer_idx, i2s):
 
 
 def bases_to_kvec(bases, s2i, kmersize=4):
-    """ Return a list of indices for nonoverlapping kmers read from the base """
+    """
+    Return a list of kmer indices for nonoverlapping kmers read from the base
+    """
     indices = []
     for i in range(0, len(bases), kmersize):
         kmer = bases[i:i+kmersize]
@@ -321,6 +369,10 @@ def bases_to_kvec(bases, s2i, kmersize=4):
 
 
 def seq_to_onehot_kmers(seq):
+    """
+    Convert sequence of bases to a Tensor
+    Tensor will have dimension [FEATURE_DIM, len(seq)]
+    """
     h = []
     for i in bases_to_kvec(seq, s2i, TGT_KMER_SIZE):
         t = torch.zeros(FEATURE_DIM, dtype=torch.float)
@@ -330,6 +382,11 @@ def seq_to_onehot_kmers(seq):
 
 
 def tgt_to_kmers(tgt):
+    """
+    Convert a batched tensor of sequence haplotypes into a tensor of kmer indices
+    :param tgt: Tensor of shape [batch, haplotype, base]
+    :return: Tensor of [batch, haplotype, kmer index]
+    """
     result = []
     for i in range(tgt.shape[0]):
         tgtseq0 = tgt_str(tgt[i, 0, :])
@@ -341,8 +398,11 @@ def tgt_to_kmers(tgt):
     return torch.stack(result, dim=0)
 
 
-def expand_to_bases(probs, expansion_factor=TGT_KMER_SIZE):
-    return list(chain(*([k]*expansion_factor for k in probs)))
+def expand_to_bases(vals, expansion_factor=TGT_KMER_SIZE):
+    """
+    Replicate each item in vals by expansion_factor times successively and return them in a list
+    """
+    return list(chain(*([k]*expansion_factor for k in vals)))
 
 
 def predict_sequence(src, model, n_output_toks, device):
@@ -356,17 +416,89 @@ def predict_sequence(src, model, n_output_toks, device):
     probs = torch.zeros(src.shape[0], 2, 1).float().to(device)
     mem = model.encode(src)
     encode = time.perf_counter()
+    encode_elapsed = encode - start
+    step_time = time.perf_counter()
     for i in range(n_output_toks + 1):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(predictions.shape[-2]).to(device)
         new_preds = model.decode(mem, predictions, tgt_mask=tgt_mask)[:, :, -1:, :]
         new_probs, tophit = torch.max(new_preds, dim=-1)
-        p = torch.nn.functional.one_hot(tophit, num_classes=260)
+        p = torch.nn.functional.one_hot(tophit, num_classes=FEATURE_DIM)
         predictions = torch.concat((predictions, p), dim=2)
         probs = torch.concat((probs, new_probs), dim=-1)
-    encode_elapsed = encode - start
+        logger.debug(f"Prediction step {i} time: {time.perf_counter() - step_time :.5f}")
+        step_time = time.perf_counter()
     decode_elapsed = time.perf_counter() - encode
     logger.debug(f"Encoding time: {encode_elapsed :.3f} n_toks: {n_output_toks}, decoding time: {decode_elapsed :.3f}")
     return predictions[:, :, 1:, :], probs[:, :, 1:]
+
+
+class VariantSortedBuffer:
+    """ Holds a list of variants in a buffer and sorts them before writing to an output stream """
+    
+    def __init__(self, outputfh, buff_size=500, capacity_factor=10):
+        self.outputfh = outputfh
+        self.buff_size = buff_size
+        self.buffer = []
+        self.capacity_factor = capacity_factor
+        self.lastchrom = None
+        self.lastpos = -1
+
+    def _chromval(self, c):
+        c = c.replace("chr", "")
+        try:
+            return int(c)
+        except:
+            if c == 'X':
+                return 50
+            elif c == 'Y':
+                return 60
+            else:
+                return 100 + ord(c[0])
+
+    def _sortkey(self, v):
+        return int(self._chromval(v.chrom) * 1e9) + v.pos
+
+    def _sort(self):
+        self.buffer = sorted(self.buffer, key=self._sortkey)
+
+    def _dumphalf(self):
+        self._sort()
+        for v in self.buffer[0:len(self.buffer)//self.capacity_factor]:
+            self.outputfh.write(str(v))
+            self.lastpos = v.pos
+            self.lastchrom = v.chrom
+        self.buffer = self.buffer[len(self.buffer)//self.capacity_factor:]
+        try:
+            self.outputfh.flush()
+        except:
+            pass
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def flush(self):
+        self._sort()
+        for v in self.buffer:
+            self.outputfh.write(str(v))
+        self.buffer = []
+        try:
+            self.outputfh.flush()
+        except:
+            pass
+
+    def put(self, v):
+        self.buffer.append(v)
+        #if v.pos < self.lastpos and v.chrom == self.lastchrom:
+        #    raise ValueError(f"Ahh, just got variant with position {v.pos} but we've already emitted a variant with position {self.lastpos}")
+
+        if len(self.buffer) > self.buff_size:
+            self._dumphalf()
+
+    def put_all(self, items):
+        for v in items:
+            self.put(v)
+
+
 
 
 class WarmupCosineLRScheduler:

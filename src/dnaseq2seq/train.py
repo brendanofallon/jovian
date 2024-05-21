@@ -17,10 +17,9 @@ import torch.cuda.amp as amp
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-
-import dnaseq2seq.vcf
-import dnaseq2seq.loader
-import dnaseq2seq.util
+import dnaseq2seq.vcf as vcf
+import dnaseq2seq.loader as loader
+import dnaseq2seq.util as util
 from dnaseq2seq.model import VarTransformer
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
@@ -191,7 +190,7 @@ def _calc_hap_accuracy(src, seq_preds, tgt, result_totals):
     for b in range(src.shape[0]):
         predstr = util.kmer_preds_to_seq(seq_preds[b, :, 0:util.KMER_COUNT], util.i2s)
         tgtstr = util.kmer_idx_to_str(tgt[b, :], util.i2s)
-        vc = len(list(vcf.aln_to_vars(tgtstr, predstr)))
+        vc = len(list(vcf.aln_to_vars(tgtstr, predstr, chrom='X'))) # chrom arbitrary, required for building variant objs
         var_count += vc
 
         # Get TP, FN and FN based on reference, alt and predicted sequence.
@@ -212,12 +211,12 @@ def eval_prediction(refseqstr, altseq, predictions, counts):
     :return: Sets of TP, FP, and FN vars
     """
     known_vars = []
-    for v in vcf.aln_to_vars(refseqstr, altseq):
+    for v in vcf.aln_to_vars(refseqstr, altseq, chrom='X'):
         known_vars.append(v)
 
     pred_vars = []
     predstr = util.kmer_preds_to_seq(predictions[:, 0:util.KMER_COUNT], util.i2s)
-    for v in vcf.aln_to_vars(refseqstr, predstr):
+    for v in vcf.aln_to_vars(refseqstr, predstr, chrom='X'):
         pred_vars.append(v)
 
     for true_var in known_vars:

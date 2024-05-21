@@ -5,11 +5,17 @@ import logging
 import pysam
 
 from skbio.alignment import StripedSmithWaterman
+from typing import List
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class Variant:
+    """
+    Represents a variant found in a single calling window. These are 0-based, have no reference padding, and
+    model a single alt allele
+    """
+    chrom: str
     ref: str
     alt: str
     pos: int
@@ -22,10 +28,10 @@ class Variant:
     aln_score: int = None
 
     def __eq__(self, other):
-        return self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
+        return self.chrom == other.chrom and self.ref == other.ref and self.alt == other.alt and self.pos == other.pos
 
     def __hash__(self):
-        return hash(f"{self.ref}&{self.alt}&{self.pos}&{self.qual}")
+        return hash(f"{self.chrom}&{self.ref}&{self.alt}&{self.pos}&{self.qual}")
 
     def __gt__(self, other):
         return self.pos > other.pos
@@ -36,7 +42,7 @@ class Variant:
 
     @property
     def key(self):
-        return self.pos, self.ref, self.alt
+        return self.chrom, self.pos, self.ref, self.alt
 
 
 @dataclass
@@ -48,12 +54,12 @@ class Cigar:
 @dataclass
 class VcfVar:
     """
-    holds params for vcf variant records
+    A variant found across multiple calling windows.
+    These are VCF-style, with 1-based coords and reference padding on indels, and a list of alts
     """
     chrom: str
     pos: int
     ref: str
-    # alt: str
     quals: list
     qual: float
     filter: list
@@ -64,7 +70,7 @@ class VcfVar:
     window_var_count: int
     window_cis_vars: int
     window_trans_vars: int
-    window_offset: int
+    window_offset: List[int]
     var_index: int
     call_count: int
     step_count: int
@@ -76,6 +82,9 @@ class VcfVar:
     @property
     def alt(self):
         return self.alts[0]
+
+    def __hash__(self):
+        return hash("{self.chrom}&{self.pos}&{self.ref}&{self.alts}")
 
 
 
@@ -106,6 +115,7 @@ def align_sequences(query, target, gap_open_penalty=3, gap_extend_penalty=1, mat
     """
     Return Smith-Watterman alignment of both sequences
     """
+    # TODO SSW in skbio is deprecated (see https://github.com/scikit-bio/scikit-bio/issues/1814)
     ssw = StripedSmithWaterman(query,
                                gap_open_penalty=gap_open_penalty,
                                gap_extend_penalty=gap_extend_penalty,
@@ -114,7 +124,7 @@ def align_sequences(query, target, gap_open_penalty=3, gap_extend_penalty=1, mat
     return ssw(target)
 
 
-def _mismatches_to_vars(query, target, cig_offset, window_offset, probs):
+def _mismatches_to_vars(query, target, chrom, cig_offset, window_offset, probs):
     """
     Zip both sequences and look for mismatches, if any are found convert them to Variant objects
     and return them
@@ -127,7 +137,8 @@ def _mismatches_to_vars(query, target, cig_offset, window_offset, probs):
     for i, (a, b) in enumerate(zip(query, target)):
         if a == b:
             if mismatches:
-                yield Variant(ref="".join(mismatches[0]).replace("-", ""),
+                yield Variant(chrom=chrom,
+                              ref="".join(mismatches[0]).replace("-", ""),
                               alt="".join(mismatches[1]).replace("-", ""),
                               pos=mismatchstart,
                               qual=_geomean(mismatch_quals),  # Geometric mean?
@@ -147,7 +158,8 @@ def _mismatches_to_vars(query, target, cig_offset, window_offset, probs):
 
     # Could be mismatches at the end
     if mismatches:
-        yield Variant(ref="".join(mismatches[0]).replace("-", ""),
+        yield Variant(chrom=chrom,
+                      ref="".join(mismatches[0]).replace("-", ""),
                       alt="".join(mismatches[1]).replace("-", ""),
                       pos=mismatchstart,
                       qual=_geomean(mismatch_quals),
@@ -155,6 +167,9 @@ def _mismatches_to_vars(query, target, cig_offset, window_offset, probs):
 
 
 def _display_aln(aln):
+    """
+    Utility function for printing an alignment
+    """
     qit = iter(aln.query_sequence)
     tit = iter(aln.target_sequence)
     tbases = 0
@@ -183,7 +198,7 @@ def _display_aln(aln):
             raise ValueError(f"Unknown cigar op {cig.op}")
 
 
-def aln_to_vars(refseq, altseq, offset=0, probs=None):
+def aln_to_vars(refseq, altseq, chrom, offset=0, probs=None):
     """
     Smith-Watterman align the given sequences and return a generator over Variant objects
     that describe differences between the sequences
@@ -213,11 +228,13 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     for cig in _cigtups(aln.cigar):
         if cig.op == "M":
             for v in _mismatches_to_vars(
-                    refseq[t_offset:t_offset+cig.len],
-                    altseq[q_offset:q_offset+cig.len],
-                    offset + t_offset,
-                    t_offset,
-                    probs[q_offset:q_offset+cig.len]):
+                        refseq[t_offset:t_offset+cig.len],
+                        altseq[q_offset:q_offset+cig.len],
+                        chrom,
+                        offset + t_offset,
+                        t_offset,
+                        probs[q_offset:q_offset+cig.len]
+            ):
                 v.var_index = num_vars
                 variants.append(v)
                 num_vars += 1
@@ -227,7 +244,9 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
 
         elif cig.op == "I":
             variants.append(
-                Variant(ref='',
+                Variant(
+                        chrom=chrom,
+                        ref='',
                         alt=altseq[q_offset:q_offset+cig.len],
                         pos=offset + variant_pos_offset + aln.target_begin,
                         qual=_geomean(probs[q_offset:q_offset+cig.len]),
@@ -240,7 +259,8 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
 
         elif cig.op == "D":
             variants.append(
-                Variant(ref=refseq[t_offset:t_offset + cig.len],
+                Variant(chrom=chrom,
+                        ref=refseq[t_offset:t_offset + cig.len],
                         alt='',
                         pos=offset + t_offset,
                         qual=_geomean(probs[q_offset-1:q_offset+cig.len]),
@@ -254,10 +274,11 @@ def aln_to_vars(refseq, altseq, offset=0, probs=None):
     for v in variants:
         v.aln_score = aln.optimal_alignment_score
         v.var_count = len(variants)
+
     return variants
 
 
-def var_depth(var, chrom, aln):
+def var_depth(chrom, pos, aln):
     """
     Get read depth at variant start position from bam  pysam AlignmentFile to get depth at
     :param var: local variant tuple just (pos, ref, alt)
@@ -268,22 +289,22 @@ def var_depth(var, chrom, aln):
     # get bam depths for now, not same as tensor depth
     count = aln.count(
          contig=chrom,
-         start=var[0],  # pos of var
-         stop=var[0] + 1,  # pos - 1
+         start=pos,  # pos of var
+         stop=pos + 1,  # pos - 1
          read_callback="all",
     )
     return count
 
 
-def vcf_vars(vars_hap0, vars_hap1, chrom, aln, reference, mindepth=30):
+def construct_vcfvars(vars_hap0, vars_hap1, aln, reference, mindepth=30):
     """
-    From hap0 and hap1 lists of vars (pos ref alt qual) create vcf variant record information for entire call window
-    This creates VcfVar objects, which are almost like pysam.VariantRecord objects but not quite
-    :param vars_hap0: Dict of (pos, ref, alt) -> Variants on hap 0
-    :param vars_hap1: Dict of (pos, ref, alt) -> Variants on hap 1
-    :param chrom:
-    :param window_idx: simple index of sequential call windows
-    :param aln: bam AlignmentFile
+    Aggregate sets of Variant objects into VcfVar objects.
+     This calculates most of the fields that are emitted in the final pysam.VariantRecord objects and used for
+     the classifier model calculation
+
+    :param vars_hap0: Dict of (chrom, pos, ref, alt) -> [Variants] on hap 0
+    :param vars_hap1: Dict of (chrom, pos, ref, alt) -> [Variants] on hap 1
+    :param aln: bam AlignmentFile (for depth calculation)
     :param mindepth: read depth cut off in bam to be labled as LowCov in filter field
     :return: single dict of vars for call window
     """
@@ -291,14 +312,15 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, aln, reference, mindepth=30):
     # index vars by (pos, ref, alt) to make dealing with homozygous easier
     vcfvars_hap0 = {}
     allkeys = list(set(list(vars_hap0.keys()) + list(vars_hap1.keys())))
-    phase_set = min(v[0] for v in allkeys) if len(allkeys) > 1 else None
+    phase_set = min(v[1] for v in allkeys) if len(allkeys) > 1 else None
     for var in vars_hap0.keys():
-        depth = var_depth(var, chrom, aln)
+        chrom, pos, ref, alt = var
+        depth = var_depth(chrom, pos, aln)
         vcfvars_hap0[var] = VcfVar(
             chrom=chrom,
-            pos=var[0] + 1,
-            ref=var[1],
-            alts=[var[2]],
+            pos=pos + 1,
+            ref=ref,
+            alts=[alt],
             quals=[call.qual for call in vars_hap0[var]],
             qual=float(np.mean([call.qual for call in vars_hap0[var]])),
             filter=[],
@@ -320,13 +342,14 @@ def vcf_vars(vars_hap0, vars_hap1, chrom, aln, reference, mindepth=30):
 
     vcfvars_hap1 = {}
     for var in vars_hap1.keys():
+        chrom, pos, ref, alt = var
         logger.debug(f"Computing {var}")
-        depth = var_depth(var, chrom, aln)
+        depth = var_depth(chrom, pos, aln)
         vcfvars_hap1[var] = VcfVar(
             chrom=chrom,
-            pos=var[0] + 1,
-            ref=var[1],
-            alts=[var[2]],
+            pos=pos + 1,
+            ref=ref,
+            alts=[alt],
             quals=[call.qual for call in vars_hap1[var]],
             qual=float(np.mean([call.qual for call in vars_hap1[var]])),
             filter=[],
