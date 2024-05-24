@@ -487,7 +487,7 @@ def predict(model, vcf, **kwargs):
         print(var, end='')
 
 
-def predict_one_record(loaded_model, var_rec, aln, **kwargs):
+def predict_one_record(var_rec, loaded_model, bampath, refpath):
     """
     given a loaded model object and a pysam variant record, return classifier quality
     :param loaded_model: loaded model object for classifier
@@ -495,6 +495,9 @@ def predict_one_record(loaded_model, var_rec, aln, **kwargs):
     :param kwargs:
     :return: classifier quality
     """
+    reference = pysam.FastaFile(refpath)
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+
     feats = var_feats(var_rec, aln, None)
     #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):

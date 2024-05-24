@@ -10,6 +10,7 @@ from collections import defaultdict
 from functools import partial
 from pathlib import Path
 from typing import List, Callable
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import torch
 import torch.multiprocessing as mp
@@ -391,7 +392,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
 
 
 @torch.no_grad()
-def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_template, max_batch_size):
+def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_template, max_batch_size):
     """
     Call variants from the encoded regions and return them as a list of variant records suitable for writing to a VCF file
     No more than max_batch_size are processed in a single batch
@@ -407,6 +408,9 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
     call_start = datetime.datetime.now()
     window_count = 0
     var_records = []  # Stores all variant records
+
+    reference = pysam.FastaFile(refpath)
+    # aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     for data in datas:
         # Load the data, parsing location + encoded data from file
@@ -426,7 +430,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
                                         max_batch_size)
 
             var_records.extend(
-                vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template)
+                vars_hap_to_records(hap0, hap1, bampath, refpath, classifier_model, vcf_template)
             )
             batch_encoded = []
             batch_start_pos = []
@@ -442,7 +446,7 @@ def call_multi_paths(datas, model, reference, aln, classifier_model, vcf_templat
         allencoded = allencoded.float()
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
         var_records.extend(
-            vars_hap_to_records(hap0, hap1, aln, reference, classifier_model, vcf_template)
+            vars_hap_to_records(hap0, hap1, bampath, refpath, classifier_model, vcf_template)
         )
 
     call_elapsed = datetime.datetime.now() - call_start
@@ -484,9 +488,6 @@ def accumulate_regions_and_call(modelpath: str,
     vcf_out = open(vcf_out_path, "w")
     vcf_out.write(str(vcf_header))
     vcf_out.flush()
-
-    reference = pysam.FastaFile(refpath)
-    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     datas = []
     bp_processed = 0
@@ -539,7 +540,7 @@ def accumulate_regions_and_call(modelpath: str,
             logger.info(
                 f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
             )
-            records = call_multi_paths(datas, model, reference, aln, classifier, vcf_template, max_batch_size=max_batch_size)
+            records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
@@ -742,7 +743,7 @@ def collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_dista
     return all_vcf_vars
 
 
-def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, vcf_template):
+def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model, vcf_template):
     """
     Convert variant haplotype objects to variant records
     """
@@ -751,6 +752,9 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
+
+    reference = pysam.FastaFile(refpath)
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     vcf_vars = collect_phasegroups(vars_hap0, vars_hap1, aln, reference, minimum_safe_distance=100)
 
@@ -764,12 +768,17 @@ def vars_hap_to_records(vars_hap0, vars_hap1, aln, reference, classifier_model, 
         return []
 
     for rec in vcf_records:
-        if rec.ref == rec.alts[0]:
-            logger.warning(f"Whoa, found a REF == ALT variant: {rec}")
+        rec.info["RAW_QUAL"] = rec.qual
 
-        if classifier_model:
-            rec.info["RAW_QUAL"] = rec.qual
-            rec.qual = buildclf.predict_one_record(classifier_model, rec, aln)
+    clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
+    futures = []
+    logger.info("Predicting variant quality for {len(vcf_records)} records")
+    with ThreadPoolExecutor(max_workers=8) as executor:
+            fut = executor.submit(clfunc, rec)
+            futures.append(fut)
+
+    for fut in futures:
+        rec.qual = fut.result()
 
     merged = []
     overlaps = [vcf_records[0]]
