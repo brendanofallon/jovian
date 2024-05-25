@@ -32,7 +32,8 @@ A comparison of the $F_1$ statistic for Indels and SNVs across different models
 
 ![Mean Total FPs and FNs](images/total_errors.png)
 
-The upper (pastel) portion is the mean total number of FPs per sample, and the bottom darker bar represents the mean total number of FPs
+The upper (pastel) portion is the mean total number of FPs per sample, and the bottom darker bar represents the mean total number of FNs. 
+Jenever calls were filtered at quality 10 (phred-scaled), HaplotypeCaller at 50 , Clair3 at 0, DeepVariant at 3, and Strelka at 4, values that are close to the $F_1$-maximizing thresholds computed by $vcfeval$. 
 
 
 ### Installation
