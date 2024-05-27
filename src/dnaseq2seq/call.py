@@ -773,13 +773,16 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
     if classifier_model is not None:
         clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
         futures = []
-        logger.info("Predicting variant quality for {len(vcf_records)} records")
+        logger.info(f"Predicting variant quality for {len(vcf_records)} records")
         with ThreadPoolExecutor(max_workers=8) as executor:
+            for rec in vcf_records:
                 fut = executor.submit(clfunc, rec)
                 futures.append(fut)
 
-        for fut in futures:
-            rec.qual = fut.result()
+        for rec, fut in zip(vcf_records, futures):
+            q = fut.result()
+            logger.info(f"Setting rec.qual to {q}")
+            rec.qual = q
 
     merged = []
     overlaps = [vcf_records[0]]
