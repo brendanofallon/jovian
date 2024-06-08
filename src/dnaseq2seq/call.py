@@ -96,7 +96,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
 
 
 
-def load_model(model_path):
+def load_model(model_path, compile=True):
     """
     Load model from given path and return it in .eval() mode
     """
@@ -124,8 +124,9 @@ def load_model(model_path):
 
     model.eval()
     model.to(DEVICE)
-    
-    model = torch.compile(model, fullgraph=True)
+
+    if compile:
+        model = torch.compile(model, fullgraph=True)
     
     return model
 

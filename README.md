@@ -136,7 +136,7 @@ In order to generate well-calibrated quality scores, it's necessary to train a s
       bam: /path/to/sample1.cram
       fps:
       - false_positive_calls.vcf
-      - some_falsepositives.vcf
+      - more_falsepositives.vcf
       tps:
       - true_positives.vcf
     
@@ -149,3 +149,12 @@ In order to generate well-calibrated quality scores, it's necessary to train a s
 
 
 To generate the classifier, run the `dnaseq2seq/builddclf.py` tool with the `train` argument and the path to the configuration file as an option. 
+
+
+### TODO
+
+   - [ ] Switch away from scikit-bio for Smith-Waterman alignment
+   - [ ] Finish up unit testing
+   - [ ] Improve error handling for calling so we don't hang when an exception is raised in downstream tasks
+   - [ ] Break eval code out from training module
+   - [ ] Explore Tensor-RT, quantization, and other methods for improving calling performance
