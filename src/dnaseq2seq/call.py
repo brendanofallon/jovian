@@ -53,6 +53,27 @@ class CallingErrorSignal:
         self.err = errormsg
 
 
+
+class PickleableVariantRecord:
+    """ Creates a Pickle-able version of a VariantRecord object that we can use in multiprocessing settings """
+
+    def __init__(self, record):
+        # Extracting fields from the VariantRecord object
+        self.chrom = record.chrom
+        self.pos = record.pos
+        self.start = record.start
+        self.qual = record.qual
+        self.id = record.id
+        self.ref = record.ref
+        self.alts = list(record.alts) if record.alts is not None else []
+        self.info = {key: record.info[key] for key in record.info}
+        self.format = record.format.keys()
+        self.samples = {sample: {key: record.samples[sample][key] for key in record.samples[sample].keys()} for sample in record.samples}
+
+    def __repr__(self):
+        return f"PickleableVariantRecord(chrom={self.chrom}, pos={self.pos}, id={self.id}, ref={self.ref}, alts={self.alts})"
+
+
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
@@ -774,9 +795,9 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
         clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
         futures = []
         logger.info(f"Predicting variant quality for {len(vcf_records)} records")
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ProcessPoolExecutor(max_workers=8) as executor:
             for rec in vcf_records:
-                fut = executor.submit(clfunc, rec)
+                fut = executor.submit(clfunc, PickleableVariantRecord(rec))
                 futures.append(fut)
 
         for rec, fut in zip(vcf_records, futures):
