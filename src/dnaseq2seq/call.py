@@ -967,7 +967,7 @@ def resolve_haplotypes(genos):
             results[0].append(p)
             results[1].append(p)
         elif prev_het is None:
-            results[0].append(p)
+            results[0].append(p) # No previous hets, so just add it to hap0
             prev_het = p
             prev_het_index = 0
         else:
