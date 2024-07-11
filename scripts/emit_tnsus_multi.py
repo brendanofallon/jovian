@@ -10,7 +10,8 @@ import re
 
 sys.path.append("/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/dnaseq2seq")
 
-import call
+from dnaseq2seq.util import cluster_positions
+from dnaseq2seq.call import gen_suspicious_spots
 
 
 def parse_giab_sample(name):
@@ -59,8 +60,8 @@ def gensus(args):
         region_type = toks[3]
 
         if region_type == "tn-map" or (region_type == "tn" and random.random() < 0.5): # Important update 12/2023 - add tn-map as a region to generate sus labels for, since many, many FPs come from tn-map areas
-            pos = list(call.cluster_positions(
-                call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
+            pos = list(cluster_positions(
+                gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
             ))
             if pos:
                 ofh.write(line.strip() + "-sus\n")
