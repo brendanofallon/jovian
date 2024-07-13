@@ -1,4 +1,3 @@
-
 import os
 import time
 
@@ -109,7 +108,7 @@ def load_model(model_path):
       new_state_dict[new_key] = statedict[key]
     statedict = new_state_dict
 
-    model = VarTransformer(read_depth=modelconf['max_read_depth'],
+    model = XVarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
                            kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
                            n_encoder_layers=modelconf['encoder_layers'],
@@ -799,13 +798,22 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     seq_preds = None
     probs = None
     start = 0
-    
+    prbs = torch.ones((encoded_reads.shape[0], 2, n_output_toks)) - 1.5
+
     while start < encoded_reads.shape[0]:
         end = start + max_batch_size
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
-            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
-                                            n_output_toks=n_output_toks, device=DEVICE)
-            preds = model.generate
+            # preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+            #                                 n_output_toks=n_output_toks, device=DEVICE)
+
+            preds = model.generate_haplotypes(encoded_reads[start:end, :, :, :].to(DEVICE), n_output_toks=n_output_toks)
+
+            print(f"Preds shape: {preds.shape}")
+            print(f"First pred kmers: {preds[0, 0, :]}")
+            kmers = preds[0, 0, :].cpu().numpy()
+            print(f"The kmers: {kmers}")
+            print(f"First pred seq: {util.kmer_idx_to_str(kmers, util.i2s)}")
+
         if seq_preds is None:
             seq_preds = preds
         else:
@@ -830,11 +838,14 @@ def call_batch(encoded_reads, offsets, regions, model, reference, n_output_toks,
 
     seq_preds, probs = _call_safe(encoded_reads, model, n_output_toks, max_batch_size)
 
+    print(f"Regions: {regions}")
+    logger.debug(f"Calling regions {regions}")
     calledvars = []
     for offset, (chrom, start, end), b in zip(offsets, regions, range(len(seq_preds))):
-        hap0_t, hap1_t = seq_preds[b, 0, :, :], seq_preds[b, 1, :, :]
-        hap0 = util.kmer_preds_to_seq(hap0_t, util.i2s)
-        hap1 = util.kmer_preds_to_seq(hap1_t, util.i2s)
+        print(f"Calling region {chrom}:{start}-{end} with offset {offset}")
+        hap0_t, hap1_t = seq_preds[b, 0, :], seq_preds[b, 1, :]
+        hap0 = util.kmer_idx_to_str(hap0_t, util.i2s)
+        hap1 = util.kmer_idx_to_str(hap1_t, util.i2s)
         probs0 = np.exp(util.expand_to_bases(probs[b, 0, :]))
         probs1 = np.exp(util.expand_to_bases(probs[b, 1, :]))
 

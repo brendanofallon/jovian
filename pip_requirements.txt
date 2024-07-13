@@ -10,4 +10,4 @@ scikit-bio
 scikit-learn==1.3.2
 pyyaml
 torch>=2.2
-git+https://github.com/lucidrains/x-transformers.git@1.28.5#egg=x_transformers
+x-transformers

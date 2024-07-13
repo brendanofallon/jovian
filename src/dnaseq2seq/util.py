@@ -1,10 +1,8 @@
 import itertools
 import datetime
 import os
-import time
 
 import torch
-import torch.nn as nn
 import numpy as np
 import gzip
 import lz4.frame
@@ -15,14 +13,17 @@ import shutil
 from itertools import chain
 from typing import List, Tuple
 
-from torch.nn.parallel import DistributedDataParallel
-
 logger = logging.getLogger(__name__)
 
 INDEX_TO_BASE = [
     'A', 'C', 'G', 'T'
 ]
 
+TGT_KMER_SIZE = 4
+KMER_COUNT = 4 ** TGT_KMER_SIZE
+FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
+START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
+START_TOKEN[:, FEATURE_DIM-1] = 1
 
 def make_kmer_lookups(size):
     """
@@ -33,19 +34,18 @@ def make_kmer_lookups(size):
     bases = "ACGT"
     baselist = [bases] * size
     str2index = {}
-    index2str = [None] * (len(bases) ** size)
+    empty_token = "N" * size
+    # Initialize with empty token because feature size may be bigger than the number of kmers
+    index2str = [empty_token] * FEATURE_DIM
     for i, combo in enumerate(itertools.product(*baselist)):
         s = ''.join(combo)
         str2index[s] = i
         index2str[i] = s
     return str2index, index2str
 
-TGT_KMER_SIZE = 4
+
 s2i, i2s = make_kmer_lookups(TGT_KMER_SIZE)
-KMER_COUNT = 4 ** TGT_KMER_SIZE
-FEATURE_DIM = KMER_COUNT + 4 # Add 4 to make it 260, which is evenly divisible by lots of numbers - needed for MHA
-START_TOKEN = torch.zeros((1, FEATURE_DIM),  dtype=float)
-START_TOKEN[:, FEATURE_DIM-1] = 1
+
 
 
 def format_bp(bp):
@@ -354,15 +354,24 @@ def kmer_preds_to_seq(preds, i2s):
 
 
 def kmer_idx_to_str(kmer_idx, i2s):
+    """
+    Return a string of bases from the given list of kmer indices
+    """
+    print(f"Converting {kmer_idx} to string")
     try:
         return ''.join(i2s[i] for i in kmer_idx)
     except Exception as ex:
-        raise ValueErro(f"Exception decoding kmers: {ex}\n kmer indices are {kmer_idx}")
+        raise ValueError(f"Exception decoding kmers: {ex}\n kmer indices are {kmer_idx}")
 
 
 def bases_to_kvec(bases, s2i, kmersize=4):
     """
     Return a list of kmer indices for nonoverlapping kmers read from the base
+    Should be inverse of kmer_idx_to_str
+    :param bases: String of bases
+    :param s2i: Dict mapping kmers to indices
+    :param kmersize: Size of kmers to extract
+    :return: List of kmer indices
     """
     indices = []
     for i in range(0, len(bases), kmersize):
