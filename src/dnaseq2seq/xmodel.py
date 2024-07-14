@@ -71,25 +71,35 @@ class XVarTransformer(nn.Module):
 
         normalmodel0 = TransformerWrapper(
             num_tokens=util.FEATURE_DIM,
-            max_seq_len=500,
+            max_seq_len=50,
             attn_layers=Decoder(
                 dim=self.kmer_dim,
                 depth=n_decoder_layers,
                 heads=decoder_attention_heads,
-                attn_dropout=0.1,
+                layer_dropout=0.0,   # stochastic depth - dropout entire layer
+                attn_dropout=0.0,    # dropout post-attention
+                ff_dropout=0.1,       # feedforward dropout
                 cross_attend=True,
+                attn_flash=True,
+                ff_swish=True,
+                ff_glu=True,
             ),
         )
         normalmodel0.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)  # Identity func, but takes arbitrary args that do nothing
         normalmodel1 = TransformerWrapper(
             num_tokens=util.FEATURE_DIM,
-            max_seq_len=500,
+            max_seq_len=50,
             attn_layers=Decoder(
                 dim=self.kmer_dim,
                 depth=n_decoder_layers,
                 heads=decoder_attention_heads,
-                attn_dropout=0.1,
+                layer_dropout=0.0,  # stochastic depth - dropout entire layer
+                attn_dropout=0.0,  # dropout post-attention
+                ff_dropout=0.1,  # feedforward dropout
                 cross_attend=True,
+                attn_flash=True,
+                ff_swish=True,
+                ff_glu=True,
             ),
         )
         normalmodel1.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)
