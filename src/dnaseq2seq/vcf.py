@@ -1,5 +1,5 @@
-
 import numpy as np
+
 from dataclasses import dataclass
 import logging
 import pysam
@@ -213,8 +213,6 @@ def aln_to_vars(refseq, altseq, chrom, offset=0, probs=None):
     else:
         probs = np.ones(len(altseq))
     aln = align_sequences(altseq, refseq, gap_open_penalty=4, gap_extend_penalty=0.2, match_score=1, mismatch_score=-1)
-
-    print(f"Alignment: \n {_display_aln(aln)}")
 
     ref_seq_consumed = 0
     q_offset = 0

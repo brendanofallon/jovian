@@ -72,6 +72,7 @@ class XVarTransformer(nn.Module):
         normalmodel0 = TransformerWrapper(
             num_tokens=util.FEATURE_DIM,
             max_seq_len=50,
+            num_memory_tokens = 4,
             attn_layers=Decoder(
                 dim=self.kmer_dim,
                 depth=n_decoder_layers,
@@ -83,12 +84,15 @@ class XVarTransformer(nn.Module):
                 attn_flash=True,
                 ff_swish=True,
                 ff_glu=True,
+                #rotary_pos_emb = True, # ROPE embeddings!
+                #use_rmsnorm = True, # Required for compat with rope?
             ),
         )
-        normalmodel0.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)  # Identity func, but takes arbitrary args that do nothing
+        #normalmodel0.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)  # Identity func, but takes arbitrary args that do nothing
         normalmodel1 = TransformerWrapper(
             num_tokens=util.FEATURE_DIM,
             max_seq_len=50,
+            num_memory_tokens = 4,
             attn_layers=Decoder(
                 dim=self.kmer_dim,
                 depth=n_decoder_layers,
@@ -100,9 +104,11 @@ class XVarTransformer(nn.Module):
                 attn_flash=True,
                 ff_swish=True,
                 ff_glu=True,
+                #rotary_pos_emb = True, # ROPE embeddings!
+                #use_rmsnorm = True, 
             ),
         )
-        normalmodel1.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)
+        #normalmodel1.token_emb = OnehotEmbedder(num_classes=self.kmer_dim)
         self.decoder0 = NoLossAutoregressiveWrapper(normalmodel0)
         self.decoder1 = NoLossAutoregressiveWrapper(normalmodel1)
 

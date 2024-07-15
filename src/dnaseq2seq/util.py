@@ -357,7 +357,6 @@ def kmer_idx_to_str(kmer_idx, i2s):
     """
     Return a string of bases from the given list of kmer indices
     """
-    print(f"Converting {kmer_idx} to string")
     try:
         return ''.join(i2s[i] for i in kmer_idx)
     except Exception as ex:

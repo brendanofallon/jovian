@@ -273,7 +273,7 @@ def calc_val_accuracy(loader, model, criterion):
         loss_tot += loss
         swap_tot += swaps
 
-        pred_toks = model.generate_haplotypes(src, n_output_toks=37)
+        pred_toks = seq_preds.argmax(dim=-1)
 
         #tgt_kmers = util.tgt_to_kmers(tgt[:, :, 0:truncate_seq_len]).float().to(DEVICE)
 
