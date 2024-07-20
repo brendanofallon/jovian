@@ -770,10 +770,14 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
     for rec in vcf_records:
         rec.info["RAW_QUAL"] = rec.qual
 
+    #for rec in vcf_records:
+    #    rec.qual = buildclf.predict_one_record(rec, classifier_model, bampath, refpath)
+
     clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
     futures = []
-    logger.info("Predicting variant quality for {len(vcf_records)} records")
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    logger.info(f"Predicting variant quality for {len(vcf_records)} records")
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        for rec in vcf_records:
             fut = executor.submit(clfunc, rec)
             futures.append(fut)
 
