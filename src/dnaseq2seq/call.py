@@ -770,21 +770,21 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
     for rec in vcf_records:
         rec.info["RAW_QUAL"] = rec.qual
 
-    #for rec in vcf_records:
-    #    rec.qual = buildclf.predict_one_record(rec, classifier_model, bampath, refpath)
-
+    clfstart = time.time()
     clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
     futures = []
 
-    logger.info(f"Predicting variant quality for {len(vcf_records)} records")
-    with ProcessPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:
         for rec in vcf_records:
-            fut = executor.submit(clfunc, vcf.PickleableVariantRecord(rec))
+            fut = executor.submit(clfunc, rec)
             futures.append(fut)
 
     for rec, fut in zip(vcf_records, futures):
         rec.qual = fut.result()
-
+    
+    clfend = time.time()
+    logger.info(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
+    
     merged = []
     overlaps = [vcf_records[0]]
     for rec in vcf_records[1:]:
