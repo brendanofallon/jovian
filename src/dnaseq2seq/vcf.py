@@ -9,6 +9,37 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+
+class PickleableVariantRecord:
+    """
+    A class to store variant records in a pickleable format
+    """
+    def __init__(self, vcfrecord):
+        self.chrom = vcfrecord.chrom
+        self.pos = vcfrecord.pos
+        self.ref = vcfrecord.ref
+        self.alts = vcfrecord.alts
+
+        self.qual = vcfrecord.qual
+        self.filter = vcfrecord.filter
+
+        self.info = {
+            "quals": vcfrecord.info["QUALS"],
+            "call_count": vcfrecord.info["CALL_COUNT"],
+            "step_count": vcfrecord.info["STEP_COUNT"],
+            "win_offsets": vcfrecord.info["WIN_OFFSETS"],
+        }
+        self.samples = [
+            {"GT": vcfrecord.samples["sample"]["GT"],}
+        ]
+
+    @property
+    def start(self):
+        """ Zero-based start position of the variant """
+        return self.pos - 1
+
+
+
 @dataclass
 class Variant:
     """

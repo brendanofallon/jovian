@@ -775,13 +775,14 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
 
     clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
     futures = []
+
     logger.info(f"Predicting variant quality for {len(vcf_records)} records")
-    with ThreadPoolExecutor(max_workers=16) as executor:
+    with ProcessPoolExecutor(max_workers=8) as executor:
         for rec in vcf_records:
-            fut = executor.submit(clfunc, rec)
+            fut = executor.submit(clfunc, vcf.PickleableVariantRecord(rec))
             futures.append(fut)
 
-    for fut in futures:
+    for rec, fut in zip(vcf_records, futures):
         rec.qual = fut.result()
 
     merged = []
@@ -971,7 +972,7 @@ def resolve_haplotypes(genos):
             results[0].append(p)
             results[1].append(p)
         elif prev_het is None:
-            results[0].append(p)
+            results[0].append(p) # No previous hets, so just add it to hap0
             prev_het = p
             prev_het_index = 0
         else:
