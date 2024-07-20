@@ -300,7 +300,8 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
 
     tot_regions, tot_bases = util.count_bed(inputbed)
     logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {inputbed}")
-
+    
+    progbar = tqdm(total=100, position=0, desc="Region finding")
     for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
@@ -311,7 +312,10 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
             reference_fasta=refpath,
             maxdist=100,
         )
-        logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
+        prog = tot_size_bp / tot_bases * 100
+        progbar.update(int(prog) - progbar.n)
+        progbar.refresh()
+
         sus_regions = util.merge_overlapping_regions(sus_regions)
         for r in sus_regions:
             sus_region_count += 1
@@ -456,7 +460,7 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
         )
 
     call_elapsed = datetime.datetime.now() - call_start
-    logger.info(
+    logger.debug(
         f"Called variants in {window_count} windows over {batch_count} batches from {len(datas)} paths in {call_elapsed.total_seconds() :.2f} seconds"
     )
     return var_records
@@ -510,7 +514,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_processed = 0
     tot_regions_submitted = 0
     vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=10000)
-    progbar = tqdm(total=100, desc="Here is a progress bar")
+    progbar = tqdm(total=100, position=1, desc="Variant calling")
     while True:
         try:
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
@@ -550,10 +554,11 @@ def accumulate_regions_and_call(modelpath: str,
             )
             records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
 
-            progress = progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
-            logger.info(f"Awesome new progress widget says were {100* progress:.2f}% done")
-            progbar.update(progress * 100)
+            progress = 100* progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
+            progbar.update(int(progress)  - progbar.n)
+            logger.info(f"Updating var calling progress to {progress}")
             progbar.refresh()
+
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
@@ -573,7 +578,7 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
 
-    logger.info(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
+    logger.debug(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
     for i in range(n_region_workers):
         logger.debug(f"Sending kill msg to region {i}")
         keepalive_queue.put(None)
@@ -582,7 +587,7 @@ def accumulate_regions_and_call(modelpath: str,
     vbuff.flush()
     vcf_out.close()
 
-    logger.info("Calling worker is exiting")
+    logger.debug("Calling worker is exiting")
 
 
 def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
@@ -605,7 +610,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     :param max_batch_size: Maximum number of regions to call in one go
     :returns Dict[(chrom, start, end)] -> List[proto vars] for the variants found in each region
     """
-    logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
+    logger.debug(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     #mid_dist = int(np.mean(dists))
     #logger.info(f"Dists: {dists} mid dist: {mid_dist}")
@@ -795,7 +800,7 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
         rec.qual = fut.result()
     
     clfend = time.time()
-    logger.info(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
+    logger.debug(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
     
     merged = []
     overlaps = [vcf_records[0]]
