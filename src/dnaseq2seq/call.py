@@ -194,6 +194,9 @@ def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str
     assert Path(bed).is_file(), f"BED file {bed} isn't a regular file"
     assert Path(reference_fasta).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
 
+    # Verify model loading, we just want to fail fast here if there's an issue
+    load_model(model_path)
+
     call_vars_in_parallel(
         bampath=bam,
         bed=bed,
@@ -250,11 +253,10 @@ def call_vars_in_parallel(
     tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
-    tot_regions, tot_bases = util.count_bed(bed)
+
     bed_chrom_order = util.unique_chroms(bed)
     priority_func = partial(region_priority, chrom_order=bed_chrom_order)
-
-    logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {bed}")
+    progress_tracker = util.RegionProgressCounter(bed)
 
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
     region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
@@ -268,7 +270,7 @@ def call_vars_in_parallel(
         p.start()
 
     model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue))
+                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue, progress_tracker))
     model_proc.start()
 
     region_finder.join()
@@ -294,6 +296,10 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
     tot_size_bp = 0
     sus_region_bp = 0
     sus_region_count = 0
+
+    tot_regions, tot_bases = util.count_bed(inputbed)
+    logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {inputbed}")
+
     for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
@@ -304,7 +310,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
             reference_fasta=refpath,
             maxdist=100,
         )
-
+        logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
         sus_regions = util.merge_overlapping_regions(sus_regions)
         for r in sus_regions:
             sus_region_count += 1
@@ -466,7 +472,8 @@ def accumulate_regions_and_call(modelpath: str,
                                 vcf_out_path: str,
                                 header_extras: str,
                                 n_region_workers: int,
-                                keepalive_queue: mp.Queue):
+                                keepalive_queue: mp.Queue,
+                                progress_tracker: util.RegionProgressCounter):
     """
     Continually poll the input queue to find new encoded regions, and call variants over those regions
     This function is typically called inside a subprocess and runs until it finds a None entry in the queue
@@ -542,6 +549,8 @@ def accumulate_regions_and_call(modelpath: str,
             )
             records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
 
+            progress = progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
+            logger.info(f"Awesome new progress widget says were {100* progress:.2f}% done")
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
