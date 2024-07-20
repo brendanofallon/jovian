@@ -254,13 +254,15 @@ def call_vars_in_parallel(
     tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
-
     bed_chrom_order = util.unique_chroms(bed)
     priority_func = partial(region_priority, chrom_order=bed_chrom_order)
     progress_tracker = util.RegionProgressCounter(bed)
 
+    region_progbar = tqdm(total=100, position=0, desc="Region finding")
+    variant_progbar = tqdm(total=100, position=1, desc="Variant calling")
+
     # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
-    region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads))
+    region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads, region_progbar))
     region_finder.start()
 
     region_workers = [mp.Process(target=generate_tensors,
@@ -271,7 +273,7 @@ def call_vars_in_parallel(
         p.start()
 
     model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue, progress_tracker))
+                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue, progress_tracker, variant_progbar))
     model_proc.start()
 
     region_finder.join()
@@ -282,11 +284,13 @@ def call_vars_in_parallel(
     logger.info("Region workers are done")
 
     model_proc.join()
+    region_progbar.close()
+    variant_progbar.close()
     logger.info("All done")
 
 
 
-def find_regions(regionq, inputbed, bampath, refpath, n_signals):
+def find_regions(regionq, inputbed, bampath, refpath, n_signals, progbar):
     """
     Read the input BED formatted file and merge / split the regions into big chunks
     Then find regions that may contain a variant, and add all of these
@@ -300,7 +304,6 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
 
     tot_regions, tot_bases = util.count_bed(inputbed)
     logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {inputbed}")
-
     for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
@@ -313,6 +316,10 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals):
         )
         logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
         sus_regions = util.merge_overlapping_regions(sus_regions)
+        if progbar is not None:
+            progbar.update(100 * (tot_size_bp) / tot_bases - progbar.n)
+            progbar.refresh()
+
         for r in sus_regions:
             sus_region_count += 1
             sus_region_bp += r[-1] - r[-2]
@@ -473,7 +480,8 @@ def accumulate_regions_and_call(modelpath: str,
                                 header_extras: str,
                                 n_region_workers: int,
                                 keepalive_queue: mp.Queue,
-                                progress_tracker: util.RegionProgressCounter):
+                                progress_tracker: util.RegionProgressCounter,
+                                progbar: tqdm):
     """
     Continually poll the input queue to find new encoded regions, and call variants over those regions
     This function is typically called inside a subprocess and runs until it finds a None entry in the queue
@@ -510,7 +518,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_processed = 0
     tot_regions_submitted = 0
     vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=10000)
-    progbar = tqdm(total=100, desc="Here is a progress bar")
+
     while True:
         try:
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
@@ -550,10 +558,11 @@ def accumulate_regions_and_call(modelpath: str,
             )
             records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
 
-            progress = progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
+            progress = 100 * progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
             logger.info(f"Awesome new progress widget says were {100* progress:.2f}% done")
-            progbar.update(progress * 100)
-            progbar.refresh()
+            if progbar is not None:
+                progbar.update(round(progress, 2) - progbar.n)
+                progbar.refresh()
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
