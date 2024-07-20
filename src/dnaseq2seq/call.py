@@ -10,6 +10,7 @@ from collections import defaultdict
 from functools import partial
 from pathlib import Path
 from typing import List, Callable
+from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import torch
@@ -416,7 +417,6 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
     var_records = []  # Stores all variant records
 
     reference = pysam.FastaFile(refpath)
-    # aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
     for data in datas:
         # Load the data, parsing location + encoded data from file
@@ -510,6 +510,7 @@ def accumulate_regions_and_call(modelpath: str,
     regions_processed = 0
     tot_regions_submitted = 0
     vbuff = util.VariantSortedBuffer(outputfh=vcf_out, buff_size=10000)
+    progbar = tqdm(total=100, desc="Here is a progress bar")
     while True:
         try:
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
@@ -544,13 +545,15 @@ def accumulate_regions_and_call(modelpath: str,
 
             bp = sum(d['region'][2] - d['region'][1] for d in datas)
             bp_processed += bp
-            logger.info(
+            logger.debug(
                 f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
             )
             records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
 
             progress = progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
             logger.info(f"Awesome new progress widget says were {100* progress:.2f}% done")
+            progbar.update(progress * 100)
+            progbar.refresh()
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
