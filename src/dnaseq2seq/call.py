@@ -194,6 +194,10 @@ def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str
     assert Path(bam).is_file(), f"Alignment file {bam} isn't a regular file"
     assert Path(bed).is_file(), f"BED file {bed} isn't a regular file"
     assert Path(reference_fasta).is_file(), f"Reference genome {reference_fasta} isn't a regular file"
+    if classifier_path is None:
+        logger.info("No classifier model provided, emitting uncalibrated qualities only. Specificity will be poor")
+    else:
+        assert Path(classifier_path).is_file(), f"Classifier model {classifier_path} isn't a regular file"
 
     # Verify model loading, we just want to fail fast here if there's an issue
     load_model(model_path)
@@ -596,7 +600,7 @@ def accumulate_regions_and_call(modelpath: str,
     logger.debug(f"Writing final {len(vbuff)} variants...")
     if progbar:
         progbar.close()
-        
+
     vbuff.flush()
     vcf_out.close()
 
@@ -800,27 +804,28 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
     for rec in vcf_records:
         rec.info["RAW_QUAL"] = rec.qual
 
-    clfstart = time.time()
-    clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
-    futures = []
+    if classifier_model:
+        clfstart = time.time()
+        clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
+        futures = []
 
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        for rec in vcf_records:
-            fut = executor.submit(clfunc, rec)
-            futures.append(fut)
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            for rec in vcf_records:
+                fut = executor.submit(clfunc, rec)
+                futures.append(fut)
 
-    for rec, fut in zip(vcf_records, futures):
-        rec.qual = fut.result()
-    
-    clfend = time.time()
-    logger.info(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
-    
+        for rec, fut in zip(vcf_records, futures):
+            rec.qual = fut.result()
+
+        clfend = time.time()
+        logger.info(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
+
     merged = []
     overlaps = [vcf_records[0]]
     for rec in vcf_records[1:]:
         if overlaps and util.records_overlap(overlaps[-1], rec):
             overlaps.append(rec)
-        elif overlaps: #
+        elif overlaps:
             result = merge_overlaps(overlaps, min_qual=min_merge_qual)
             merged.extend(result)
             overlaps = [rec]
