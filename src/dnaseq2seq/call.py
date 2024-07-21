@@ -279,14 +279,13 @@ def call_vars_in_parallel(
     model_proc.start()
 
     region_finder.join()
-    logger.info("Done finding regions")
+    logger.debug("Done finding regions")
 
     for p in region_workers:
         p.join()
-    logger.info("Region workers are done")
+    logger.debug("Region workers are done")
 
     model_proc.join()
-    logger.info("All done")
 
 
 
@@ -318,18 +317,18 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
             reference_fasta=refpath,
             maxdist=100,
         )
-        logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
         sus_regions = util.merge_overlapping_regions(sus_regions)
         if progbar is not None:
             progbar.update(100 * (tot_size_bp) / tot_bases - progbar.n)
             progbar.refresh()
-
+        else:
+            logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
         for r in sus_regions:
             sus_region_count += 1
             sus_region_bp += r[-1] - r[-2]
             regionq.put(r)
 
-    logger.info("Done finding regions")
+    logger.debug("Done finding regions")
     for i in range(n_signals):
         regionq.put(RegionStopSignal(sus_region_count, sus_region_bp))
     if progbar:
@@ -408,7 +407,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     # the calling process to put a signal into the 'keepalive' queue to signal that it is all done and we can finally exit
     logger.debug(f"Polling keepalive queue after generating {encoded_region_count} tensors")
     result = keepalive_queue.get()
-    logger.info(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
+    logger.debug(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
 @torch.no_grad()
@@ -469,7 +468,7 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
         )
 
     call_elapsed = datetime.datetime.now() - call_start
-    logger.info(
+    logger.debug(
         f"Called variants in {window_count} windows over {batch_count} batches from {len(datas)} paths in {call_elapsed.total_seconds() :.2f} seconds"
     )
     return var_records
@@ -569,10 +568,12 @@ def accumulate_regions_and_call(modelpath: str,
             records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
 
             progress = 100 * progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
-            logger.info(f"Awesome new progress widget says were {100* progress:.2f}% done")
             if progbar is not None:
                 progbar.update(round(progress, 2) - progbar.n)
                 progbar.refresh()
+            else:
+                logger.info(f"Variant calling progress {100* progress:.2f}%")
+
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
@@ -592,7 +593,7 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
 
-    logger.info(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
+    logger.debug(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
     for i in range(n_region_workers):
         logger.debug(f"Sending kill msg to region {i}")
         keepalive_queue.put(None)
@@ -627,7 +628,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
     :param max_batch_size: Maximum number of regions to call in one go
     :returns Dict[(chrom, start, end)] -> List[proto vars] for the variants found in each region
     """
-    logger.info(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
+    logger.debug(f"Predicting batch of size {batch.shape[0]} for chrom {regions[0][0]}:{regions[0][1]}-{regions[-1][2]}")
     dists = np.array([r[2] - bo for r, bo in zip(regions, batch_offsets)])
     #mid_dist = int(np.mean(dists))
     #logger.info(f"Dists: {dists} mid dist: {mid_dist}")
@@ -818,7 +819,7 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
             rec.qual = fut.result()
 
         clfend = time.time()
-        logger.info(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
+        logger.debug(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
 
     merged = []
     overlaps = [vcf_records[0]]
@@ -943,7 +944,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
             batch_offsets.append(window_start)
             #logger.debug(f"Added item to batch from window_start {window_start}")
         except bam.LowReadCountException:
-            logger.info(
+            logger.debug(
                 f"Bam window {chrom}:{window_start}-{window_start + window_size} "
                 f"had too few reads for variant calling (< {min_reads})"
             )
@@ -962,7 +963,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
         yield encodedreads, batch_offsets
 
     if not returned_count:
-        logger.info(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
+        logger.debug(f"Region {chrom}:{start}-{end} has only low coverage areas, not encoding data")
 
 
 def resolve_haplotypes(genos):
