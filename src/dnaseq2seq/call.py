@@ -605,7 +605,7 @@ def accumulate_regions_and_call(modelpath: str,
     vbuff.flush()
     vcf_out.close()
 
-    logger.info("Calling worker is exiting")
+    logger.debug("Calling worker is exiting")
 
 
 def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
