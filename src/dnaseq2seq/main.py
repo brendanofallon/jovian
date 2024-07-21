@@ -101,7 +101,7 @@ def main():
     callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     callparser.add_argument("-td", "--temp-dir", help="Temporary data storage location", default=os.environ.get("JV_TMPDIR", "."))
     callparser.add_argument("-mx", "--max-batch-size", help="Max number of regions to process at once", type=int, default=128)
-    callparser.add_argument("-np", "--no-progress", help="Turn off progress bars", type=bool, default=False)
+    callparser.add_argument("-np", "--no-progress", help="Turn off progress bars", action='store_true')
 
 
     callparser.set_defaults(func=do_call)
