@@ -75,7 +75,6 @@ class Genotype(object):
         return None
 
 
-
 def trim_common_prefix(a,b):
     """
     Remove the longest string that starts both a and b and return its length and the trimmed a and b

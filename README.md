@@ -9,11 +9,31 @@ any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or deci
 quality cutoffs, read counts, allele frequencies, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
-#### A note on earlier versions
+
+## What's new with version 1.2
+
+
+Jenever 1.2 contains new models with significantly improved accuracy for SNVs compared to the version 1.1 models (named 100M_s28_cont_mapsus_lolr2_epoch2 and paraclf). SNV precision has increased from 99.5% to about 99.7% (at a quality cutoff of 0.10), while SNV recall has increased modestly from 99.27% to about 99.33%. These improvements came from training on a new dataset that included ~44 WGS samples and more regions sampled from each, for a total of ~73M regions containing nearly 11B tokens.  Indel accuracy remains mostly unchanged. 
+
+Jenever 1.1 has much improved calling performance compared to version 1.0, due to a better parallelization strategy for region encoding & calling. Variant detection accuracy should be about the same as 1.0. Also fixes a minor regression which occurred when some fixes were made to the phasing logic. The regression caused the features used in the classifier model to be incorrect in a small fraction of variants, resulting in quality scores that were too high and decreased precision (~0.1% of variants were affected). 
+
+
+#### A note on Jovian
 
 An earlier version of this tool, called Jovian, was made available in 2022 (see [preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for details).
 Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
 The current version which uses autoregressive decoders to generate haplotypes is called Jenever. 
+
+### Performance notes
+
+![$F_1$](images/f1.png)
+
+A comparison of the $F_1$ statistic for Indels and SNVs across different models
+
+![Mean Total FPs and FNs](images/total_errors.png)
+
+The upper (pastel) portion is the mean total number of FPs per sample, and the bottom darker bar represents the mean total number of FNs. 
+Jenever calls were filtered at quality 10 (phred-scaled), HaplotypeCaller at 50 , Clair3 at 0, DeepVariant at 3, and Strelka at 4, values that are close to the $F_1$-maximizing thresholds computed by $vcfeval$. 
 
 
 ### Installation
@@ -45,9 +65,11 @@ to actually download the weights.
 There are two types of model files. The first stores weights for the main transformer model used for haplotype generation. These are big, often over 1GB. The second is the 'classifier' model which predicts variant quality from multiple overlapping haplotypes. The classifier model files are typically much smaller (~40MB)
 
 #### Model files:
-- **100M_s28_cont_mapsus_lolr2_epoch2.model**: This contains weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower.
-- **s28ce40_bamfix.model**: The original classifier model, as used in the Jenever publication
-- **paraclf.model**: A new classifier model, trained on more data with slightly higher performance the the previous model. 
+- **good44fix_epoch280.model**: New in v1.2, this contains weights for an improved transformer model with better precision and sensitivity for SNVs
+- **g44e280_clf.model**: New in v1.2, this is a new classifier model trained with calls form the "good44fix" transformer.
+- **100M_s28_cont_mapsus_lolr2_epoch2.model**: The v1.0  weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower.
+- **s28ce40_bamfix.model**: The v1.0 classifier model, as used in the Jenever publication
+- **paraclf.model**: New in v1.1, this classifier model was trained on more data with slightly higher performance the the previous model. 
 
 
 
