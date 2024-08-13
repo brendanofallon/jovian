@@ -63,11 +63,11 @@ class ReadCache:
 
 class ReadWindow:
 
-    def __init__(self, aln, chrom, start, end, min_mq=-1):
+    def __init__(self, aln, chrom, start, end, min_mq=-1, margin_size=150):
         self.aln = aln
         self.start = start
         self.end = end
-        self.margin_size = 150 # Should be about a read length
+        self.margin_size = margin_size # Should be about a read length
         self.chrom = chrom
         self.min_mq = min_mq
         self.cache = ReadCache()  # Cache for encoded reads
@@ -77,6 +77,7 @@ class ReadWindow:
         bypos = defaultdict(list)
         for i, read in enumerate(self.aln.fetch(self.chrom, self.start - self.margin_size, self.end)):
             if read is not None and read.mapping_quality > self.min_mq:
+                print(f"Appending read with start {alnstart(read)} and query length: {read.query_length}")
                 bypos[alnstart(read)].append(read)
         return bypos
 
@@ -432,3 +433,13 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         encoded_with_ref = torch.cat((ref_encoded.unsqueeze(1), reads_encoded), dim=1)[:, 0:maxreads, :]
 
         yield encoded_with_ref, (start, end)
+
+
+if __name__=="__main__":
+    bam = "/Users/brendan/data/WGS/hg002_chr22.cram"
+    ref = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
+    chrom = "22"
+    aln = pysam.AlignmentFile(bam, reference_filename=ref)
+    rw = ReadWindow(aln, chrom, 27000000, 27000150, margin_size=50000)
+    t = rw.get_window(27000000, 27000150, 100)
+    print(t)
