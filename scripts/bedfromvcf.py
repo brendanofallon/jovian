@@ -15,11 +15,13 @@ def is_FN(rec):
     return rec.samples['TRUTH']['BD'] == 'FN'
 
 def main(vcfpath: str):
-
     for rec in pysam.VariantFile(vcfpath):
-        if is_FP(rec) or is_FN(rec):
+        if is_FP(rec):
             for region in emit_regions(rec.chrom, rec.pos):
-                print("\t".join((str(r) for r in region)))
+                print("\t".join((str(r) for r in region)) + "\ttn-fp")
+        elif is_FN(rec):
+            for region in emit_regions(rec.chrom, rec.pos):
+                print("\t".join((str(r) for r in region)) + "\tfn")
 
 
 

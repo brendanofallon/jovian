@@ -67,24 +67,9 @@ def bed_intersect(b1, b2):
 
 def sort_vcf(vcf):
     dest = Path(vcf).name.replace(".vcf", "") + "_sorted.vcf"
-    vcf = pysam.VariantFile(vcf)
-    chrvars = []
-    with open(dest, 'w') as ofh:
-        ofh.write(str(vcf.header))
-        prev = -1
-        for v in vcf:
-            if not chrvars or v.chrom != chrvars[0][0]:
-                for vc in sorted(chrvars, key=lambda x: x[1]):
-                    prev = vc[1]
-                    ofh.write(vc[2])
-                chrvars = []
-            chrvars.append( (v.chrom, v.pos, str(v)) )
-        
-        prev = -1
-        for vc in sorted(chrvars, key=lambda x: x[1]):
-            prev = vc[1]
-            ofh.write(vc[2])
-
+    cmd = f"bedtools sort -header -i {vcf} > {dest}"
+    sys.stderr.write(f"Running {cmd}\n")
+    subprocess.run(cmd, shell=True, check=True)
     return dest
 
 

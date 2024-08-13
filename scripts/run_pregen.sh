@@ -22,8 +22,8 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/src/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbig_sus_5more_chrsE.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/decoder_fpfn_chr1_conf.yaml
 
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/pregen_confs/good44tough_chrE.yaml
-DEST=/scratch/general/vast/u0379426/pregen/good44tough_chrE
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/pregen_confs/good44_fpfns.yaml
+DEST=/scratch/general/vast/u0379426/pregen/good44_fpfns
 
 
 BATCH_SIZE=512
