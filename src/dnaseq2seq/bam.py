@@ -30,6 +30,27 @@ def readkey(read):
     return read.query_name + suf + suf2
 
 
+def gen_cumulative_offsets(read):
+    """
+    Generate a list of cumulative offsets for each base in the read, based on the CIGAR string
+    """
+    offsets = []
+    offset = 0
+    for op, length in read.cigartuples:
+        if op in {1, 4, 5}: # Insertion, soft or hard clip, these don't consume reference bases
+            for i in range(length):
+                offsets.append(offset)
+                offset -= 1
+        elif op in {0, 7}: # Match, Sequence match
+            offsets.extend([offset] * length)
+        elif op in {2, 3}: # Deletion, Skip
+            for i in range(length):
+                offsets.append(offset)
+                offset += 1
+
+    return offsets
+
+
 class ReadCache:
     """
     Simple cache to store read encodings
@@ -41,12 +62,36 @@ class ReadCache:
     def __getitem__(self, read):
         key = readkey(read)
         if key not in self.cache:
-            self.cache[key] = (alnstart(read), encode_read(read).char(), read.get_aligned_pairs(matches_only=True))
+            self.cache[key] = (alnstart(read), encode_read(read).char(), read.get_aligned_pairs(matches_only=True), ) # gen_cumulative_offsets(read)
+            # self.cache[key] = ReadEncoder(read)
 
         return self.cache[key]
 
     def __contains__(self, item):
         return readkey(item) in self.cache
+
+
+class ReadEncoder:
+
+    def __init__(self, read: pysam.AlignedSegment):
+        self.read = read
+        self.alnpairs = read.get_aligned_pairs(matches_only=True)
+        self.alnstart = next(a for a in self.alnpairs if a[1] is not None)[1]
+        self.alnend = next(a for a in reversed(self.alnpairs) if a[1] is not None)[1]
+
+    def __len__(self):
+        return self.read.query_length
+
+    def get_encoded(self, ref_start, ref_end):
+        first_base_to_encode, first_base_ref_coord = find_start(self.alnpairs, ref_start)
+        encoded = encode_read(self.read,
+                              prepad=first_base_ref_coord - ref_start,
+                              tot_length=ref_end - ref_start, # Includes prepad bases, so always equal to full window length
+                              skip=first_base_to_encode)
+        assert encoded.shape[0] == ref_end - ref_start, f"Encoded read length {encoded.shape[0]} doesn't match window length {ref_end - ref_start}"
+        return encoded
+
+
 
 def find_start(alnpairs, start):
     """ Use bisect library to find entry in aligned pairs that corresponds to the start of the window """
@@ -97,14 +142,13 @@ class ReadWindow:
         self.margin_size = margin_size # Should be about a read length
         self.chrom = chrom
         self.min_mq = min_mq
-        self.cache = ReadCache()  # Cache for encoded reads
+        # self.cache = ReadCache()  # Cache for encoded reads
         self.bypos = self._fill() # Maps read start positions to actual reads
 
     def _fill(self):
         bypos = defaultdict(list)
         for i, read in enumerate(self.aln.fetch(self.chrom, self.start - self.margin_size, self.end)):
             if read is not None and read.mapping_quality > self.min_mq:
-                print(f"Appending read with start {alnstart(read)} and query length: {read.query_length}")
                 bypos[alnstart(read)].append(read)
         return bypos
 
@@ -137,22 +181,25 @@ class ReadWindow:
         window_size = end - start
         t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            alnstart, encoded, alignedpairs = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
+            # alnstart, encoded, alignedpairs, = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
+            re = ReadEncoder(read)
+            t[:, i, :] = re.get_encoded(start, end)
 
-            read_anchor, ref_anchor = find_start(alignedpairs, start)
-
-            enc_start_offset, t_start_offset, num_bases = get_mapping_coords(start, end, read.query_length, read_anchor, ref_anchor)
-
-            t[t_start_offset:(t_start_offset + num_bases), i, :] = encoded[enc_start_offset:(enc_start_offset + num_bases)]
+            # read_anchor, ref_anchor = find_start(alignedpairs, start)
+            #
+            # enc_start_offset, t_start_offset, num_bases = get_mapping_coords(start, end, read.query_length, read_anchor, ref_anchor)
+            #
+            # t[t_start_offset:(t_start_offset + num_bases), i, :] = encoded[enc_start_offset:(enc_start_offset + num_bases)]
 
         return t
 
 
-def encode_read(read, prepad=0, tot_length=None):
+def encode_read(read, prepad=0, tot_length=None, skip=0):
     """
     Encode the given read into a tensor
     :param read: Read to be encoded (typically pysam.AlignedSegment)
     :param prepad: Leading zeros to prepend
+    :param skip: Skip this many bases at the beginning of the read
     :param tot_length: If not None, desired total 'length' (dimension 0) of tensor
     """
     if tot_length:
@@ -162,7 +209,7 @@ def encode_read(read, prepad=0, tot_length=None):
         bases.append(torch.zeros(FEATURE_NUM))
 
     try:
-        for t in iterate_bases(read):
+        for i, t in enumerate(iterate_bases(read, skip=skip)):
             bases.append(t)
             if tot_length is not None:
                 if len(bases) >= tot_length:
@@ -248,7 +295,7 @@ def pad_zeros(pre, data, post):
     return data
 
 
-def iterate_bases(rec):
+def iterate_bases(rec, skip=0):
     """
     Generate encoded base calls for the given variant record, this version does NOT
     insert gaps into the bases if there's a deletion in the cigar - it just reads right on thru
@@ -267,7 +314,8 @@ def iterate_bases(rec):
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
     for i, (base, qual) in enumerate(zip(bases, quals)):
-        readpos = i/150 if not rec.is_reverse else 1.0 - i/150
+        if i < skip:
+            continue
         yield encode_basecall(base, qual, is_ref_consumed, is_seq_consumed, rec.is_reverse, is_clipped, rec.mapping_quality)
         n_bases_cigop -= 1
         if n_bases_cigop <= 0:
@@ -468,11 +516,41 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
 
 if __name__=="__main__":
+    from dnaseq2seq.call import gen_suspicious_spots
     bam = "/Users/brendan/data/WGS/hg002_chr22.cram"
     ref = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
     chrom = "22"
     aln = pysam.AlignmentFile(bam, reference_filename=ref)
-    rw = ReadWindow(aln, chrom, 27000000, 27000150, margin_size=50000)
-    t = rw.get_window(27000000, 27000150, 100)
-    p = util.to_pileup(t)
-    print(p)
+
+    c = [(start, end) for start, end in util.cluster_positions(
+            gen_suspicious_spots(bam, chrom, 27717050, 27717250, reference_fasta=ref),
+            maxdist=100,
+    )]
+
+    print(c)
+    # for b in gen_suspicious_spots(bam, "22", 27717050, 27717250, reference_fasta=ref):
+    #     print(b)
+
+    # rw = ReadWindow(aln, chrom, 27717050, 27717180, margin_size=50000)
+    # t = rw.get_window(27717050, 27717150, 50)
+    # p = util.to_pileup(t)
+    # print(p)
+
+    # ws = 27717800
+    # we = 27717820
+    # fetcher = aln.fetch("22", ws, we)
+    # encs = []
+    # for i, r in enumerate(fetcher):
+    #     re = ReadEncoder(r)
+    #     enc = re.get_encoded(ws, we)
+    #     encs.append(enc)
+    #     if i > 100:
+    #         break
+    #
+    #
+    # t = torch.stack(tuple(encs), dim=1)
+
+    # p = util.to_pileup(t)
+    # print(p)
+
+

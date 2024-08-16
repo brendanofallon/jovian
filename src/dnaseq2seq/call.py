@@ -143,13 +143,14 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
         f"{cpname}: Generating regions from window {window_idx}: "
         f"{window_start}-{window_end} on chromosome {chrom}"
     )
-    return [
+    result = [
         (chrom, window_idx, start, end)
         for start, end in util.cluster_positions(
             gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
             maxdist=maxdist,
         )
     ]
+    return result
 
 
 def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str, classifier_path=None, **kwargs):
@@ -317,7 +318,9 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
             reference_fasta=refpath,
             maxdist=100,
         )
+        logger.debug(f"Found sus regions: {sus_regions}")
         sus_regions = util.merge_overlapping_regions(sus_regions)
+
         if progbar is not None:
             progbar.update(100 * (tot_size_bp) / tot_bases - progbar.n)
             progbar.refresh()
@@ -931,7 +934,7 @@ def _encode_region(aln, reference, chrom, start, end, max_read_depth, window_siz
     window_start = int(start - 0.7 * window_size)  # We start with regions a bit upstream of the focal / target region
     batch = []
     batch_offsets = []
-    readwindow = bam.ReadWindow(aln, chrom, start - 150, end + window_size)
+    readwindow = bam.ReadWindow(aln, chrom, start - 150, end + window_size, margin_size=50000)
     logger.debug(f"Encoding region {chrom}:{start}-{end}")
     returned_count = 0
     while window_start <= (end - 0.2 * window_size):
