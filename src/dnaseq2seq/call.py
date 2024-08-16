@@ -133,7 +133,7 @@ def load_model(model_path):
     model = torch.compile(model, fullgraph=True)
     return model
 
-def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
+def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=50, min_indel_count=3, min_mismatch_count=3):
     """
     Generate a list of ranges containing a list of positions from the given window
     returns: list of (chrom, index, start, end) tuples
@@ -148,7 +148,7 @@ def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     result = [
         (chrom, window_idx, start, end)
         for start, end in util.cluster_positions(
-            gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta),
+            gen_suspicious_spots(bamfile, chrom, window_start, window_end, reference_fasta, min_indel_count, min_mismatch_count),
             maxdist=maxdist,
         )
     ]

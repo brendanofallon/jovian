@@ -127,7 +127,7 @@ class ReadEncoder:
         """
         if self.encoded_chunk is None:
             return self._from_scratch(ref_start, ref_end)
-        elif ref_start > self.window_start and ref_start < self.window_end:
+        elif self.window_start < ref_start < self.window_end:
             return self.shift(ref_start, ref_end)
         else:
             return self._from_scratch(ref_start, ref_end)
