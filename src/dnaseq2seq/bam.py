@@ -75,7 +75,6 @@ class ReadEncoder:
         """
         assert self.encoded_chunk is not None, f"No encoded chunk to extend"
         bases_to_skip = self.first_base_to_encode + self.encoded_chunk.shape[0]
-        logger.info(f"Will encode {new_end - self.window_end} new bases starting at read pos {bases_to_skip}")
         new_enc = encode_read(self.read,
                               prepad=0,
                               tot_length=new_end - self.window_end, # Includes prepad bases, so always equal to full window length
