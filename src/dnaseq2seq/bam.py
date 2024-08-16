@@ -2,10 +2,13 @@
 import random
 import traceback
 import numpy as np
-import pysam
-import torch
+from typing import List, Tuple
 import logging
 from collections import defaultdict
+import bisect
+
+import pysam
+import torch
 
 from dnaseq2seq import util
 
@@ -38,27 +41,51 @@ class ReadCache:
     def __getitem__(self, read):
         key = readkey(read)
         if key not in self.cache:
-            self.cache[key] = (alnstart(read), encode_read(read))
+            self.cache[key] = (alnstart(read), encode_read(read).char(), read.get_aligned_pairs(matches_only=True))
 
-        return self.cache[key][1]
-
-    def clear_to_pos(self, min_pos):
-        """
-        Remove any items from the cache that have a alnstart of less than min_pos
-        """
-        newcache = {}
-        for key, val in self.cache.items():
-            if val[0] >= min_pos:
-                newcache[key] = val
-        self.cache = newcache
+        return self.cache[key]
 
     def __contains__(self, item):
-        if type(item) == str:
-            return item in self.cache
-        elif type(item) == pysam.AlignedSegment:
-            return item.query_name in self.cache
-        else:
-            return False
+        return readkey(item) in self.cache
+
+def find_start(alnpairs, start):
+    """ Use bisect library to find entry in aligned pairs that corresponds to the start of the window """
+    idx = bisect.bisect_left(alnpairs, start, key=lambda x: x[1]) # Including the key function here restricts everything to python >=3.10
+    return alnpairs[idx]
+
+
+def get_mapping_coords(window_start: int, window_end: int, read_length: int, read_idx_anchor: int, ref_idx_anchor: int) -> Tuple[int, int, int]:
+    """
+    Calculate the start and end indexes of the read that map to the window as well as the offset of the window start
+    :param window_start: Start of the window
+    :param window_end: End of the window
+    :param read_length: total number of bases in read
+    :param read_idx_anchor: Index into read that corresponds to ref_start reference coordinate
+    :param ref_idx_anchor: Reference coordinate of the start of the read
+    :return: Tuple of read offset, window offset, and length of bases that map to window
+    """
+
+    # Reference coordinate of first read base
+    read_start_ref_coord = ref_idx_anchor - read_idx_anchor
+
+    # Compute first base of read that maps to window
+    read_idx_start = max(0, window_start - read_start_ref_coord)
+
+    # Reference coordinate of first base of read that maps to window
+    ref_idx_start = max(window_start, read_start_ref_coord)
+
+    # Compute last base of read that maps to window
+    read_idx_end = min(read_length,
+                       read_idx_start + (window_end - ref_idx_start),
+                       )
+
+    # Compute position in window the first base of the read maps
+    window_offset = max(0, ref_idx_start - window_start)
+
+    # Compute number of bases included in window
+    num_bases = read_idx_end - read_idx_start
+
+    return read_idx_start, window_offset, num_bases
 
 
 class ReadWindow:
@@ -86,10 +113,14 @@ class ReadWindow:
         assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window"
         allreads = []
         for pos in range(start - self.margin_size, end):
-            for read in self.bypos[pos]:
-                if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
-                    continue
-                allreads.append((pos, read))
+            for read in self.bypos[pos]: #
+                # if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
+                #     continue
+                if read.get_overlap(start, end) > 1:
+                    allreads.append((pos, read))
+
+        # TODO realign reads around window by using get_blocks() or get_aligned_pairs() to identify aligned regions around start of window
+        # I think this should alter the 'read_start' entry that is the first part of the tuple in allreads
         if len(allreads) < 5:
             raise LowReadCountException(f"Only {len(allreads)} reads in window")
             
@@ -106,12 +137,13 @@ class ReadWindow:
         window_size = end - start
         t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            encoded = self.cache[read].char() # Char is the same as int8
-            enc_start_offset = max(0,  start - readstart)
-            enc_end_offset = min(encoded.shape[0], window_size - (readstart - start))
-            t_start_offset = max(0, readstart - start)
-            t_end_offset = t_start_offset + (enc_end_offset - enc_start_offset)
-            t[t_start_offset:t_end_offset, i, :] = encoded[enc_start_offset:enc_end_offset]
+            alnstart, encoded, alignedpairs = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
+
+            read_anchor, ref_anchor = find_start(alignedpairs, start)
+
+            enc_start_offset, t_start_offset, num_bases = get_mapping_coords(start, end, read.query_length, read_anchor, ref_anchor)
+
+            t[t_start_offset:(t_start_offset + num_bases), i, :] = encoded[enc_start_offset:(enc_start_offset + num_bases)]
 
         return t
 
@@ -442,4 +474,5 @@ if __name__=="__main__":
     aln = pysam.AlignmentFile(bam, reference_filename=ref)
     rw = ReadWindow(aln, chrom, 27000000, 27000150, margin_size=50000)
     t = rw.get_window(27000000, 27000150, 100)
-    print(t)
+    p = util.to_pileup(t)
+    print(p)
