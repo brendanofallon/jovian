@@ -59,7 +59,7 @@ def randchars(n=6):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
-def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
+def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
     """
     Generator for positions of a BAM / CRAM file that may contain a variant. This should be pretty sensitive and
     trigger on anything even remotely like a variant
@@ -69,6 +69,8 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
     :param chrom: Chromosome containing region
     :param start: Start position of region
     :param stop: End position of region (exclusive)
+    :param min_indel_count: Minimum number of indels to flag the region as 'suspicious'
+    :param min_mismatch_count: Minimum number of mismatches to flag the region as 'suspicious'
     :param reference_fasta: Reference sequences in fasta
     """
     aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
@@ -92,7 +94,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta):
                     if base != refbase:  # May want to check quality before adding a mismatch?
                         base_mismatches += 1
 
-                if indel_count > 1 or base_mismatches > 2:
+                if indel_count > min_indel_count or base_mismatches > min_mismatch_count:
                     yield col.reference_pos
                     break
 
@@ -538,7 +540,7 @@ def accumulate_regions_and_call(modelpath: str,
         except queue.Empty:
             timeouts += 1
             data = None
-            logger.debug(f"Got a timeout in model queue, have {timeouts} total")
+            logger.info(f"Got a timeout in model queue, have {timeouts} total")
         except FileNotFoundError as ex:
             # This happens when region workers exit prematurely, it's bad
             logger.warning(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
@@ -555,9 +557,6 @@ def accumulate_regions_and_call(modelpath: str,
             regions_found += 1
             logger.debug("Found a non-None data object, appending it")
             datas.append(data)
-
-        if data is None:
-            logger.info(f"Hmm, got None from the calling input queue, this doesn't seem right")
 
         if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")

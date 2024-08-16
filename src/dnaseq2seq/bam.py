@@ -1,5 +1,6 @@
 
 import random
+import time
 import traceback
 import numpy as np
 from typing import List, Tuple
@@ -30,27 +31,6 @@ def readkey(read):
     return read.query_name + suf + suf2
 
 
-def gen_cumulative_offsets(read):
-    """
-    Generate a list of cumulative offsets for each base in the read, based on the CIGAR string
-    """
-    offsets = []
-    offset = 0
-    for op, length in read.cigartuples:
-        if op in {1, 4, 5}: # Insertion, soft or hard clip, these don't consume reference bases
-            for i in range(length):
-                offsets.append(offset)
-                offset -= 1
-        elif op in {0, 7}: # Match, Sequence match
-            offsets.extend([offset] * length)
-        elif op in {2, 3}: # Deletion, Skip
-            for i in range(length):
-                offsets.append(offset)
-                offset += 1
-
-    return offsets
-
-
 class ReadCache:
     """
     Simple cache to store read encodings
@@ -62,8 +42,8 @@ class ReadCache:
     def __getitem__(self, read):
         key = readkey(read)
         if key not in self.cache:
-            self.cache[key] = (alnstart(read), encode_read(read).char(), read.get_aligned_pairs(matches_only=True), ) # gen_cumulative_offsets(read)
-            # self.cache[key] = ReadEncoder(read)
+            # self.cache[key] = (alnstart(read), encode_read(read).char(), read.get_aligned_pairs(matches_only=True), ) # gen_cumulative_offsets(read)
+            self.cache[key] = ReadEncoder(read)
 
         return self.cache[key]
 
@@ -78,18 +58,80 @@ class ReadEncoder:
         self.alnpairs = read.get_aligned_pairs(matches_only=True)
         self.alnstart = next(a for a in self.alnpairs if a[1] is not None)[1]
         self.alnend = next(a for a in reversed(self.alnpairs) if a[1] is not None)[1]
+        self.encoded_chunk = None
+        self.first_base_to_encode = None # Read offset of first base to grab
+        self.first_base_ref_coord = None # Reference coordinate of first base to grab
+        self.window_start = None # Ref coord start of window
+        self.window_end = None # Ref coord end of window
 
     def __len__(self):
         return self.read.query_length
 
-    def get_encoded(self, ref_start, ref_end):
+    def extend(self, new_end):
+        """
+        Extend the current encoded chunk to the given reference position end in a semi-efficient manner
+        We don't re-encode any of the bases that are part of the current chunk, just the new ones
+        :param new_end: Reference coordinate of the end of the new window
+        """
+        assert self.encoded_chunk is not None, f"No encoded chunk to extend"
+        bases_to_skip = self.first_base_to_encode + self.encoded_chunk.shape[0]
+        logger.info(f"Will encode {new_end - self.window_end} new bases starting at read pos {bases_to_skip}")
+        new_enc = encode_read(self.read,
+                              prepad=0,
+                              tot_length=new_end - self.window_end, # Includes prepad bases, so always equal to full window length
+                              skip=bases_to_skip)
+        encoded = torch.cat((self.encoded_chunk, new_enc), dim=0)
+
+        self.encoded_chunk = encoded
+        self.window_end = new_end
+
+        return encoded
+
+    def shift(self, new_start, new_end):
+        """
+        Create a new encoded region by shifting the current region to the new location. If the new location is
+        outside the current encoded region, we re-encode the whole thing
+        """
+        assert new_start > self.window_start, f"Can't shift to a position before the current window start (asked for {new_start} but current start is {self.window_start})"
+        if self.encoded_chunk is None or new_start > self.window_end:
+            return self.get_encoded(new_start, new_end)
+
+        encoded = self.extend(new_end)[new_start - self.window_start:, :]
+        self.encoded_chunk = encoded
+        self.window_start = new_start
+        self.window_end = new_end
+        return encoded
+
+    def _from_scratch(self, ref_start, ref_end):
         first_base_to_encode, first_base_ref_coord = find_start(self.alnpairs, ref_start)
         encoded = encode_read(self.read,
                               prepad=first_base_ref_coord - ref_start,
                               tot_length=ref_end - ref_start, # Includes prepad bases, so always equal to full window length
                               skip=first_base_to_encode)
         assert encoded.shape[0] == ref_end - ref_start, f"Encoded read length {encoded.shape[0]} doesn't match window length {ref_end - ref_start}"
+
+        self.encoded_chunk = encoded
+        self.first_base_to_encode = first_base_to_encode
+        self.first_base_ref_coord = first_base_ref_coord
+        self.window_start = ref_start
+        self.window_end = ref_end
         return encoded
+
+    def get_encoded(self, ref_start, ref_end):
+        """
+        Encode a portion of the read corresponding to the given reference window
+        This will shift the current encoded region if the reference start coord is between the existing (previous) start and end, otherwise re-encode the whole thing
+        :param ref_start: Reference coordinate of the start of the window
+        :param ref_end: Reference coordinate of the end of the window
+        :return: Encoded tensor
+        """
+        if self.encoded_chunk is None:
+            return self._from_scratch(ref_start, ref_end)
+        elif ref_start > self.window_start and ref_start < self.window_end:
+            return self.shift(ref_start, ref_end)
+        else:
+            return self._from_scratch(ref_start, ref_end)
+
 
 
 
@@ -142,7 +184,7 @@ class ReadWindow:
         self.margin_size = margin_size # Should be about a read length
         self.chrom = chrom
         self.min_mq = min_mq
-        # self.cache = ReadCache()  # Cache for encoded reads
+        self.cache = ReadCache()  # Cache for encoded reads
         self.bypos = self._fill() # Maps read start positions to actual reads
 
     def _fill(self):
@@ -155,6 +197,7 @@ class ReadWindow:
     def get_window(self, start, end, max_reads, downsample_read_count=None):
         assert self.start <= start < self.end, f"Start coordinate must be between beginning and end of window"
         assert self.start < end <= self.end, f"End coordinate must be between beginning and end of window"
+        start_time = time.perf_counter()
         allreads = []
         for pos in range(start - self.margin_size, end):
             for read in self.bypos[pos]: #
@@ -182,9 +225,9 @@ class ReadWindow:
         window_size = end - start
         t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            # alnstart, encoded, alignedpairs, = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
-            re = ReadEncoder(read)
-            t[:, i, :] = re.get_encoded(start, end)
+            readenc = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
+            # re = ReadEncoder(read)
+            t[:, i, :] = readenc.get_encoded(start, end)
 
             # read_anchor, ref_anchor = find_start(alignedpairs, start)
             #
@@ -192,6 +235,8 @@ class ReadWindow:
             #
             # t[t_start_offset:(t_start_offset + num_bases), i, :] = encoded[enc_start_offset:(enc_start_offset + num_bases)]
 
+        end_time = time.perf_counter()
+        logger.debug(f"Encoded {len(allreads)} reads in {end_time - start_time:.2f} seconds (region {start}-{end})")
         return t
 
 
@@ -524,29 +569,48 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
 
 if __name__=="__main__":
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     from dnaseq2seq.call import gen_suspicious_spots
     bam = "/Users/brendan/data/WGS/hg002_chr22.cram"
+    # bam = "/Users/brendan/data/WGS/99702152385_GM24385_500ng_S92_chr21and22.cram"
     ref = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
     chrom = "22"
     aln = pysam.AlignmentFile(bam, reference_filename=ref)
 
-    c = [(start, end) for start, end in util.cluster_positions(
-            gen_suspicious_spots(bam, chrom, 27717050, 27717250, reference_fasta=ref),
-            maxdist=100,
-    )]
-
-    print(c)
+    # c = [(start, end) for start, end in util.cluster_positions(
+    #         gen_suspicious_spots(bam, chrom, 27717050, 27728250, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3),
+    #         maxdist=50,
+    # )]
+    #
+    # print(c)
+    # tot = sum([end-start for start, end in c])
+    # print(f"Total of {tot} bases in suspicious regions, region count: {len(c)}")
     # for b in gen_suspicious_spots(bam, "22", 27717050, 27717250, reference_fasta=ref):
     #     print(b)
 
-    # rw = ReadWindow(aln, chrom, 27717050, 27717180, margin_size=50000)
-    # t = rw.get_window(27717050, 27717150, 50)
-    # p = util.to_pileup(t)
-    # print(p)
+    rw = ReadWindow(aln, chrom, 27717050, 27717580, margin_size=50000)
+    t = rw.get_window(27717050, 27717150, 100)
+    p = util.to_pileup(t)
+    print(p)
+
+    print("The next window")
+    t = rw.get_window(27717100, 27717200, 100)
+    p = util.to_pileup(t)
+    print(p)
 
     # ws = 27717800
     # we = 27717820
     # fetcher = aln.fetch("22", ws, we)
+    # r = next(fetcher)
+    # re = ReadEncoder(r)
+    # enc0 = re.get_encoded(27717800, 27717810)
+    # print(util.to_pileup(enc0.unsqueeze(1)))
+    # enc1 = re.extend(27717820)
+    # print(util.to_pileup(enc1.unsqueeze(1)))
+    # enc2 = re.shift(27717810, 27717830)
+    # print(''.join(["."] * 10) + util.to_pileup(enc2.unsqueeze(1)))
+
+
     # encs = []
     # for i, r in enumerate(fetcher):
     #     re = ReadEncoder(r)
