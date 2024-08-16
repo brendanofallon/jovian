@@ -160,7 +160,8 @@ class ReadWindow:
             for read in self.bypos[pos]: #
                 # if pos > end or (pos + read.query_length) < start: # Check to make sure read overlaps window
                 #     continue
-                if read.get_overlap(start, end) > 1:
+                overlap = read.get_overlap(start, end) # Can return None sometimes
+                if overlap is not None and overlap > 1:
                     allreads.append((pos, read))
 
         # TODO realign reads around window by using get_blocks() or get_aligned_pairs() to identify aligned regions around start of window
@@ -313,6 +314,13 @@ def iterate_bases(rec, skip=0):
     is_ref_consumed = cigop in {0, 2, 4, 5, 7}  # 2 is deletion
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
+    if bases is None:
+        logger.warning(f"No bases for {rec.query_name}, skipping")
+        return
+    if quals is None:
+        logger.warning(f"No quals for {rec.query_name}, skipping")
+        return
+
     for i, (base, qual) in enumerate(zip(bases, quals)):
         if i < skip:
             continue
