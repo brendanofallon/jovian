@@ -319,7 +319,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
         )
         sus_regions = util.merge_overlapping_regions(sus_regions)
         if progbar is not None:
-            progbar.update(100 * (tot_size_bp) / tot_bases - progbar.n)
+            progbar.update(round(100 * (tot_size_bp) / tot_bases,2) - progbar.n)
             progbar.refresh()
         else:
             logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
