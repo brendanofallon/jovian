@@ -224,15 +224,8 @@ class ReadWindow:
         window_size = end - start
         t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            readenc = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
-            # re = ReadEncoder(read)
+            readenc = self.cache[read]
             t[:, i, :] = readenc.get_encoded(start, end)
-
-            # read_anchor, ref_anchor = find_start(alignedpairs, start)
-            #
-            # enc_start_offset, t_start_offset, num_bases = get_mapping_coords(start, end, read.query_length, read_anchor, ref_anchor)
-            #
-            # t[t_start_offset:(t_start_offset + num_bases), i, :] = encoded[enc_start_offset:(enc_start_offset + num_bases)]
 
         end_time = time.perf_counter()
         logger.debug(f"Encoded {len(allreads)} reads in {end_time - start_time:.2f} seconds (region {start}-{end})")

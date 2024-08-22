@@ -60,6 +60,13 @@ def randchars(n=6):
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
+    """
+    Identify regions that may contain a variant. This needs to be very sensitive so we don't miss anything
+    The idea here is to build an intervaltree containing positions where there are indels or mismatches for each read,
+    then we query the intervaltree for intervals containing more than a few hits. This is way faster than the old
+    pileup method (which for some reason was super-duper slow for long reads)
+    :returns: Generator of (position, count) tuples
+    """
     aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
     ref = pysam.FastaFile(reference_fasta)
     postree = util.build_postree(aln, ref, chrom, start, stop)
@@ -70,9 +77,9 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel
     for iv, count in sorted(ivs_counts, key=lambda x: x[0].begin):
         if start <= iv.begin < stop:
             if count > min_indel_count:
-                yield iv.begin, count
-            elif len(postree.overlap(iv.begin, iv.end)) > 2*min_indel_count:
-                yield f"{iv.begin}-{iv.end}", len(postree.overlap(iv.begin, iv.end)) + count
+                yield iv.begin
+            elif len(postree.overlap(iv.begin, iv.end)) > 2 * min_indel_count:
+                yield iv.begin
 
 
 def old_gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
