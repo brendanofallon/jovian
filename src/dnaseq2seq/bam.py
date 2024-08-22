@@ -569,12 +569,30 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
 if __name__=="__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    from dnaseq2seq.call import gen_suspicious_spots
+    from dnaseq2seq.call import gen_suspicious_spots, old_gen_suspicious_spots
     bam = "/Users/brendan/data/WGS/hg002_chr22.cram"
     # bam = "/Users/brendan/data/WGS/99702152385_GM24385_500ng_S92_chr21and22.cram"
     ref = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
     chrom = "22"
     aln = pysam.AlignmentFile(bam, reference_filename=ref)
+
+    start = 27710000
+    end =   27711000
+    t0 = time.perf_counter()
+    logger.info("Starting old method")
+    pl_old = old_gen_suspicious_spots(bam, chrom, start, end, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3)
+    for p in pl_old:
+        print(p + 1)
+    t1 = time.perf_counter()
+    logger.info("Starting new method")
+    pl = gen_suspicious_spots(bam, chrom, start, end, reference_fasta=ref, min_indel_count=5, min_mismatch_count=3)
+    for p, c in pl:
+        print(f"{p}\t{c}")
+    t2 = time.perf_counter()
+
+    print(f"Old method took {t1-t0:.2f} seconds")
+    print(f"New method took {t2-t1:.2f} seconds")
+
 
     # c = [(start, end) for start, end in util.cluster_positions(
     #         gen_suspicious_spots(bam, chrom, 27717050, 27728250, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3),
@@ -587,15 +605,15 @@ if __name__=="__main__":
     # for b in gen_suspicious_spots(bam, "22", 27717050, 27717250, reference_fasta=ref):
     #     print(b)
 
-    rw = ReadWindow(aln, chrom, 27717050, 27717580, margin_size=50000)
-    t = rw.get_window(27717050, 27717150, 100)
-    p = util.to_pileup(t)
-    print(p)
-
-    print("The next window")
-    t = rw.get_window(27717100, 27717200, 100)
-    p = util.to_pileup(t)
-    print(p)
+    # rw = ReadWindow(aln, chrom, 27718050, 27718580, margin_size=50000)
+    # t = rw.get_window(27718050, 27718150, 100)
+    # p = util.to_pileup(t)
+    # print(p)
+    #
+    # print("The next window")
+    # t = rw.get_window(27718100, 27718200, 100)
+    # p = util.to_pileup(t)
+    # print(p)
 
     # ws = 27717800
     # we = 27717820

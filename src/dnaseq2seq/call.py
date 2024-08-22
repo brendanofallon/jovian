@@ -60,6 +60,22 @@ def randchars(n=6):
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
+    aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
+    ref = pysam.FastaFile(reference_fasta)
+    postree = util.build_postree(aln, ref, chrom, start, stop)
+
+    ivs_counts = []
+    for iv, count in postree:
+        ivs_counts.append((iv, count))
+    for iv, count in sorted(ivs_counts, key=lambda x: x[0].begin):
+        if start <= iv.begin < stop:
+            if count > min_indel_count:
+                yield iv.begin, count
+            elif len(postree.overlap(iv.begin, iv.end)) > 2*min_indel_count:
+                yield f"{iv.begin}-{iv.end}", len(postree.overlap(iv.begin, iv.end)) + count
+
+
+def old_gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
     """
     Generator for positions of a BAM / CRAM file that may contain a variant. This should be pretty sensitive and
     trigger on anything even remotely like a variant
@@ -98,6 +114,8 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel
                     yield col.reference_pos
                     break
 
+        if col.reference_pos >= stop:
+            return
 
 
 def load_model(model_path):
