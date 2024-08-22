@@ -554,7 +554,7 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         num_samples = max(1, len(allreads) // maxreads)
 
     #logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
-    readwindow = ReadWindow(bam, chrom, start, end)
+    readwindow = ReadWindow(bam, chrom, start, end, margin_size=50000)
     for i in range(num_samples):
         reads_to_sample = maxreads
         if np.random.rand() < downsample_frac:

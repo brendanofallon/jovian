@@ -10,7 +10,8 @@ import re
 
 sys.path.append("/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/dnaseq2seq")
 
-import call
+from dnaseq2seq import call
+from dnaseq2seq import util
 
 
 def parse_giab_sample(name):
@@ -47,7 +48,7 @@ def gensus(args):
     giab = parse_giab_sample(bampath)
     prefix = Path(bampath).name.replace(".cram", "")
     input_bed = SPLITBEDS[giab]
-    dest = f"/uufs/chpc.utah.edu/common/home/u0379426/vast/giab_label_beds/{prefix}_labelmapsusfix_chr{group}.bed"
+    dest = f"/uufs/chpc.utah.edu/common/home/u0379426/vast/giab_label_beds/{prefix}_ontfix_chr{group}.bed"
     print(f"BAM: {bampath} giab: {giab} prefix: {prefix} input bed: {input_bed}  dest: {dest}")
     reference_path = os.getenv("REF_GENOME")
     ofh = open(dest, "w")
@@ -59,8 +60,8 @@ def gensus(args):
         region_type = toks[3]
 
         if region_type == "tn-map" or (region_type == "tn" and random.random() < 0.5): # Important update 12/2023 - add tn-map as a region to generate sus labels for, since many, many FPs come from tn-map areas
-            pos = list(call.cluster_positions(
-                call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
+            pos = list(util.cluster_positions(
+                call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path, min_indel_count=3, min_mismatch_count=3 ), maxdist=50,
             ))
             if pos:
                 ofh.write(line.strip() + "-sus\n")
