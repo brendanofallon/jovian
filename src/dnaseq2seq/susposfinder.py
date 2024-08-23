@@ -38,7 +38,7 @@ def get_sus_positions(read: pysam.AlignedSegment, ref: pysam.FastaFile, min_qual
     sus_positions = []
 
     if read.is_secondary or read.is_supplementary or read.is_unmapped:
-        return sus_positions, 0, 0
+        return sus_positions
 
     bt0 = time.perf_counter()
     blocks = read.get_blocks()
@@ -48,7 +48,7 @@ def get_sus_positions(read: pysam.AlignedSegment, ref: pysam.FastaFile, min_qual
     bt1 = time.perf_counter()
     # No sequence, so no mismatches
     if read.query_sequence is None:
-        return sus_positions, bt1 - bt0, 0
+        return sus_positions
 
     cigtups = read.cigartuples
     refdist = 0
@@ -59,7 +59,6 @@ def get_sus_positions(read: pysam.AlignedSegment, ref: pysam.FastaFile, min_qual
     tq_sum = 0
     for i, (op, length) in enumerate(cigtups):
         if op == 0 and length > 0:
-            t0 = time.perf_counter()
             refseq = fullrefseq[refdist:refdist + length]
             readseq = read.query_sequence[readist:readist + length]
             readquals = read.query_qualities[readist:readist + length]
@@ -82,9 +81,6 @@ def get_sus_positions(read: pysam.AlignedSegment, ref: pysam.FastaFile, min_qual
             refdist += length
             readist += length
 
-            t1 = time.perf_counter()
-            tq_sum += t1 - t0
-
         elif op in {1, 3, 4, 5}:  # Insertion, 'ref skip' or soft-clip
             readist += length
         elif op == 2:  # Deletion
@@ -92,9 +88,7 @@ def get_sus_positions(read: pysam.AlignedSegment, ref: pysam.FastaFile, min_qual
         else:
             logger.warning(f"Unknown CIGAR operation {op} for read ({read.query_name})")
 
-    # print(f"Block: {bt1 - bt0 :.6f} mismatch_pos: {tq_sum:.6f}")
-
-    return sus_positions, bt1 - bt0, tq_sum
+    return sus_positions
 
 
 class CountingIntervalTree:
@@ -155,5 +149,4 @@ def build_postree(bam, ref, chrom, start, end):
             if start < pos[0] <= pos[1] < end:
                 itree.add(pos[0], pos[1])
 
-    print(f"Block time sum {bsum:.6f} mm time sum {msum:.6f}")
     return itree
