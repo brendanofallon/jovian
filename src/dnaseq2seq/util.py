@@ -4,19 +4,21 @@ import datetime
 import os
 import bisect
 import time
+import io
+from pathlib import Path
+import logging
+import shutil
+from collections import defaultdict, OrderedDict
+from itertools import chain
+from typing import List, Tuple
+from functools import lru_cache
 
 import torch
 import torch.nn as nn
 import numpy as np
 import gzip
 import lz4.frame
-import io
-from pathlib import Path
-import logging
-import shutil
-from itertools import chain
-from typing import List, Tuple
-
+from intervaltree import Interval, IntervalTree
 from torch.nn.parallel import DistributedDataParallel
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,8 @@ def split_large_regions(regions: List[Tuple[str, int, int]], max_region_size: in
         while start < end:
             yield chrom, start, min(end, start + max_region_size)
             start += max_region_size
+
+
 
 
 def cluster_positions(poslist: List[int], maxdist: int = 100, pad_bases=8):
@@ -538,6 +542,7 @@ class WarmupCosineLRScheduler:
         self.last_lr = lr
         return lr
 
+
 class RegionProgressCounter:
 
     def __init__(self, bed):
@@ -576,4 +581,28 @@ class RegionProgressCounter:
             return actual_pct
         else:
             return None
+
+
+class LRUCache:
+    def __init__(self, func, capacity: int = 1000, key_function=lambda x: x):
+        self.capacity = capacity
+        self.cache = OrderedDict()
+        self.func = func
+        self.key_function = key_function
+
+    def __len__(self):
+        return len(self.cache)
+    def __getitem__(self, item):
+        custom_key = self.key_function(item)
+        if custom_key not in self.cache:
+            result = self.func(item)
+            self.cache[custom_key] = result
+
+        result = self.cache[custom_key]
+        self.cache.move_to_end(custom_key)
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+
+        return result
+
 

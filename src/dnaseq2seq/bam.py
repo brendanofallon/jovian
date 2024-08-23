@@ -224,15 +224,8 @@ class ReadWindow:
         window_size = end - start
         t = torch.zeros(window_size, max_reads, 10, device='cpu', dtype=torch.int8)
         for i, (readstart, read) in enumerate(allreads):
-            readenc = self.cache[read] # TODO encoding the whole read is slow (but we only do it once) - does it make more sense to encode small regions on the fly?
-            # re = ReadEncoder(read)
+            readenc = self.cache[read]
             t[:, i, :] = readenc.get_encoded(start, end)
-
-            # read_anchor, ref_anchor = find_start(alignedpairs, start)
-            #
-            # enc_start_offset, t_start_offset, num_bases = get_mapping_coords(start, end, read.query_length, read_anchor, ref_anchor)
-            #
-            # t[t_start_offset:(t_start_offset + num_bases), i, :] = encoded[enc_start_offset:(enc_start_offset + num_bases)]
 
         end_time = time.perf_counter()
         logger.debug(f"Encoded {len(allreads)} reads in {end_time - start_time:.2f} seconds (region {start}-{end})")
@@ -554,7 +547,7 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
         num_samples = max(1, len(allreads) // maxreads)
 
     #logger.info(f"Taking {num_samples} samples from {chrom}:{start}-{end}  ({len(allreads)} total reads")
-    readwindow = ReadWindow(bam, chrom, start, end)
+    readwindow = ReadWindow(bam, chrom, start, end, margin_size=50000)
     for i in range(num_samples):
         reads_to_sample = maxreads
         if np.random.rand() < downsample_frac:
@@ -566,15 +559,61 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
         yield encoded_with_ref, (start, end)
 
+def read_query_length(read: pysam.AlignedSegment):
+    return read.query_alignment_length
 
 if __name__=="__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    from dnaseq2seq.call import gen_suspicious_spots
-    bam = "/Users/brendan/data/WGS/hg002_chr22.cram"
-    # bam = "/Users/brendan/data/WGS/99702152385_GM24385_500ng_S92_chr21and22.cram"
+
+
+
+    from functools import partial
+    from dnaseq2seq.call import gen_suspicious_spots, old_gen_suspicious_spots
+    from susposfinder import get_sus_positions, get_sus_positions_cached
+    # bam = "/Users/brendan/data/WGS/hg002_chr22.bam"
+    bam = "/Users/brendan/data/WGS/99702152385_GM24385_500ng_S92_chr21and22.cram"
     ref = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
     chrom = "22"
     aln = pysam.AlignmentFile(bam, reference_filename=ref)
+
+    start = 27710000
+    end =   27710150
+
+    # for r in aln.fetch(chrom, start, end):
+    #     l = lc[r]
+    #     print(f"{r.query_name} : {l}")
+    #
+    # for r in aln.fetch(chrom, start, end):
+    #     l = lc[r]
+    #     print(f"{r.query_name} : {l}")
+
+    # t0 = time.perf_counter()
+    # for r in aln.fetch(chrom, start, end):
+    #     print(r.query_name, r.reference_start, r.reference_end, r.cigarstring, r.mapping_quality)
+    # t1 = time.perf_counter()
+    # print(f"Time to fetch reads: {t1-t0:.4f} seconds")
+
+    # sp = util.get_sus_positions(r, pysam.FastaFile(ref), min_qual=10)
+    # print(sp)
+
+    # t0 = time.perf_counter()
+    # logger.info("Starting old method")
+    # pl_old = old_gen_suspicious_spots(bam, chrom, start, end, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3)
+    # for p in pl_old:
+    #     print(p + 1)
+    t1 = time.perf_counter()
+    start = 27717050
+
+    for i in range(100):
+        pl = gen_suspicious_spots(bam, chrom, start, start + 150, reference_fasta=ref, min_indel_count=5, min_mismatch_count=3)
+        for p in pl:
+            print(f"{p}")
+        start += 5000
+    t2 = time.perf_counter()
+    #
+    # print(f"Old method took {t1-t0:.2f} seconds")
+    print(f"New method took {t2-t1:.2f} seconds")
+
 
     # c = [(start, end) for start, end in util.cluster_positions(
     #         gen_suspicious_spots(bam, chrom, 27717050, 27728250, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3),
@@ -587,15 +626,15 @@ if __name__=="__main__":
     # for b in gen_suspicious_spots(bam, "22", 27717050, 27717250, reference_fasta=ref):
     #     print(b)
 
-    rw = ReadWindow(aln, chrom, 27717050, 27717580, margin_size=50000)
-    t = rw.get_window(27717050, 27717150, 100)
-    p = util.to_pileup(t)
-    print(p)
-
-    print("The next window")
-    t = rw.get_window(27717100, 27717200, 100)
-    p = util.to_pileup(t)
-    print(p)
+    # rw = ReadWindow(aln, chrom, 27718050, 27718580, margin_size=50000)
+    # t = rw.get_window(27718050, 27718150, 100)
+    # p = util.to_pileup(t)
+    # print(p)
+    #
+    # print("The next window")
+    # t = rw.get_window(27718100, 27718200, 100)
+    # p = util.to_pileup(t)
+    # print(p)
 
     # ws = 27717800
     # we = 27717820

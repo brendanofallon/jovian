@@ -24,6 +24,7 @@ from dnaseq2seq import buildclf
 from dnaseq2seq import vcf
 from dnaseq2seq import util
 from dnaseq2seq import bam
+from dnaseq2seq import susposfinder
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,29 @@ def randchars(n=6):
 
 
 def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
+    """
+    Identify regions that may contain a variant. This needs to be very sensitive so we don't miss anything
+    The idea here is to build an intervaltree containing positions where there are indels or mismatches for each read,
+    then we query the intervaltree for intervals containing more than a few hits. This is way faster than the old
+    pileup method (which for some reason was super-duper slow for long reads)
+    :returns: Generator of (position, count) tuples
+    """
+    aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
+    ref = pysam.FastaFile(reference_fasta)
+    postree = susposfinder.build_postree(aln, ref, chrom, start, stop)
+
+    ivs_counts = []
+    for iv, count in postree:
+        ivs_counts.append((iv, count))
+    for iv, count in sorted(ivs_counts, key=lambda x: x[0].begin):
+        if start <= iv.begin < stop:
+            if count > min_indel_count:
+                yield iv.begin
+            elif len(postree.overlap(iv.begin, iv.end)) > 2 * min_indel_count:
+                yield iv.begin
+
+
+def old_gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel_count=2, min_mismatch_count=2):
     """
     Generator for positions of a BAM / CRAM file that may contain a variant. This should be pretty sensitive and
     trigger on anything even remotely like a variant
@@ -98,8 +122,8 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel
                     yield col.reference_pos
                     break
 
-            if col.reference_pos >= stop:
-                break
+        if col.reference_pos >= stop:
+            return
 
 
 def load_model(model_path):
