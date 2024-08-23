@@ -488,8 +488,8 @@ class VariantSortedBuffer:
 
     def put(self, v):
         self.buffer.append(v)
-        if v.pos < self.lastpos and v.chrom == self.lastchrom:
-            raise ValueError(f"Ahh, just got variant with position {v.pos} but we've already emitted a variant with position {self.lastpos}")
+        #if v.pos < self.lastpos and v.chrom == self.lastchrom:
+        #    raise ValueError(f"Ahh, just got variant with position {v.pos} but we've already emitted a variant with position {self.lastpos}")
 
         if len(self.buffer) > self.buff_size:
             self._dumphalf()
