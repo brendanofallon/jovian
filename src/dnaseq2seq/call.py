@@ -24,6 +24,7 @@ from dnaseq2seq import buildclf
 from dnaseq2seq import vcf
 from dnaseq2seq import util
 from dnaseq2seq import bam
+from dnaseq2seq import susposfinder
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_indel
     """
     aln = pysam.AlignmentFile(bamfile, reference_filename=reference_fasta)
     ref = pysam.FastaFile(reference_fasta)
-    postree = util.build_postree(aln, ref, chrom, start, stop)
+    postree = susposfinder.build_postree(aln, ref, chrom, start, stop)
 
     ivs_counts = []
     for iv, count in postree:
