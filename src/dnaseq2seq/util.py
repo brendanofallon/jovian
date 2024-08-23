@@ -8,7 +8,7 @@ import io
 from pathlib import Path
 import logging
 import shutil
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from itertools import chain
 from typing import List, Tuple
 from functools import lru_cache
@@ -583,113 +583,26 @@ class RegionProgressCounter:
             return None
 
 
-@lru_cache(maxsize=1000)
-def get_sus_positions(read, ref, min_qual=10):
-    """
-    Return a list of intervals where the read either has a mismatch with the reference or where there is a gap
-    """
-    sus_positions = []
-
-    if read.is_secondary or read.is_supplementary or read.is_unmapped:
-        return sus_positions
-
-    blocks = read.get_blocks()
-    sus_positions.extend(
-        [(b0[1], b1[0] + 1) for b0, b1 in zip(blocks[:-1], blocks[1:])]
-    )
-
-    # No sequence, so no mismatches
-    if read.query_sequence is None:
-        return sus_positions
-
-    cigtups = read.cigartuples
-    refdist = 0
-    readist = 0
-    for i, (op, length) in enumerate(cigtups):
-        if op == 0 and length > 0:
-            refseq = ref.fetch(read.reference_name, read.reference_start + refdist,
-                               read.reference_start + refdist + length)
-            readseq = read.query_sequence[readist:readist + length]
-            readquals = read.query_qualities[readist:readist + length]
-            mismatches = mismatch_pos(refseq, readseq)
-            mm_intervals = [(read.reference_start + refdist + i, read.reference_start + refdist + i + 1) for i in
-                            mismatches]
-            mm_quals = [readquals[i] for i in mismatches]
-
-            # Filter mismatches by min_qual
-            flt_mm_intervals = [mm_intervals[i] for i in range(len(mm_intervals)) if mm_quals[i] >= min_qual]
-
-            sus_positions.extend(
-                flt_mm_intervals
-            )
-            refdist += length
-            readist += length
-        elif op in {1, 3, 4, 5}:  # Insertion, 'ref skip' or soft-clip
-            readist += length
-        elif op == 2:  # Deletion
-            refdist += length
-        else:
-            logger.warning(f"Unknown CIGAR operation {op} for read ({read.query_name})")
-
-
-    if 27717002 in [x[0] for x in sus_positions]:
-        print(f"Found 27717002 in pos list for read {read.query_name} - must come from get_blocks part secondary: {read.is_secondary}, supp: {read.is_supplementary}, unmapped: {read.is_unmapped}")
-
-
-    return sus_positions
-
-
-class CountingIntervalTree:
-    """
-    A class that holds intervals and counts how many times each interval has been added
-    """
-
-    def __init__(self):
-        self.tree = IntervalTree()
-        self.counts = defaultdict(int)
-
-    def add(self, begin, end):
-        interval = Interval(begin, end)
-        self.tree.add(interval)
-        self.counts[interval] += 1  # Increment the count for this interval
-
-    def remove(self, begin, end):
-        interval = Interval(begin, end)
-        if interval in self.tree:
-            self.tree.remove(interval)
-            self.counts[interval] -= 1  # Decrement the count
-            if self.counts[interval] == 0:
-                del self.counts[interval]  # Remove from counts if zero
-
-    def get_count(self, begin, end):
-        interval = Interval(begin, end)
-        return self.counts[interval]  # Return the count for this interval
-
-    def overlap(self, begin, end):
-        interval = Interval(begin, end)
-        return self.tree.overlap(interval)
+class LRUCache:
+    def __init__(self, func, capacity: int = 1000, key_function=lambda x: x):
+        self.capacity = capacity
+        self.cache = OrderedDict()
+        self.func = func
+        self.key_function = key_function
 
     def __len__(self):
-        return sum(v for v in self.counts.values())
+        return len(self.cache)
+    def __getitem__(self, item):
+        custom_key = self.key_function(item)
+        if custom_key not in self.cache:
+            result = self.func(item)
+            self.cache[custom_key] = result
 
-    def __iter__(self):
-        for interval in self.tree:
-            yield interval, self.counts[interval]
+        result = self.cache[custom_key]
+        self.cache.move_to_end(custom_key)
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+
+        return result
 
 
-def mismatch_pos(seq0, seq1):
-    """
-    Return all positions that are not equal in seq0, seq1
-    """
-    return [i for i, (a, b) in enumerate(zip(seq0, seq1)) if a != b]
-
-
-def build_postree(bam, ref, chrom, start, end):
-    reads = bam.fetch(chrom, start, end)
-    itree = CountingIntervalTree()
-    for i, r in enumerate(reads):
-        for pos in get_sus_positions(r, ref):
-            if start < pos[0] <= pos[1] < end:
-                itree.add(pos[0], pos[1])
-
-    return itree

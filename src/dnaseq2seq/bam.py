@@ -559,31 +559,59 @@ def encode_and_downsample(chrom, start, end, bam, refgenome, maxreads, num_sampl
 
         yield encoded_with_ref, (start, end)
 
+def read_query_length(read: pysam.AlignedSegment):
+    return read.query_alignment_length
 
 if __name__=="__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+
+
+    from functools import partial
     from dnaseq2seq.call import gen_suspicious_spots, old_gen_suspicious_spots
-    bam = "/Users/brendan/data/WGS/hg002_chr22.cram"
-    # bam = "/Users/brendan/data/WGS/99702152385_GM24385_500ng_S92_chr21and22.cram"
+    from susposfinder import get_sus_positions, get_sus_positions_cached
+    # bam = "/Users/brendan/data/WGS/hg002_chr22.bam"
+    bam = "/Users/brendan/data/WGS/99702152385_GM24385_500ng_S92_chr21and22.cram"
     ref = "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz"
     chrom = "22"
     aln = pysam.AlignmentFile(bam, reference_filename=ref)
 
     start = 27710000
-    end =   27711000
-    t0 = time.perf_counter()
-    logger.info("Starting old method")
-    pl_old = old_gen_suspicious_spots(bam, chrom, start, end, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3)
-    for p in pl_old:
-        print(p + 1)
-    t1 = time.perf_counter()
-    logger.info("Starting new method")
-    pl = gen_suspicious_spots(bam, chrom, start, end, reference_fasta=ref, min_indel_count=5, min_mismatch_count=3)
-    for p, c in pl:
-        print(f"{p}\t{c}")
-    t2 = time.perf_counter()
+    end =   27710150
 
-    print(f"Old method took {t1-t0:.2f} seconds")
+    # for r in aln.fetch(chrom, start, end):
+    #     l = lc[r]
+    #     print(f"{r.query_name} : {l}")
+    #
+    # for r in aln.fetch(chrom, start, end):
+    #     l = lc[r]
+    #     print(f"{r.query_name} : {l}")
+
+    # t0 = time.perf_counter()
+    # for r in aln.fetch(chrom, start, end):
+    #     print(r.query_name, r.reference_start, r.reference_end, r.cigarstring, r.mapping_quality)
+    # t1 = time.perf_counter()
+    # print(f"Time to fetch reads: {t1-t0:.4f} seconds")
+
+    # sp = util.get_sus_positions(r, pysam.FastaFile(ref), min_qual=10)
+    # print(sp)
+
+    # t0 = time.perf_counter()
+    # logger.info("Starting old method")
+    # pl_old = old_gen_suspicious_spots(bam, chrom, start, end, reference_fasta=ref, min_indel_count=3, min_mismatch_count=3)
+    # for p in pl_old:
+    #     print(p + 1)
+    t1 = time.perf_counter()
+    start = 27717050
+
+    for i in range(100):
+        pl = gen_suspicious_spots(bam, chrom, start, start + 150, reference_fasta=ref, min_indel_count=5, min_mismatch_count=3)
+        for p in pl:
+            print(f"{p}")
+        start += 5000
+    t2 = time.perf_counter()
+    #
+    # print(f"Old method took {t1-t0:.2f} seconds")
     print(f"New method took {t2-t1:.2f} seconds")
 
 

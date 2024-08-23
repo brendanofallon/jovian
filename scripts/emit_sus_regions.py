@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/dnaseq2seq")
 
-import call
+from dnaseq2seq import call, util
 import pysam
 import random
 
@@ -18,7 +18,7 @@ def main(reference_path, bampath, input_bed):
         region_type = toks[3]
 
         if region_type == "tn" and random.random() < 0.5:
-            pos = list(call.cluster_positions(
+            pos = list(util.cluster_positions(
                 call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path), maxdist=100,
             ))
             if pos:
