@@ -18,8 +18,8 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 
-import util
-import pregen
+from dnaseq2seq import util
+from dnaseq2seq import pregen
 
 class ReadLoader:
     """
