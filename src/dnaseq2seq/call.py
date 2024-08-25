@@ -181,7 +181,8 @@ def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str
     max_batch_size = kwargs.get('max_batch_size', 64)
     logger.info(f"Using {threads} threads for encoding")
     logger.info(f"Found torch device: {DEVICE}")
-
+    logger.info(f"Writing variants to {Path(vcf_out).absolute()}")
+    
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
             logger.info(f"Using CUDA device {idev} {torch.cuda.get_device_name({idev})}")
@@ -256,7 +257,7 @@ def call_vars_in_parallel(
     """
 
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue =  mp.Queue(maxsize=2048)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
     bed_chrom_order = util.unique_chroms(bed)
@@ -375,9 +376,9 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
     """
     min_reads = 5 # Abort if there are fewer than this many reads
-    batch_size = 32 # Tensors hold this many regions
+    batch_size = 64 # Tensors hold this many regions
     window_step = 25
-    torch.set_num_threads(2)  # Must be here for it to work for this process
+    torch.set_num_threads(4)  # Must be here for it to work for this process
 
     encoded_region_count = 0
     while True:
@@ -418,7 +419,7 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
     """
     # Accumulate regions until we have at least this many
     # Bigger number here use more memory but allow for more efficient processing downstream
-    min_samples_callbatch = 256
+    min_samples_callbatch = 2 * max_batch_size
 
     batch_encoded = []
     batch_start_pos = []
@@ -503,7 +504,6 @@ def accumulate_regions_and_call(modelpath: str,
 
     vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=header_extras)
     vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
-    logger.info(f"Writing variants to {Path(vcf_out_path).absolute()}")
 
     vcf_out = open(vcf_out_path, "w")
     vcf_out.write(str(vcf_header))
