@@ -311,6 +311,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
     else:
         progbar = None
     logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {inputbed}")
+    
     for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
@@ -381,7 +382,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     min_reads = 5 # Abort if there are fewer than this many reads
     batch_size = 64 # Tensors hold this many regions at max, but since we're encoding a single region most tensors will have 4-8 individual windows
     window_step = 25
-    torch.set_num_threads(4)  # Must be here for it to work for this process
+    torch.set_num_threads(2)  # Must be here for it to work for this process
 
     encoded_region_count = 0
     while True:
@@ -391,16 +392,13 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             output_queue.put(CallingStopSignal(regions_submitted=encoded_region_count, sus_region_count=region.tot_sus_regions, sus_region_bp=region.tot_sus_bp))
             break
         else:
-            logger.debug(f"Encoding region {region}")
             try:
                 data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
                 if data is not None:
                     data['encoded_pileup'].share_memory_()
                     encoded_region_count += 1
-                    logger.debug(f"Putting new data item into queue, region is {data['region']}")
                     output_queue.put(data)
-                else:
-                    logger.warning(f"Whoa, got back None from encode_region")
+
             except Exception as ex:
                 output_queue.put(CallingErrorSignal(errormsg=str(ex)))
                 raise ex
@@ -414,22 +412,13 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     logger.debug(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
-@torch.no_grad()
-def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_template, max_batch_size):
+def merge_datas(datas):
     """
-    Concat a list of 'datas' objects, which contain encoded_pileups, batch offsets, and then call variants over all of them
-    
-    :return : List of VCFRecords for variants found
+    Concat a list of datas dictionaries into a single tensor and lists of regions, start positions
     """
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
-    batch_count = 0
-    call_start = datetime.datetime.now()
-    window_count = 0
-    var_records = []  # Stores all variant records
-
-    reference = pysam.FastaFile(refpath)
 
     for data in datas:
         # Load the data, parsing location + encoded data from file
@@ -437,12 +426,27 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
         batch_encoded.append(data['encoded_pileup'])
         batch_start_pos.extend(data['start_positions'])
         batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
-        window_count += len(batch_start_pos)
     
     if len(batch_encoded) > 1:
         allencoded = torch.concat(batch_encoded, dim=0)
     else:
         allencoded = batch_encoded[0]
+
+    return allencoded, batch_start_pos, batch_regions
+
+
+@torch.no_grad()
+def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_template, max_batch_size):
+    """
+    Concat a list of 'datas' objects, which contain encoded_pileups, batch offsets, and then call variants over all of them
+    
+    :return : List of VCFRecords for variants found
+    """
+    call_start = datetime.datetime.now()
+    var_records = []  # Stores all variant records
+    reference = pysam.FastaFile(refpath)
+    
+    allencoded, batch_start_pos, batch_regions = merge_datas(datas)
 
     hap0, hap1= call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
 
@@ -450,7 +454,7 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
 
     call_elapsed = datetime.datetime.now() - call_start
     logger.debug(
-        f"Called variants in {window_count} windows over {batch_count} batches from {len(datas)} paths in {call_elapsed.total_seconds() :.2f} seconds"
+        f"Called variants over {len(batch_start_pos)} windows from {len(datas)} regions in {call_elapsed.total_seconds() :.2f} seconds"
     )
     return var_records
 
@@ -571,7 +575,7 @@ def accumulate_regions_and_call(modelpath: str,
                 progbar.update(round(progress, 2) - progbar.n)
                 progbar.refresh()
             else:
-                logger.info(f"Variant calling progress {100* progress:.2f}%")
+                logger.info(f"Variant calling progress {progress:.2f}%")
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
@@ -849,7 +853,7 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     
     while start < encoded_reads.shape[0]:
         end = min(encoded_reads.shape[0]+1, start + max_batch_size)
-        logger.info(f"Calling batch of size {end - start}")
+        logger.debug(f"Calling batch of size {end - start}")
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
             preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE).float(), model,
                                             n_output_toks=n_output_toks, device=DEVICE)
