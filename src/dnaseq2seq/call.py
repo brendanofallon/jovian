@@ -35,6 +35,9 @@ warnings.filterwarnings(action='ignore')
 
 REGION_ERROR_TOKEN = "error"
 
+# Profiling
+TOTAL_TIME_CLF = 0
+
 class RegionStopSignal:
 
     def __init__(self, total_sus_regions, total_sus_bp):
@@ -174,14 +177,15 @@ def call(model_path: str, bam: str, bed: str, reference_fasta: str, vcf_out: str
     np.random.seed(seed)
     random.seed(seed)
 
-    torch.set_num_threads(1) # Per-process ?
+    torch.set_num_threads(4) # Per-process ?
     mp.set_start_method('spawn')
     start_time = time.perf_counter()
     threads = kwargs.get('threads', 1)
     max_batch_size = kwargs.get('max_batch_size', 64)
     logger.info(f"Using {threads} threads for encoding")
     logger.info(f"Found torch device: {DEVICE}")
-
+    logger.info(f"Writing variants to {Path(vcf_out).absolute()}")
+    
     if 'cuda' in str(DEVICE):
         for idev in range(torch.cuda.device_count()):
             logger.info(f"Using CUDA device {idev} {torch.cuda.get_device_name({idev})}")
@@ -256,7 +260,7 @@ def call_vars_in_parallel(
     """
 
     regions_queue = mp.Queue(maxsize=1024)  # Hold BED file regions, generated in main process and sent to 'generate_tensors' workers
-    tensors_queue =  mp.Queue(maxsize=1024)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
+    tensors_queue =  mp.Queue(maxsize=5000)  # Holds tensors generated in 'generate tensors' workers, consumed by accumulate_regions_and_call
     region_keepalive_queue = mp.Queue()  # Signals to region_workers that they are permitted to die, since all tensors have been processed
 
     bed_chrom_order = util.unique_chroms(bed)
@@ -307,6 +311,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
     else:
         progbar = None
     logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {inputbed}")
+    
     for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
         region_count += 1
         tot_size_bp += window_end - window_start
@@ -319,7 +324,7 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
         )
         sus_regions = util.merge_overlapping_regions(sus_regions)
         if progbar is not None:
-            progbar.update(100 * (tot_size_bp) / tot_bases - progbar.n)
+            progbar.update(round(100 * (tot_size_bp) / tot_bases, 2) - progbar.n)
             progbar.refresh()
         else:
             logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
@@ -375,7 +380,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
     """
     min_reads = 5 # Abort if there are fewer than this many reads
-    batch_size = 32 # Tensors hold this many regions
+    batch_size = 64 # Tensors hold this many regions at max, but since we're encoding a single region most tensors will have 4-8 individual windows
     window_step = 25
     torch.set_num_threads(2)  # Must be here for it to work for this process
 
@@ -387,16 +392,13 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             output_queue.put(CallingStopSignal(regions_submitted=encoded_region_count, sus_region_count=region.tot_sus_regions, sus_region_bp=region.tot_sus_bp))
             break
         else:
-            logger.debug(f"Encoding region {region}")
             try:
                 data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
                 if data is not None:
                     data['encoded_pileup'].share_memory_()
                     encoded_region_count += 1
-                    logger.debug(f"Putting new data item into queue, region is {data['region']}")
                     output_queue.put(data)
-                else:
-                    logger.warning(f"Whoa, got back None from encode_region")
+
             except Exception as ex:
                 output_queue.put(CallingErrorSignal(errormsg=str(ex)))
                 raise ex
@@ -410,25 +412,13 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
     logger.debug(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
-@torch.no_grad()
-def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_template, max_batch_size):
+def merge_datas(datas):
     """
-    Call variants from the encoded regions and return them as a list of variant records suitable for writing to a VCF file
-    No more than max_batch_size are processed in a single batch
+    Concat a list of datas dictionaries into a single tensor and lists of regions, start positions
     """
-    # Accumulate regions until we have at least this many
-    # Bigger number here use more memory but allow for more efficient processing downstream
-    min_samples_callbatch = 256
-
     batch_encoded = []
     batch_start_pos = []
     batch_regions = []
-    batch_count = 0
-    call_start = datetime.datetime.now()
-    window_count = 0
-    var_records = []  # Stores all variant records
-
-    reference = pysam.FastaFile(refpath)
 
     for data in datas:
         # Load the data, parsing location + encoded data from file
@@ -436,40 +426,35 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
         batch_encoded.append(data['encoded_pileup'])
         batch_start_pos.extend(data['start_positions'])
         batch_regions.extend((chrom, start, end) for _ in range(len(data['start_positions'])))
-        window_count += len(batch_start_pos)
-        if len(batch_start_pos) > min_samples_callbatch:
-            batch_count += 1
-            if len(batch_encoded) > 1:
-                allencoded = torch.concat(batch_encoded, dim=0)
-            else:
-                allencoded = batch_encoded[0]
-            allencoded = allencoded.float()
-            hap0, hap1= call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
-                                        max_batch_size)
+    
+    if len(batch_encoded) > 1:
+        allencoded = torch.concat(batch_encoded, dim=0)
+    else:
+        allencoded = batch_encoded[0]
 
-            var_records.extend(
-                vars_hap_to_records(hap0, hap1, bampath, refpath, classifier_model, vcf_template)
-            )
-            batch_encoded = []
-            batch_start_pos = []
-            batch_regions = []
+    return allencoded, batch_start_pos, batch_regions
 
-    # Write last few
-    if len(batch_start_pos):
-        batch_count += 1
-        if len(batch_encoded) > 1:
-            allencoded = torch.concat(batch_encoded, dim=0)
-        else:
-            allencoded = batch_encoded[0]
-        allencoded = allencoded.float()
-        hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
-        var_records.extend(
-            vars_hap_to_records(hap0, hap1, bampath, refpath, classifier_model, vcf_template)
-        )
+
+@torch.no_grad()
+def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_template, max_batch_size):
+    """
+    Concat a list of 'datas' objects, which contain encoded_pileups, batch offsets, and then call variants over all of them
+    
+    :return : List of VCFRecords for variants found
+    """
+    call_start = datetime.datetime.now()
+    var_records = []  # Stores all variant records
+    reference = pysam.FastaFile(refpath)
+    
+    allencoded, batch_start_pos, batch_regions = merge_datas(datas)
+
+    hap0, hap1= call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
+
+    var_records.extend(vars_hap_to_records(hap0, hap1, bampath, refpath, classifier_model, vcf_template))
 
     call_elapsed = datetime.datetime.now() - call_start
     logger.debug(
-        f"Called variants in {window_count} windows over {batch_count} batches from {len(datas)} paths in {call_elapsed.total_seconds() :.2f} seconds"
+        f"Called variants over {len(batch_start_pos)} windows from {len(datas)} regions in {call_elapsed.total_seconds() :.2f} seconds"
     )
     return var_records
 
@@ -493,7 +478,7 @@ def accumulate_regions_and_call(modelpath: str,
     Variants are written to the output VCF file here
     """
 
-    torch.set_num_threads(4)
+    torch.set_num_threads(8)
     model = load_model(modelpath)
     model.eval()
     if classifier_path:
@@ -503,7 +488,6 @@ def accumulate_regions_and_call(modelpath: str,
 
     vcf_header = vcf.create_vcf_header(sample_name="sample", lowcov=20, cmdline=header_extras)
     vcf_template = pysam.VariantFile("/dev/null", mode='w', header=vcf_header)
-    logger.info(f"Writing variants to {Path(vcf_out_path).absolute()}")
 
     vcf_out = open(vcf_out_path, "w")
     vcf_out.write(str(vcf_header))
@@ -515,7 +499,6 @@ def accumulate_regions_and_call(modelpath: str,
     # Not sure what the optimum is here - we accumulate tensors until we have at least this many, then process them in batches
     # If this number is too large, we will wait for too long before submitting the next batch to the GPU
     # If its to small, then we end up sending lots of tiny little batches to the GPU, which also isn't efficient
-    max_datas = n_region_workers * 4 # Bigger numbers here use more memory but help ensure we produce sorted outputs
     n_finished_workers = 0
     max_consecutive_timeouts = 10
     timeouts = 0
@@ -528,9 +511,15 @@ def accumulate_regions_and_call(modelpath: str,
     else:
         progbar = None
 
+    wait_time_total = 0
+    process_time_total = 0
+    total_windows_found = 0
     while True:
         try:
+            t0 = time.perf_counter()
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
+            t1 = time.perf_counter()
+            wait_time_total += t1 - t0
             timeouts = 0
         except queue.Empty:
             timeouts += 1
@@ -548,15 +537,22 @@ def accumulate_regions_and_call(modelpath: str,
             logger.error(f"Calling worker discovered an error token: {data.err}, we are shutting down")
             break
 
+        if timeouts == max_consecutive_timeouts:
+            logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
+            break
+
         if not isinstance(data, CallingStopSignal) and data is not None:
             regions_found += 1
             logger.debug("Found a non-None data object, appending it")
             datas.append(data)
+            total_windows_found += data['encoded_pileup'].shape[0]
 
-        if data is None:
-            logger.info(f"Hmm, got None from the calling input queue, this doesn't seem right")
+        if type(data) == CallingStopSignal:
+            n_finished_workers += 1
+            tot_regions_submitted += data.regions_submitted
+            logger.debug(f"Found a stop token, {n_finished_workers} of {n_region_workers} are done, tot regions submitted: {tot_regions_submitted}, tot processed: {regions_processed}")
 
-        if (isinstance(data, CallingStopSignal) and len(datas)) or len(datas) > max_datas:
+        if total_windows_found >= max_batch_size:
             logger.debug(f"Calling variants from {len(datas)} objects, we've found {regions_found} regions and processed {regions_processed} of them so far")
             datas = sorted(datas, key=priority_func) # Sorting data chunks here helps ensure sorted output
 
@@ -565,31 +561,33 @@ def accumulate_regions_and_call(modelpath: str,
             logger.debug(
                 f"Calling variants up to {datas[len(datas) // 2]['region'][0]}:{datas[-1]['region'][1]}-{datas[-1]['region'][2]}, total bp processed: {round(bp_processed / 1e6, 3)}MB"
             )
-            records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
-
+            t0 = time.perf_counter()
+            to_submit, datas = datas[0:-3], datas[-3:]
+            submitted_windows = sum(d['encoded_pileup'].shape[0] for d in to_submit)
+            remaining_windows = sum(d['encoded_pileup'].shape[0] for d in datas)
+    
+            total_windows_found = remaining_windows
+            records = call_multi_paths(to_submit, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
+            t1 = time.perf_counter()
+            process_time_total += t1 - t0
             progress = 100 * progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
             if progbar is not None:
                 progbar.update(round(progress, 2) - progbar.n)
                 progbar.refresh()
             else:
-                logger.info(f"Variant calling progress {100* progress:.2f}%")
+                logger.info(f"Variant calling progress {progress:.2f}%")
 
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
             vbuff.put_all(records)
-            datas = []
-
-        if timeouts == max_consecutive_timeouts:
-            logger.error(f"Found {max_consecutive_timeouts} timeouts, aborting model processing queue")
-            break
-
-        if type(data) == CallingStopSignal:
-            n_finished_workers += 1
-            tot_regions_submitted += data.regions_submitted
-            logger.debug(f"Found a stop token, {n_finished_workers} of {n_region_workers} are done, tot regions submitted: {tot_regions_submitted}, tot processed: {regions_processed}")
 
         if n_finished_workers == n_region_workers:
+            # We are finishing, so process anything left in the datas buffer and put the records in the variant buffer
+            if datas:
+                records = call_multi_paths(datas, model, refpath, bampath, classifier, vcf_template, max_batch_size=max_batch_size)
+                vbuff.put_all(records)
+
             logger.debug(f"All region workers are done, datas length is {len(datas)}, exiting..")
             break
 
@@ -601,7 +599,9 @@ def accumulate_regions_and_call(modelpath: str,
     logger.debug(f"Writing final {len(vbuff)} variants...")
     if progbar:
         progbar.close()
-
+    
+    logger.info(f"Calling queue spent {wait_time_total :.3f} seconds waiting for info and {process_time_total :.3f} seconds processing data")
+    logger.info(f"Spent {TOTAL_TIME_CLF :.3f} seconds in classifier")
     vbuff.flush()
     vcf_out.close()
 
@@ -787,7 +787,7 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
     # we hard-filter out very poor quality variants that overlap other, higher-quality variants
     # This value defines the min qual to be included when merging overlapping variants
     min_merge_qual = 0.01
-
+    global TOTAL_TIME_CLF
     reference = pysam.FastaFile(refpath)
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
@@ -819,6 +819,7 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
             rec.qual = fut.result()
 
         clfend = time.time()
+        TOTAL_TIME_CLF += clfend - clfstart
         logger.debug(f"Predicted variant quality for {len(vcf_records)} records in {(clfend - clfstart):6f} seconds ({(clfend - clfstart)/len(vcf_records) :6f} per record)")
 
     merged = []
@@ -851,9 +852,10 @@ def _call_safe(encoded_reads, model, n_output_toks, max_batch_size, enable_amp=T
     start = 0
     
     while start < encoded_reads.shape[0]:
-        end = start + max_batch_size
+        end = min(encoded_reads.shape[0]+1, start + max_batch_size)
+        logger.debug(f"Calling batch of size {end - start}")
         with torch.amp.autocast(device_type='cuda', enabled=enable_amp):
-            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE), model,
+            preds, prbs = util.predict_sequence(encoded_reads[start:end, :, :, :].to(DEVICE).float(), model,
                                             n_output_toks=n_output_toks, device=DEVICE)
         if seq_preds is None:
             seq_preds = preds
