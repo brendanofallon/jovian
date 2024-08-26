@@ -338,7 +338,7 @@ def save_model(mdl, path):
         
 
 def load_model(path):
-    logger.info(f"Loading model from {path}")
+    logger.debug(f"Loading model from {path}")
     if str(path).endswith(".json") or str(path).endswith(".xgb"):
         bst = xgboost.Booster()
         bst.load_model(path)

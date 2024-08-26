@@ -17,9 +17,10 @@ import torch.cuda.amp as amp
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-import dnaseq2seq.vcf as vcf
-import dnaseq2seq.loader as loader
-import dnaseq2seq.util as util
+
+from dnaseq2seq import vcf
+from dnaseq2seq import loader
+from dnaseq2seq import util
 from dnaseq2seq.model import VarTransformer
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
@@ -30,8 +31,6 @@ handler.setFormatter(formatter)
 
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)
-
-
 
 
 USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None

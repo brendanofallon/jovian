@@ -17,11 +17,11 @@ import numpy as np
 import pysam
 import torch
 
-import call
-import util
-from bam import target_string_to_tensor, encode_and_downsample, ensure_dim
-import phaser
-import loader
+from dnaseq2seq import call
+from dnaseq2seq import util
+from dnaseq2seq.bam import target_string_to_tensor, encode_and_downsample, ensure_dim
+from dnaseq2seq import phaser
+from dnaseq2seq import loader
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     :return: Generator
     """
     refgenome = pysam.FastaFile(refpath)
-    bam = pysam.AlignmentFile(bampath)
+    bam = pysam.AlignmentFile(bampath, reference_filename=refpath)
     vcf = pysam.VariantFile(vcfpath)
 
     upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)
