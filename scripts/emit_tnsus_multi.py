@@ -59,7 +59,7 @@ def gensus(args):
         window_end = int(toks[2])
         region_type = toks[3]
 
-        if region_type == "tn-map" or (region_type == "tn" and random.random() < 0.5): # Important update 12/2023 - add tn-map as a region to generate sus labels for, since many, many FPs come from tn-map areas
+        if region_type == "tn-map" or (region_type == "tn" and random.random() < 0.2): # Important update 12/2023 - add tn-map as a region to generate sus labels for, since many, many FPs come from tn-map areas
             pos = list(util.cluster_positions(
                 call.gen_suspicious_spots(bampath, chrom, window_start, window_end, reference_path, min_indel_count=3, min_mismatch_count=3 ), maxdist=50,
             ))

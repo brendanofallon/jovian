@@ -23,7 +23,7 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/src/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/decoder_fpfn_chr1_conf.yaml
 
 CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/pregen_confs/test_ont.yaml
-DEST=/scratch/general/vast/u0379426/pregen/test_ont
+DEST=/scratch/general/vast/u0379426/pregen/ont_HG002
 
 
 BATCH_SIZE=512
@@ -33,5 +33,5 @@ JITTER=0
 mkdir -p $DEST
 cp $CONF $DEST/
 
-$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 48 --jitter $JITTER --batch-size $BATCH_SIZE --read-depth $READ_DEPTH > $DEST/stdout.log 
+$PYTHON $ds2s pregen -c $CONF -d $DEST --threads 8 --jitter $JITTER --batch-size $BATCH_SIZE --read-depth $READ_DEPTH > $DEST/stdout.log 
 

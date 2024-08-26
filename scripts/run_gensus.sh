@@ -14,5 +14,6 @@
 # to the right spot - seems to work
 PYTHON=$HOME/miniconda3/envs/py3/bin/python
 
+export PYTHONUNBUFFERED=1
 
 $PYTHON /uufs/chpc.utah.edu/common/home/u0379426/src/jovian/scripts/emit_tnsus_multi.py $@
