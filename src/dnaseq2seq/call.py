@@ -56,6 +56,14 @@ class CallingErrorSignal:
     def __init__(self, errormsg):
         self.err = errormsg
 
+class IndexedRegion:
+
+    def __init__(self, chrom, start, end, index):
+        self.chrom = chrom
+        self.start = start
+        self.end = end
+        self.index = index
+
 
 def randchars(n=6):
     """ Generate a random string of letters and numbers """
@@ -133,6 +141,7 @@ def load_model(model_path):
     
     model = torch.compile(model, fullgraph=True)
     return model
+
 
 def cluster_positions_for_window(window, bamfile, reference_fasta, maxdist=100):
     """
@@ -328,10 +337,10 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
             progbar.refresh()
         else:
             logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
-        for r in sus_regions:
+        for i, r in enumerate(sus_regions):
             sus_region_count += 1
             sus_region_bp += r[-1] - r[-2]
-            regionq.put(r)
+            regionq.put(IndexedRegion(chrom, r[-2], r[-1], idx))
 
     logger.debug("Done finding regions")
     for i in range(n_signals):
@@ -340,37 +349,35 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
         progbar.close()
 
 
-def encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size, window_step):
+def encode_region(bampath, refpath, idxregion, max_read_depth, window_size, min_reads, batch_size, window_step):
     """
     Encode the reads in the given region and save the data along with the region and start offsets to a file
     and return the absolute path of the file
-
-    Somewhat confusingly, the 'region' argument must be a tuple of  (chrom, index, start, end)
     """
-    chrom, idx, start, end = region
-    logger.debug(f"Entering func for region {chrom}:{start}-{end}")
+
+    logger.debug(f"Encoding region {idxregion.chrom}:{idxregion.start}-{idxregion.end}")
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
     reference = pysam.FastaFile(refpath)
     all_encoded = []
     all_starts = []
-    logger.debug(f"Encoding region {chrom}:{start}-{end}")
-    for encoded_region, start_positions in _encode_region(aln, reference, chrom, start, end, max_read_depth,
+    for encoded_region, start_positions in _encode_region(aln, reference, idxregion.chrom, idxregion.start, idxregion.end, max_read_depth,
                                                      window_size=window_size, min_reads=min_reads, batch_size=batch_size, window_step=window_step):
         all_encoded.append(encoded_region)
         all_starts.extend(start_positions)
-    logger.debug(f"Done encoding region {chrom}:{start}-{end}, created {len(all_starts)} windows")
+    logger.debug(f"Done encoding region {idxregion.chrom}:{idxregion.start}-{idxregion.end}, created {len(all_starts)} windows")
     if len(all_encoded) > 1:
         encoded = torch.concat(all_encoded, dim=0)
     elif len(all_encoded) == 1:
         encoded = all_encoded[0]
     else:
-        logger.error(f"Uh oh, did not find any encoded paths!, region is {chrom}:{start}-{end}")
+        logger.error(f"Uh oh, did not find any encoded paths!, region is {idxregion.chrom}:{idxregion.start}-{idxregion.end}")
         return None
 
     data = {
         'encoded_pileup': encoded,
-        'region': (chrom, start, end),
+        'region': (idxregion.chrom, idxregion.start, idxregion.end),
         'start_positions': all_starts,
+        'index': idxregion.index,
     }
     return data
 
@@ -393,6 +400,7 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
             break
         else:
             try:
+                reg = (region.chrom, region.start, region.end)
                 data = encode_region(bampath, refpath, region, max_read_depth, window_size, min_reads, batch_size=batch_size, window_step=window_step)
                 if data is not None:
                     data['encoded_pileup'].share_memory_()
@@ -571,6 +579,7 @@ def accumulate_regions_and_call(modelpath: str,
             t1 = time.perf_counter()
             process_time_total += t1 - t0
             progress = 100 * progress_tracker.prog(datas[-1]['region'][0], datas[-1]['region'][2])
+
             if progbar is not None:
                 progbar.update(round(progress, 2) - progbar.n)
                 progbar.refresh()
