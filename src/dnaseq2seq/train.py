@@ -328,6 +328,7 @@ def load_model(modelconf, ckpt):
                            embed_dim_factor=modelconf['embed_dim_factor'],
                            encoder_attention_heads=modelconf['encoder_attention_heads'],
                            decoder_attention_heads=modelconf['decoder_attention_heads'],
+                           decoder_model_dim=modelconf['decoder_model_dim'],
                            d_ff=modelconf['dim_feedforward'],
                            device=DEVICE)
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
