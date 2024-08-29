@@ -113,11 +113,11 @@ class VarTransformer(nn.Module):
                  embed_dim_factor=40,
                  n_encoder_layers=3,
                  n_decoder_layers=3,
+                 decoder_model_dim=260,
                  p_dropout=0.1,
                  device='cpu'):
         super().__init__()
 
-        # For quantization aware training - see https://pytorch.org/tutorials/recipes/quantization.html
         self.device = device
         self.read_depth = read_depth
         self.kmer_dim = kmer_dim
@@ -126,6 +126,9 @@ class VarTransformer(nn.Module):
 
         self.fc1 = nn.Linear(feature_count, self.fc1_hidden)
         self.fc2 = nn.Linear(self.read_depth * self.fc1_hidden, self.embed_dim)
+
+        self.final0 = nn.Linear(decoder_model_dim, self.kmer_dim)
+        self.final1 = nn.Linear(decoder_model_dim, self.kmer_dim)
 
         self.converter = nn.Linear(self.embed_dim, self.kmer_dim)
         self.pos_encoder = PositionalEncoding2D(self.fc1_hidden, self.device)
@@ -141,7 +144,7 @@ class VarTransformer(nn.Module):
         self.encoder = nn.TransformerEncoder(encoder_layers, num_layers=n_encoder_layers)
 
         decoder_layers = nn.TransformerDecoderLayer(
-            d_model=self.kmer_dim,
+            d_model=decoder_model_dim,
             nhead=decoder_attention_heads,
             dim_feedforward=d_ff,
             dropout=p_dropout,
@@ -172,8 +175,8 @@ class VarTransformer(nn.Module):
             #logger.info(f"Forcing tgt mask shapre to be {tgt_mask.shape}, input enc shape is: {mem.shape}")
         h0 = self.decoder0(tgt0, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
         h1 = self.decoder1(tgt1, mem_proj, tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
-        h0 = self.softmax(h0)
-        h1 = self.softmax(h1)
+        h0 = self.softmax(self.final0(h0))
+        h1 = self.softmax(self.final1(h1))
         return torch.stack((h0, h1), dim=1)
 
     def forward(self, src, tgt, tgt_mask, tgt_key_padding_mask=None):

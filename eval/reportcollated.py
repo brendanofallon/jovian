@@ -5,6 +5,14 @@ from rich.table import Table
 from rich.text import Text
 from rich.console import Console
 
+__doc__ = """
+This script takes a 'collated' report, which is a CSV file created from the output of one or more hap.py runs,
+and emits some summary stats in a nicely formatted table to stdout. 
+In general, the collated reports are created by eval/collate.py, which runs after multiple variant calling / hap.py
+runs completely successfully.  
+"""
+
+
 def get_val(t, metric):
     if len(t) == 0:
         return "?"
@@ -64,7 +72,7 @@ def main(collated_csv):
     tags = df['caller'].unique()
     assert len(tags) == 2
 
-    print(f"Comparinsg {tags[0]} to {tags[1]} across {len(samples)}")
+    print(f"Comparing {tags[0]} to {tags[1]} across {len(samples)}")
     console = Console()
     t = generate_table(df, samples, tags[0], tags[1], "INDEL")
     console.print(t)
