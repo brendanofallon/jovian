@@ -819,13 +819,15 @@ def vars_hap_to_records(vars_hap0, vars_hap1, bampath, refpath, classifier_model
         clfunc = partial(buildclf.predict_one_record, loaded_model=classifier_model, bampath=bampath, refpath=refpath)
         futures = []
 
-        with ThreadPoolExecutor(max_workers=16) as executor:
-            for rec in vcf_records:
-                fut = executor.submit(clfunc, rec)
-                futures.append(fut)
-
-        for rec, fut in zip(vcf_records, futures):
-            rec.qual = fut.result()
+        # with ThreadPoolExecutor(max_workers=16) as executor:
+        #     for rec in vcf_records:
+        #         fut = executor.submit(clfunc, rec)
+        #         futures.append(fut)
+        # for rec, fut in zip(vcf_records, futures):
+        #     rec.qual = fut.result()
+        clf_preds = buildclf.predict_records(vcf_records, classifier_model, bampath, refpath)
+        for rec, pred in zip(vcf_records, clf_preds):
+            rec.qual = pred
 
         clfend = time.time()
         TOTAL_TIME_CLF += clfend - clfstart
