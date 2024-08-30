@@ -11,6 +11,7 @@ import multiprocessing as mp
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
+from concurrent.futures import ProcessPoolExecutor
 import xgboost
 from xgboost import XGBClassifier
 from functools import lru_cache
@@ -182,7 +183,8 @@ def read_support(read, offset, ref, alt):
 
 
 
-def bamfeats(var, aln):
+def bamfeats(chrom, start, ref, alt, bampath, refpath=None):
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
     tot_reads = 0
     pos_ref = 0
     pos_alt = 0
@@ -191,12 +193,12 @@ def bamfeats(var, aln):
     min_mq = 10
     highmq_ref = 0
     highmq_alt = 0
-    pos_offset, trimref, trimalt = full_prefix_trim(var.ref, var.alts[0])
+    pos_offset, trimref, trimalt = full_prefix_trim(ref, alt)
     if len(trimref) == 0 and len(trimalt) == 0:
         return 0, 0, 0, 0, 0, 0, 0
 
-    varstart = var.start + pos_offset
-    for read in aln.fetch(var.chrom, var.start-1, var.start+1):
+    varstart = start + pos_offset
+    for read in aln.fetch(chrom, start-1, start+1):
         try:
             offset = get_query_pos(read, varstart)
             support_val = read_support(read, offset, trimref, trimalt)
@@ -224,9 +226,9 @@ def bamfeats(var, aln):
 
 
 
-def var_feats(var, aln, var_freq_file):
+def var_feats(var, bam_features):
     feats = []
-    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
+    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bam_features # bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
     if amreads > 0:
         vaf = (pos_alt + neg_alt) / amreads
     else:
@@ -487,18 +489,47 @@ def predict(model, vcf, **kwargs):
         print(var, end='')
 
 
-def predict_one_record(var_rec, loaded_model, bampath, refpath):
+def predict_records(varrecs, loaded_model, bampath, refpath):
+    """
+    Given a loaded model object and a list of pysam variant records, return classifier quality
+    :param loaded_model: loaded model object for classifier
+    :param varrecs: list of pysam vcf records
+
+    :return: List containing the computed classifier qualities
+    """
+    futs = []
+    with ProcessPoolExecutor(max_workers=8) as pool:
+        for var in varrecs:
+            futs.append(pool.submit(bamfeats, var.chrom, var.start, var.ref, var.alts[0], bampath, refpath))
+
+    bam_feat_results = []
+    for fut in futs:
+        result = fut.result(timeout=60)
+        bam_feat_results.append(result)
+
+    allfeats = []
+    for var, bam_features in zip(varrecs, bam_feat_results):
+        feats = var_feats(var, bam_features)
+        allfeats.append(feats)
+
+    predictions = loaded_model.predict_proba(np.array(allfeats))[:, 1]
+    return predictions.tolist()
+
+
+def predict_one_record(var, loaded_model, bampath, refpath):
     """
     given a loaded model object and a pysam variant record, return classifier quality
     :param loaded_model: loaded model object for classifier
-    :param var_rec: single pysam vcf record
+    :param var: single pysam vcf record
     :param kwargs:
     :return: classifier quality
     """
-    reference = pysam.FastaFile(refpath)
-    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+    # reference = pysam.FastaFile(refpath)
+    # aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
-    feats = var_feats(var_rec, aln, None)
+    bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], bampath, refpath)
+    feats = var_feats(var, bam_features)
+
     #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):
         prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
@@ -553,10 +584,14 @@ if __name__ == "__main__":
                     datefmt='%m-%d %H:%M:%S',
                     level=logging.INFO)
 
-    main()
+    # main()
 
-    #aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
-    #vcf = pysam.VariantFile("test.vcf")
-    #var = next(vcf)
-    #x = bamfeats(var, aln)
+    # aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    vcf = pysam.VariantFile("test.vcf")
+    records = list(vcf)
+    model = load_model("/Users/brendan/data/jovian/g44e280_clf.model")
+
+    preds = predict_records(records, model, "/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    print(preds)
+
    # print(x)
