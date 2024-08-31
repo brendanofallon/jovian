@@ -498,7 +498,7 @@ def predict_records(varrecs, loaded_model, bampath, refpath):
     :return: List containing the computed classifier qualities
     """
     futs = []
-    with ProcessPoolExecutor(max_workers=8) as pool:
+    with ProcessPoolExecutor(max_workers=24) as pool:
         for var in varrecs:
             futs.append(pool.submit(bamfeats, var.chrom, var.start, var.ref, var.alts[0], bampath, refpath))
 
