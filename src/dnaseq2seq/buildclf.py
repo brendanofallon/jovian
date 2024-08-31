@@ -512,7 +512,7 @@ def predict_records(varrecs, loaded_model, bampath, refpath):
     batchsize = len(varrecs) // workers
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for batch_records in batch(varrecs, batchsize):
-            futs.append(pool.submit(process_batch, var.chrom, var.start, var.ref, var.alts[0], bampath, refpath))
+            futs.append(pool.submit(process_batch, batch_records, bampath, refpath))
 
     bam_feat_results = []
     for fut in futs:
