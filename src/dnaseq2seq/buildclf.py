@@ -17,6 +17,7 @@ from xgboost import XGBClassifier
 from functools import lru_cache
 import logging
 import argparse
+from itertools import islice
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +184,7 @@ def read_support(read, offset, ref, alt):
 
 
 
-def bamfeats(chrom, start, ref, alt, bampath, refpath=None):
-    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+def bamfeats(chrom, start, ref, alt, aln):
     tot_reads = 0
     pos_ref = 0
     pos_alt = 0
@@ -489,23 +489,35 @@ def predict(model, vcf, **kwargs):
         print(var, end='')
 
 
-def predict_records(varrecs, loaded_model, bampath, refpath):
-    """
-    Given a loaded model object and a list of pysam variant records, return classifier quality
-    :param loaded_model: loaded model object for classifier
-    :param varrecs: list of pysam vcf records
+def batch(iterable, n):
+    "Batch data into lists of length n. The last batch may be shorter."
+    it = iter(iterable)
+    while True:
+        chunk = list(islice(it, n))
+        if not chunk:
+            return
+        yield chunk
 
-    :return: List containing the computed classifier qualities
-    """
+def process_batch(batch, bampath, refpath):
+    results = []
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+    for var in batch:
+        result = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
+        results.append(result)
+    return results
+
+def predict_records(varrecs, loaded_model, bampath, refpath):
     futs = []
-    with ProcessPoolExecutor(max_workers=8) as pool:
-        for var in varrecs:
-            futs.append(pool.submit(bamfeats, var.chrom, var.start, var.ref, var.alts[0], bampath, refpath))
+    workers = 8
+    batchsize = len(varrecs) // workers
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for batch_records in batch(varrecs, batchsize):
+            futs.append(pool.submit(process_batch, var.chrom, var.start, var.ref, var.alts[0], bampath, refpath))
 
     bam_feat_results = []
     for fut in futs:
-        result = fut.result(timeout=60)
-        bam_feat_results.append(result)
+        results = fut.result(timeout=60)
+        bam_feat_results.extend(results)
 
     allfeats = []
     for var, bam_features in zip(varrecs, bam_feat_results):
@@ -524,10 +536,9 @@ def predict_one_record(var, loaded_model, bampath, refpath):
     :param kwargs:
     :return: classifier quality
     """
-    # reference = pysam.FastaFile(refpath)
-    # aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
 
-    bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], bampath, refpath)
+    bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
     feats = var_feats(var, bam_features)
 
     #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
