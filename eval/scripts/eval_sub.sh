@@ -13,7 +13,10 @@ COLLATE_SCRIPT="${JOVROOT}/eval/scripts/run_collate.sh"
 RESULT_ROOT="$HOME/storage/jovian/eval_results/"
 CRAMS="$HOME/src/jovian/eval/afewcrams.txt"
 
-RESULT_DIR="${RESULT_ROOT}/eval-${TAG_A}-${TAG_B}"
+
+RANDO=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 5)
+
+RESULT_DIR="${RESULT_ROOT}/eval-${TAG_A}-${TAG_B}-$RANDO"
 
 
 mkdir -p $RESULT_DIR
