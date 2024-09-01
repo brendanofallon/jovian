@@ -512,7 +512,7 @@ def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, r
     """ 
     """
     futs = []
-    batchsize = len(var_records) // threads
+    batchsize = max(1, len(var_records) // threads)
     logger.debug(f"Processing {len(var_records)} with {threads} threads, batch size is: {batchsize}")
     with ThreadPoolExecutor(max_workers=threads) as pool:
         for batch_records in batch(var_records, batchsize):
