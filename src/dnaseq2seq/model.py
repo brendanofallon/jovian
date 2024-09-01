@@ -107,12 +107,12 @@ class VarTransformer(nn.Module):
                  read_depth,
                  feature_count,
                  kmer_dim,
-                 encoder_attention_heads=6,
-                 decoder_attention_heads=6,
-                 d_ff=1024,
-                 embed_dim_factor=40,
-                 n_encoder_layers=3,
-                 n_decoder_layers=3,
+                 encoder_attention_heads,
+                 decoder_attention_heads,
+                 d_ff,
+                 embed_dim_factor,
+                 n_encoder_layers,
+                 n_decoder_layers,
                  p_dropout=0.1,
                  device='cpu'):
         super().__init__()
