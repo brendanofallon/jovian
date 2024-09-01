@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import random
 from enum import Enum
+from typing import List
 import yaml
 import numpy as np
 import bisect
@@ -11,7 +12,7 @@ import multiprocessing as mp
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import xgboost
 from xgboost import XGBClassifier
 from functools import lru_cache
@@ -499,29 +500,41 @@ def batch(iterable, n):
             return
         yield chunk
 
+
 def process_batch(batch, bampath, refpath):
     results = []
     aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
-    for var in batch:
-        result = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
+    for chrom, start, ref, alt in batch:
+        result = bamfeats(chrom, start, ref, alt, aln)
         results.append(result)
     return results
 
-def predict_records(varrecs, loaded_model, bampath, refpath):
+def var_keys(var: pysam.VariantRecord):
+    return var.chrom, var.start, var.ref, var.alts[0]
+
+def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, refpath: str, threads: int):
+    """ 
+    """
     futs = []
-    workers = 8
-    batchsize = len(varrecs) // workers
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        for batch_records in batch(varrecs, batchsize):
-            futs.append(pool.submit(process_batch, var.chrom, var.start, var.ref, var.alts[0], bampath, refpath))
+    batchsize = len(var_records) // threads
+    logger.debug(f"Processing {len(var_records)} with {threads} threads, batch size is: {batchsize}")
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        for batch_records in batch(var_records, batchsize):
+            vkeys = [var_keys(v) for v in batch_records]
+            futs.append(pool.submit(process_batch, vkeys, bampath, refpath))
 
     bam_feat_results = []
     for fut in futs:
         results = fut.result(timeout=60)
-        bam_feat_results.extend(results)
+        bam_feat_results.extend(results)  
+    return bam_feat_results
+
+
+def predict_records(varrecs: List[pysam.VariantRecord], loaded_model: RandomForestClassifier, bampath: str, refpath: str, threads: int):
+    bam_features = collect_bam_features(varrecs, bampath, refpath, threads)
 
     allfeats = []
-    for var, bam_features in zip(varrecs, bam_feat_results):
+    for var, bam_features in zip(varrecs, bam_features):
         feats = var_feats(var, bam_features)
         allfeats.append(feats)
 

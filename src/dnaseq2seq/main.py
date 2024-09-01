@@ -5,7 +5,6 @@ import logging
 import os
 
 import re
-import torch
 import sklearn
 
 import argparse
@@ -46,7 +45,6 @@ def alphanumeric_no_spaces(name):
 def main():
     logger.debug("Turning on DEBUG log level")
     logger.info(f"Jenever version {VERSION}")
-    logger.info(f"PyTorch version: {torch.__version__}")
     logger.info(f"Scikit-learn version: {sklearn.__version__}")
     parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
