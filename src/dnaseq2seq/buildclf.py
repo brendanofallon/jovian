@@ -248,7 +248,7 @@ def var_feats(var, bam_features):
     feats.append(min(var.info['WIN_OFFSETS']))
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
-    #feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
+    
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     feats.append(vaf)
     feats.append(amreads)
@@ -319,17 +319,19 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
 
         yield var
 
+
 def rec_extract_feats(var, aln):
     bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
     feats = var_feats(var, bam_features)
     fstr = ",".join(str(x) for x in [varstr(var)] + list(feats))
     return feats, fstr
 
-def extract_feats(vcf, aln, var_freq_file):
+
+def extract_feats(vcf, aln):
     allfeats = []
     featstrs = []
     for var in vcf:
-        feats, fstr = rec_extract_feats(var, aln, var_freq_file)
+        feats, fstr = rec_extract_feats(var, aln)
         allfeats.append(feats)
         featstrs.append(fstr)
     return allfeats, featstrs
@@ -360,10 +362,8 @@ def _find_var(chrom, pos, ref, alts, vcf):
     return None
 
 def _process_sample(args):
-    sample, bampath, reference_filename, varoutputs, tps, fps, var_freq_file = args
-    if var_freq_file:
-        logger.info(f"Loading variant frequency file from {var_freq_file}")
-        var_freq_file = pysam.VariantFile(var_freq_file)
+    sample, bampath, reference_filename, varoutputs, tps, fps = args
+
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
     allfeats = []
@@ -413,7 +413,7 @@ def _process_sample(args):
                 if fpvar is None:
                     logger.warning(f"Couldn't find FP match for find variant {var}")
                     continue
-                feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
+                feats, fstr = rec_extract_feats(fpvar, aln)
                 allfeats.append(feats)
                 featstrs.append(fstr)
                 labels.append(0)
@@ -422,7 +422,7 @@ def _process_sample(args):
     return allfeats, featstrs, labels
 
 
-def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
+def train_model(conf, threads, feat_csv=None, labels_csv=None, reference_filename=None):
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -436,7 +436,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         label_fh = None
 
     with mp.Pool(threads) as pool:
-        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps'), var_freq_file) for sample in conf.keys()))
+        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
 
     y = []
     feats = []
@@ -480,13 +480,9 @@ def predict(model, vcf, **kwargs):
     model = load_model(model)
     bam = pysam.AlignmentFile(kwargs.get('bam'))
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
-    if kwargs.get('freq_file'):
-        var_freq_file = pysam.VariantFile(kwargs.get('freq_file'))
-    else:
-        var_freq_file = None
     print(vcf.header, end='')
     for var in vcf:
-        proba = predict_one_record(model, var, bam, var_freq_file)
+        proba = predict_one_record(model, var, bam)
         var.qual = proba
         print(var, end='')
 
@@ -570,7 +566,6 @@ def train(conf, output, **kwargs):
     conf = yaml.safe_load(open(conf).read())
     model = train_model(conf, 
             threads=kwargs.get('threads'), 
-            var_freq_file=kwargs.get('freq_file'),
             feat_csv=kwargs.get('feat_csv'),
             labels_csv=kwargs.get('labels_csv'),
             reference_filename=kwargs.get('reference'))
@@ -588,7 +583,6 @@ def main():
     trainparser.add_argument("-t", "--threads", help="thread count", default=24, type=int)
     trainparser.add_argument("-o", "--output", help="Output path")
     trainparser.add_argument("-r", "--reference", help="Reference genome fasta")
-    trainparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     trainparser.add_argument("--feat-csv", help="Feature dump CSV")
     trainparser.add_argument("--labels-csv", help="Label dump CSV")
     trainparser.set_defaults(func=train)
@@ -596,7 +590,6 @@ def main():
     predictparser = subparser.add_parser("predict", help="Predict")
     predictparser.add_argument("-m", "--model", help="Model file")
     predictparser.add_argument("-b", "--bam", help="Path to the bam")
-    predictparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     predictparser.add_argument("-v", "--vcf", help="Input VCF")
     predictparser.set_defaults(func=predict)
 
