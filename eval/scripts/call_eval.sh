@@ -14,12 +14,12 @@
 #SBATCH --gres=gpu:1 --constraint="2080ti|v100|3090|a6000|a100"
 
 
-REF_GENOME=/uufs/chpc.utah.edu/common/home/u0379426/vast/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz
-HAPPY_LOOKUP=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/scripts/happy_lookup.py
-
 JOV_ROOT=$1
 BED=$2
 BAM=$3
+
+REF_GENOME=/uufs/chpc.utah.edu/common/home/u0379426/vast/ref/human_g1k_v37_decoy_phiXAdaptr.fasta.gz
+HAPPY_LOOKUP=$JOV_ROOT/eval/happy_lookup.py
 
 
 SUFFIX=$(basename $JOV_ROOT | sed -e 's/jenever-//g')

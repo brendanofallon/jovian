@@ -40,16 +40,17 @@ job_ids=()
 
 # Loop over each file and submit a job
 for file in "${files[@]}"; do
-    job_id=$(sbatch -M notchpeak --parsable "$RUN_SCRIPT" "$REPO_A" "$INPUT_BED" "$file")
+    job_id=$(sbatch -M notchpeak --parsable "$RUN_SCRIPT" "$REPO_B" "$INPUT_BED" "$file")
     echo "Submitted job for $file with ID: $job_id"
     job_ids+=("$job_id")
 done
 
 for file in "${files[@]}"; do
-    job_id=$(sbatch -M notchpeak --parsable "$RUN_SCRIPT" "$REPO_B" "$INPUT_BED" "$file")
+    job_id=$(sbatch -M notchpeak --parsable "$RUN_SCRIPT" "$REPO_A" "$INPUT_BED" "$file")
     echo "Submitted job for $file with ID: $job_id"
     job_ids+=("$job_id")
 done
+
 
 
 # Create a string of job IDs separated by colons for the dependency
