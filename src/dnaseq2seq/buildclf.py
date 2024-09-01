@@ -318,8 +318,9 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
 
         yield var
 
-def rec_extract_feats(var, aln, var_freq_file):
-    feats = var_feats(var, aln, var_freq_file)
+def rec_extract_feats(var, aln):
+    bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
+    feats = var_feats(var, bam_features)
     fstr = ",".join(str(x) for x in [varstr(var)] + list(feats))
     return feats, fstr
 
@@ -392,7 +393,7 @@ def _process_sample(args):
                     if tpvar is None:
                         logger.warning(f"Couldn't find true pos match for {var}")
                         continue
-                    feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
+                    feats, fstr = rec_extract_feats(tpvar, aln)
                     allfeats.append(feats)
                     featstrs.append(fstr)
                     labels.append(1)
