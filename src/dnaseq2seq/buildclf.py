@@ -538,10 +538,8 @@ def predict_records(varrecs: List[pysam.VariantRecord], loaded_model: RandomFore
         allfeats.append(feats)
 
     a = np.array(allfeats)
-    logger.info(f"Input array has shape {a.shape}")
     if a.ndim == 1:
         a = a[np.newaxis, ...]  # Reshape to 2D array with one row
-        logger.info(f"After reshape input array is {a.shape}")
     
     predictions = loaded_model.predict_proba(a)[:, 1]
     return predictions.tolist()
