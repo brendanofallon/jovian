@@ -31,6 +31,10 @@ def generate_table(df, samples, tagA, tagB, vtype, subtype="*", subset="*", filt
         table.add_column(f"{metric}-{tagB}")
         table.add_column(f"{metric} diff")
 
+    recalls_A = []
+    precisions_A = []
+    recalls_B = []
+    precisions_B = []
     for sample in samples:
         cols = []
         s = df[(df['sample'] == sample) & (df[' Type'] == vtype) & (df['Subtype'] == subtype) & (df['Subset'] == subset) & (
@@ -39,8 +43,22 @@ def generate_table(df, samples, tagA, tagB, vtype, subtype="*", subset="*", filt
         for metric in ['METRIC.Recall', 'METRIC.Precision']:
             tA = s[s['caller'] == tagA]
             valA = get_val(tA, metric)
+            try:
+                if metric == 'METRIC.Recall':
+                    recalls_A.append(float(valA))
+                elif metric == 'METRIC.Precision':
+                    precisions_A.append(float(valA))
+            except:
+                pass
             tB = s[s['caller'] == tagB]
             valB = get_val(tB, metric)
+            try:
+                if metric == 'METRIC.Recall':
+                    recalls_B.append(float(valB))
+                elif metric == 'METRIC.Precision':
+                    precisions_B.append(float(valB))
+            except:
+                pass
             try:
                 diff = valB - valA
             except:
@@ -54,8 +72,13 @@ def generate_table(df, samples, tagA, tagB, vtype, subtype="*", subset="*", filt
                 cols.append(Text(fmt(valB), style='bold red'))
                 cols.append(Text(fmt(diff), style='bold red'))
 
-        table.add_row(*cols)
 
+        table.add_row(*cols)
+    recall_A = np.mean(recalls_A)
+    precision_A = np.mean(precisions_A)
+    recall_B = np.mean(recalls_B)
+    precision_B = np.mean(precisions_B)
+    table.add_row(Text("Avg", style="bold"), Text(fmt(recall_A), style="bold"), Text(fmt(recall_B), style="bold"), Text(fmt(recall_B - recall_A), style="bold"), Text(fmt(precision_A), style="bold"), Text(fmt(precision_B), style="bold"), Text(fmt(precision_B - precision_A), style="bold"))
     return table
 
 def main(collated_csv):
