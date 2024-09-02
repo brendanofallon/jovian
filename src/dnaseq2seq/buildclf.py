@@ -503,8 +503,10 @@ def process_batch(batch, bampath, refpath):
         results.append(result)
     return results
 
+
 def var_keys(var: pysam.VariantRecord):
     return var.chrom, var.start, var.ref, var.alts[0]
+
 
 def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, refpath: str, threads: int):
     """ 
@@ -519,10 +521,8 @@ def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, r
 
     bam_feat_results = []
     for i, fut in enumerate(futs):
-        results = fut.result(timeout=60)
-        
+        results = fut.result(timeout=60)        
         bam_feat_results.extend(results)  
-        logger.info(f"Got {len(results)} from thread {i}, bam_feats len is {len(bam_feat_results)}")
 
     return bam_feat_results
 
