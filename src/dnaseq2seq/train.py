@@ -17,9 +17,16 @@ import torch.cuda.amp as amp
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+<<<<<<< HEAD
 import dnaseq2seq.vcf as vcf
 import dnaseq2seq.loader as loader
 import dnaseq2seq.util as util
+=======
+
+from dnaseq2seq import vcf
+from dnaseq2seq import loader
+from dnaseq2seq import util
+>>>>>>> 4dd6bbb4db1897033da7436f6e2340ce7481e78c
 from dnaseq2seq.model import VarTransformer
 
 LOG_FORMAT  ='[%(asctime)s] %(process)d  %(name)s  %(levelname)s  %(message)s'
