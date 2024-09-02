@@ -13,8 +13,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
 from concurrent.futures import ThreadPoolExecutor
-import xgboost
-from xgboost import XGBClassifier
 from functools import lru_cache
 import logging
 import argparse
@@ -505,8 +503,10 @@ def process_batch(batch, bampath, refpath):
         results.append(result)
     return results
 
+
 def var_keys(var: pysam.VariantRecord):
     return var.chrom, var.start, var.ref, var.alts[0]
+
 
 def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, refpath: str, threads: int):
     """ 
@@ -520,21 +520,28 @@ def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, r
             futs.append(pool.submit(process_batch, vkeys, bampath, refpath))
 
     bam_feat_results = []
-    for fut in futs:
-        results = fut.result(timeout=60)
+    for i, fut in enumerate(futs):
+        results = fut.result(timeout=60)        
         bam_feat_results.extend(results)  
+
     return bam_feat_results
 
 
 def predict_records(varrecs: List[pysam.VariantRecord], loaded_model: RandomForestClassifier, bampath: str, refpath: str, threads: int):
+    logger.info(f"Prediction classifications for {len(varrecs)} records")
     bam_features = collect_bam_features(varrecs, bampath, refpath, threads)
+    assert len(bam_features) == len(varrecs), f"Unequal numbers of features {len(bam_features)} and records: {len(varrecs)}"
 
     allfeats = []
-    for var, bam_features in zip(varrecs, bam_features):
-        feats = var_feats(var, bam_features)
+    for var, bfeats in zip(varrecs, bam_features):
+        feats = var_feats(var, bfeats)
         allfeats.append(feats)
 
-    predictions = loaded_model.predict_proba(np.array(allfeats))[:, 1]
+    a = np.array(allfeats)
+    if a.ndim == 1:
+        a = a[np.newaxis, ...]  # Reshape to 2D array with one row
+    
+    predictions = loaded_model.predict_proba(a)[:, 1]
     return predictions.tolist()
 
 
