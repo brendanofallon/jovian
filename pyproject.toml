@@ -25,7 +25,6 @@ dependencies = [
     "pytest"
 ]
 urls = { "Homepage" = "https://github.com/ARUP-NGS/jenever" }
-scripts = ["src/dnaseq2seq/main.py"]
 
 [project.scripts]
 jenever = "dnaseq2seq.main:main"
