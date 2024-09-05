@@ -101,7 +101,7 @@ def old_gen_suspicious_spots(bamfile, chrom, start, stop, reference_fasta, min_i
     ref = pysam.FastaFile(reference_fasta)
     refseq = ref.fetch(chrom, start, stop)
     assert len(refseq) == stop - start, f"Ref sequence length doesn't match start - stop coords start: {chrom}:{start}-{stop}, ref len: {len(refseq)}"
-    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter', multiple_iterators=False):
+    for col in aln.pileup(chrom, start=start, stop=stop, stepper='nofilter', multiple_iterators=True, truncate=True):
         # The pileup returned by pysam actually starts long before the first start position, but we only want to
         # report positions in the actual requested window
         if start <= col.reference_pos < stop:
