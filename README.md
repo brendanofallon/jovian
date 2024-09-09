@@ -9,13 +9,14 @@ any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or deci
 quality cutoffs, read counts, allele frequencies, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
+### Warning!
+The current Jenever model has been trained on Illumina WGS germline short-read data, and is not likely to work on hybrid-capture (e.g. exome), long read, somatic, or other types of genomic data. 
 
-## What's new with version 1.2
 
+## What's new with version 1.3
 
-Jenever 1.2 contains new models with significantly improved accuracy for SNVs compared to the version 1.1 models (named 100M_s28_cont_mapsus_lolr2_epoch2 and paraclf). SNV precision has increased from 99.5% to about 99.7% (at a quality cutoff of 0.10), while SNV recall has increased modestly from 99.27% to about 99.33%. These improvements came from training on a new dataset that included ~44 WGS samples and more regions sampled from each, for a total of ~73M regions containing nearly 11B tokens.  Indel accuracy remains mostly unchanged. 
+Jenever 1.3 introduces better parallelization for the variant quality score calculation, leading to higher overall performance. We've also added progress bars for calling (you can disable with the `--no-prog` option), and done a lot of behind-the-scenes code cleanup and testing. Precision and recall statistics should be the same as for Jenever 1.2.
 
-Jenever 1.1 has much improved calling performance compared to version 1.0, due to a better parallelization strategy for region encoding & calling. Variant detection accuracy should be about the same as 1.0. Also fixes a minor regression which occurred when some fixes were made to the phasing logic. The regression caused the features used in the classifier model to be incorrect in a small fraction of variants, resulting in quality scores that were too high and decreased precision (~0.1% of variants were affected). 
 
 
 #### A note on Jovian
@@ -92,9 +93,6 @@ Runtimes are long and a GPU is required for tolerable performance when more than
 In general performance is somewhere near 15MB (megabases) per hour, depending on how many regions trigger the
 generation procedure, the number of threads and batch size, and the GPU speed. 
 
-
-### Warning!
-The current Jenever model has been trained on Illumina WGS germline short-read data, and is not likely to work on hybrid-capture (e.g. exome), long read, somatic, or other types of genomic data. 
 
 ### Training a new model
 
