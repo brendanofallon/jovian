@@ -564,7 +564,6 @@ def predict_one_record(var, loaded_model, bampath, refpath):
         return prediction[0, 1]
     else:
         prediction = loaded_model.predict(xgboost.DMatrix(feats[np.newaxis, ...]))
-        logger.info(f"Prediction: {prediction}")
         return prediction
 
 
