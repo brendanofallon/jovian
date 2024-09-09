@@ -25,7 +25,7 @@ An earlier version of this tool, called Jovian, was made available in 2022 (see 
 Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
 The current version which uses autoregressive decoders to generate haplotypes is called Jenever. 
 
-### Performance notes
+## Performance notes
 
 ![$F_1$](images/f1.png)
 
@@ -39,7 +39,7 @@ Jenever calls were filtered at quality 10 (phred-scaled), HaplotypeCaller at 50 
 These accuracy statistics were computed by [hap.py](https://github.com/Illumina/hap.py) on held-out validation regions on chromosomes 21 and 22.
  
 
-### Installation
+## Installation
 
 #### Requirements
 
@@ -76,13 +76,13 @@ There are two types of model files. The first stores weights for the main transf
 
 
 
-### Calling variants
+## Calling variants
 
 Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basical calling command looks like: 
 
     jenever call -r <reference genome fasta> 
       --threads <number of threads to use> 
-      -m /path/to/model
+      -m /path/to/model.model
       --bed /path/to/BED file 
       --bam /BAM or CRAM file
       -c /path/to/classifier.model
@@ -94,7 +94,7 @@ In general performance is somewhere near 15MB (megabases) per hour, depending on
 generation procedure, the number of threads and batch size, and the GPU speed. 
 
 
-### Training a new model
+## Training a new model
 
 
 #### Creating training from labelled BAMs (pregen)
@@ -102,10 +102,10 @@ generation procedure, the number of threads and batch size, and the GPU speed.
 Training requires converting pileups (regions of BAM files) into tensors. Because that process is very slow 
 it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
 training runs. This is called `pregen` (for pre-generation of training data). The pregenerated training 
-tensors and 'labels' (true alt sequences, stored a k-mer indices) are stored in a single directory. To create pregenerated training 
+tensors and 'labels' (true alt sequences, stored as k-mer indices) are stored in a single directory. To create pregenerated training 
 data, run
 
-    ./main.py pregen --threads <thread count> 
+    jenever pregen --threads <thread count> 
       -c <conf.yaml> 
       -d /path/to/output/directory
 
@@ -141,7 +141,7 @@ in 'vals_per_class' from the configuration file.
 
 To train a new model, run a command similar to
 
-    dnaseq2seq/main.py train -c training_conf.yaml --run-name my_new_run
+    jenever train -c training_conf.yaml --run-name my_new_run
 
 
 
