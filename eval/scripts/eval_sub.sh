@@ -24,13 +24,15 @@ cp $INPUT_BED $RESULT_DIR/
 cd $RESULT_DIR
 
 REPO_ROOT="jenever"
+SRC_REPO="https://github.com/brendanofallon/jovian"
+#SRC_REPO="https://github.com/ARUP-NGS/jenever.git "
 
 REPO_A="$REPO_ROOT-$TAG_A"
 REPO_B="$REPO_ROOT-$TAG_B"
 
 
-GIT_LFS_SKIP_SMUDGE=1 git clone -b $TAG_A --filter=blob:none https://github.com/ARUP-NGS/jenever.git "$REPO_A"
-GIT_LFS_SKIP_SMUDGE=1 git clone -b $TAG_B --filter=blob:none https://github.com/ARUP-NGS/jenever.git "$REPO_B"
+GIT_LFS_SKIP_SMUDGE=1 git clone -b $TAG_A --filter=blob:none $SRC_REPO "$REPO_A"
+GIT_LFS_SKIP_SMUDGE=1 git clone -b $TAG_B --filter=blob:none $SRC_REPO "$REPO_B"
 
 
 readarray -t files < "$CRAMS"
@@ -45,11 +47,11 @@ for file in "${files[@]}"; do
     job_ids+=("$job_id")
 done
 
-for file in "${files[@]}"; do
-    job_id=$(sbatch -M notchpeak --parsable "$RUN_SCRIPT" "$REPO_A" "$INPUT_BED" "$file")
-    echo "Submitted job for $file with ID: $job_id"
-    job_ids+=("$job_id")
-done
+#for file in "${files[@]}"; do
+#    job_id=$(sbatch -M notchpeak --parsable "$RUN_SCRIPT" "$REPO_A" "$INPUT_BED" "$file")
+#    echo "Submitted job for $file with ID: $job_id"
+#    job_ids+=("$job_id")
+#done
 
 
 
