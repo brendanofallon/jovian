@@ -528,7 +528,7 @@ def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, r
 
 
 def predict_records(varrecs: List[pysam.VariantRecord], loaded_model: RandomForestClassifier, bampath: str, refpath: str, threads: int):
-    logger.info(f"Prediction classifications for {len(varrecs)} records")
+    logger.debug(f"Predicting classifications for {len(varrecs)} records")
     bam_features = collect_bam_features(varrecs, bampath, refpath, threads)
     assert len(bam_features) == len(varrecs), f"Unequal numbers of features {len(bam_features)} and records: {len(varrecs)}"
 

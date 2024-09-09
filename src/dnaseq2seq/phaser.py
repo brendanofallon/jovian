@@ -344,7 +344,7 @@ def project_vars(variants, allele_indexes, ref_sequence, ref_offset):
     return seq
 
 
-def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
+def gen_haplotypes(bam, ref_sequence, chrom, region_start, region_end, variants):
     """
     Generate the two most likely haplotypes given the variants and reads for the region
     In many cases this is trivial and we don't need to look at the reads, but if there are
@@ -353,7 +353,6 @@ def gen_haplotypes(bam, ref, chrom, region_start, region_end, variants):
 
     : returns: Two strings representing the most probable haplotypes in the region
     """
-    ref_sequence = ref.fetch(chrom, region_start, region_end)
     hap0 = ref_sequence
     hap1 = ref_sequence
     if len(variants) == 0:
@@ -436,27 +435,4 @@ def parse_rows_classes(bed):
     return rows, idxs, class_names
 
 
-        
 
-
-
-def main():
-
-    ref = pysam.FastaFile("/Volumes/Share/genomics/reference/human_g1k_v37_decoy_phiXAdaptr.fasta")
-    vcf = pysam.VariantFile("/Volumes/Share/genomics/GIAB/4.2.1/HG002_GRCh37_1_22_v4.2.1_benchmark.vcf.gz")
-    bam = pysam.AlignmentFile("/Volumes/Share/genomics/NIST-002/final.cram")
-
-
-    chrom = '21'
-    start = 20576974
-    end =   20577105
-    variants = list(v for v in vcf.fetch(chrom, start, end))
-
-    hap0, hap1 = gen_haplotypes(bam, ref, chrom, start, end, variants)
-    print(hap0)
-    print(hap1)
-    print("".join( ' ' if a==b else '*' for a,b in zip(hap0, hap1)))
-
-
-if __name__=="__main__":
-    main()
