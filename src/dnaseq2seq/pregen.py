@@ -244,7 +244,7 @@ def load_from_csv(bampath, refpath, bed, vcfpath, max_reads_per_aln, samples_per
     :return: Generator
     """
     refgenome = pysam.FastaFile(refpath)
-    bam = pysam.AlignmentFile(bampath)
+    bam = pysam.AlignmentFile(bampath, reference_filename=refpath)
     vcf = pysam.VariantFile(vcfpath)
 
     upsampled_labels = upsample_labels(bed, vals_per_class=vals_per_class)

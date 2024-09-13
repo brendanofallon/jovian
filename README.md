@@ -9,13 +9,13 @@ any sophisticated statistical procedures - no HMMs, no de Bruijn graphs, or deci
 quality cutoffs, read counts, allele frequencies, etc. The approach allows for true end-to-end deep learning
 for variant detection.
 
+### Warning!
+The current Jenever model has been trained on Illumina WGS germline short-read data, and is not likely to work on hybrid-capture (e.g. exome), long read, somatic, or other types of genomic data. 
 
-## What's new with version 1.2
 
+## What's new with version 1.3
 
-Jenever 1.2 contains new models with significantly improved accuracy for SNVs compared to the version 1.1 models (named 100M_s28_cont_mapsus_lolr2_epoch2 and paraclf). SNV precision has increased from 99.5% to about 99.7% (at a quality cutoff of 0.10), while SNV recall has increased modestly from 99.27% to about 99.33%. These improvements came from training on a new dataset that included ~44 WGS samples and more regions sampled from each, for a total of ~73M regions containing nearly 11B tokens.  Indel accuracy remains mostly unchanged. 
-
-Jenever 1.1 has much improved calling performance compared to version 1.0, due to a better parallelization strategy for region encoding & calling. Variant detection accuracy should be about the same as 1.0. Also fixes a minor regression which occurred when some fixes were made to the phasing logic. The regression caused the features used in the classifier model to be incorrect in a small fraction of variants, resulting in quality scores that were too high and decreased precision (~0.1% of variants were affected). 
+Jenever 1.3 introduces better parallelization for the variant quality score calculation, leading to higher overall performance. We've also added progress bars for calling (you can disable with the `--no-prog` option), and done a lot of behind-the-scenes code cleanup and testing. Precision and recall statistics should be the same as for Jenever 1.2.
 
 
 #### A note on Jovian
@@ -24,7 +24,7 @@ An earlier version of this tool, called Jovian, was made available in 2022 (see 
 Jovian used a similar encoder architecture, but did not use autoregressive decoding, and had overall lower performance. 
 The current version which uses autoregressive decoders to generate haplotypes is called Jenever. 
 
-### Performance notes
+## Performance notes
 
 ![$F_1$](images/f1.png)
 
@@ -33,11 +33,17 @@ A comparison of the $F_1$ statistic for Indels and SNVs across different models
 ![Mean Total FPs and FNs](images/total_errors.png)
 
 The upper (pastel) portion is the mean total number of FPs per sample, and the bottom darker bar represents the mean total number of FNs. 
+<<<<<<< HEAD
+=======
 Jenever calls were filtered at quality 10 (phred-scaled), HaplotypeCaller at 50 , Clair3 at 0, DeepVariant at 3, and Strelka at 4, values that are close to the $F_1$-maximizing thresholds computed by $vcfeval$.
 These accuracy statistics were computed by [hap.py](https://github.com/Illumina/hap.py) on held-out validation regions on chromosomes 21 and 22.
+>>>>>>> public/master
 
+Jenever calls were filtered at quality 10 (phred-scaled), HaplotypeCaller at 50 , Clair3 at 0, DeepVariant at 3, and Strelka at 4, values that are close to the $F_1$-maximizing thresholds computed by $vcfeval$.
+These accuracy statistics were computed by [hap.py](https://github.com/Illumina/hap.py) on held-out validation regions on chromosomes 21 and 22.
+ 
 
-### Installation
+## Installation
 
 #### Requirements
 
@@ -51,36 +57,29 @@ on the command line. There are some pretty large dependencies (pytorch, pysam, s
 
 It's a good idea to install in a separate conda environment or python virtualenv if possible, but not required unless there are dependency conflicts. 
 
-### Model weights
+### Model checkpoints
 
-Model weights are stored using [git lfs](https://git-lfs.com/), under the `models/` directory. If you don't have `git lfs` installed, the weights files will appear as small stub files with references to the actual weights objects. If you install `git lfs` after you've already cloned the repo, run
+Transformer model checkpoints and variant quality models available from [this bucket](https://storage.googleapis.com/jenever-models/). You'll need to download a transformer model and a classifier model in order to use Jenever. Here is a table with the available models:
 
-    git lfs fetch
+| Model file                                                                                                                       | Description                                                                                    |
+|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| [bwa_ft_100M_run5_epoch80.model](https://storage.googleapis.com/jenever-models/bwa_ft_100M_run5_epoch80.model)                                                 | A model fine-tuned on BWA-aligned data, with improved performance for BWA data    |
+| [good44fix_epoch280.model](https://storage.googleapis.com/jenever-models/good44fix_epoch280.model)                               | A new transformer model with better precision and sensitivity for SNVs                         |
+| [g44e280_clf.model](https://storage.googleapis.com/jenever-models/g44e280_clf.model)                                             | A new classifier model trained with calls form the "good44fix" transformer                     |
+| [100M_s28_cont_mapsus_lolr2_epoch2.model](https://storage.googleapis.com/jenever-models/100M_s28_cont_mapsus_lolr2_epoch4.model) | The v1.0  weights for the main transformer model, as used in the Jenever publication           |
+| [s28ce40_bamfix.model](https://storage.googleapis.com/jenever-models/s28ce40_bamfix.model)                                       | The v1.0 classifier model, as used in the Jenever publication                                  |
+| [paraclf.model](https://storage.googleapis.com/jenever-models/paraclf.model)                                                     | A classifier model trained on more data with slightly higher performance the the previous model |
 
-followed by
-
-    git lfs checkout
-
-to actually download the weights.
-
-There are two types of model files. The first stores weights for the main transformer model used for haplotype generation. These are big, often over 1GB. The second is the 'classifier' model which predicts variant quality from multiple overlapping haplotypes. The classifier model files are typically much smaller (~40MB)
-
-#### Model files:
-- **good44fix_epoch280.model**: New in v1.2, this contains weights for an improved transformer model with better precision and sensitivity for SNVs
-- **g44e280_clf.model**: New in v1.2, this is a new classifier model trained with calls form the "good44fix" transformer.
-- **100M_s28_cont_mapsus_lolr2_epoch2.model**: The v1.0  weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower.
-- **s28ce40_bamfix.model**: The v1.0 classifier model, as used in the Jenever publication
-- **paraclf.model**: New in v1.1, this classifier model was trained on more data with slightly higher performance the the previous model. 
+The model files are large because they are full checkpoints, and hence include the  optimizer state and other metadata. This means they can be used for fine-tuning (see Training section below). Smaller versions without the optimizer state are available on request.
 
 
-
-### Calling variants
+## Calling variants
 
 Calling variants requires an alignment file in bam / cram format, a model file, a list of regions to examine in BED format, and a fasta reference sequence. A basical calling command looks like: 
 
     jenever call -r <reference genome fasta> 
       --threads <number of threads to use> 
-      -m /path/to/model
+      -m /path/to/model.model
       --bed /path/to/BED file 
       --bam /BAM or CRAM file
       -c /path/to/classifier.model
@@ -92,10 +91,7 @@ In general performance is somewhere near 15MB (megabases) per hour, depending on
 generation procedure, the number of threads and batch size, and the GPU speed. 
 
 
-### Warning!
-The current Jenever model has been trained on Illumina WGS germline short-read data, and is not likely to work on hybrid-capture (e.g. exome), long read, somatic, or other types of genomic data. 
-
-### Training a new model
+## Training a new model
 
 
 #### Creating training from labelled BAMs (pregen)
@@ -103,10 +99,10 @@ The current Jenever model has been trained on Illumina WGS germline short-read d
 Training requires converting pileups (regions of BAM files) into tensors. Because that process is very slow 
 it makes sense to just do it once and save the tensors to disk so they can be used in multiple 
 training runs. This is called `pregen` (for pre-generation of training data). The pregenerated training 
-tensors and 'labels' (true alt sequences, stored a k-mer indices) are stored in a single directory. To create pregenerated training 
+tensors and 'labels' (true alt sequences, stored as k-mer indices) are stored in a single directory. To create pregenerated training 
 data, run
 
-    ./main.py pregen --threads <thread count> 
+    jenever pregen --threads <thread count> 
       -c <conf.yaml> 
       -d /path/to/output/directory
 
@@ -122,6 +118,8 @@ choose from each region type, and a list of BAMs + labels, like this:
         'deletion': 500
         'insertion': 500
         'mnv': 1000
+
+    input_model: /path/to/transformer/model # Optional, if you want to start from a checkpoint and fine-tune an existing model
 
     data:
       - bam: /path/to/a/bam
@@ -142,7 +140,7 @@ in 'vals_per_class' from the configuration file.
 
 To train a new model, run a command similar to
 
-    dnaseq2seq/main.py train -c training_conf.yaml --run-name my_new_run
+    jenever train -c training_conf.yaml --run-name my_new_run
 
 
 

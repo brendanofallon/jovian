@@ -33,8 +33,6 @@ logger = logging.getLogger(__name__)
 logger.addHandler(handler)
 
 
-
-
 USE_DDP = int(os.environ.get('RANK', -1)) >= 0 and os.environ.get('WORLD_SIZE') is not None
 MASTER_PROCESS = (not USE_DDP) or os.environ.get('RANK') == '0'
 DEVICE = None # This is set in the 'train' method
@@ -305,61 +303,6 @@ def safe_compute_ppav(results0, results1, key):
     return ppa, ppv
 
 def load_model(modelconf, ckpt):
-    # 35M model params
-    # encoder_attention_heads = 8 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 6
-    # decoder_layers = 4 # was 2
-    # embed_dim_factor = 100 # was 100
-
-    # 50M model params
-    # encoder_attention_heads = 8 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 8
-    # decoder_layers = 6 # was 2
-    # embed_dim_factor = 120 # was 100
-
-    # Wider model
-    # encoder_attention_heads = 4 # was 4
-    # decoder_attention_heads = 4 # was 4
-    # dim_feedforward = 1024
-    # encoder_layers = 6
-    # decoder_layers = 6 # was 2
-    # embed_dim_factor = 200 # was 100
-
-    # 100M params
-    # encoder_attention_heads = 8  # was 4
-    # decoder_attention_heads = 10  # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 10
-    # decoder_layers = 10  # was 2
-    # embed_dim_factor = 160  # was 100
-
-    # 200M params
-    # encoder_attention_heads = 12 # was 4
-    # decoder_attention_heads = 13 # Must evenly divide 260
-    # dim_feedforward = 1024
-    # encoder_layers = 10
-    # decoder_layers = 10 # was 2
-    # embed_dim_factor = 160 # was 100
-
-    # More layers but less model dim
-    # encoder_attention_heads = 10 # was 4
-    # decoder_attention_heads = 10 # Must evenly divide 260
-    # dim_feedforward = 1024
-    # encoder_layers = 14
-    # decoder_layers = 14 # was 2
-    # embed_dim_factor = 160 # was 100
-
-    # Small, for testing params
-    # encoder_attention_heads = 2  # was 4
-    # decoder_attention_heads = 2  # was 4
-    # dim_feedforward = 512
-    # encoder_layers = 2
-    # decoder_layers = 2  # was 2
-    # embed_dim_factor = 160  # was 100
     statedict = None
     if ckpt is not None:
         if 'model' in ckpt:
@@ -376,6 +319,7 @@ def load_model(modelconf, ckpt):
             logger.warning(f"Found model conf AND a checkpoint with model conf - using the model params from checkpoint")
             modelconf = ckpt['conf']
 
+    logger.info(f"Model conf: {modelconf}")
     model = VarTransformer(read_depth=modelconf['max_read_depth'],
                            feature_count=modelconf['feats_per_read'],
                            kmer_dim=util.FEATURE_DIM,  # Number of possible kmers
@@ -386,8 +330,16 @@ def load_model(modelconf, ckpt):
                            decoder_attention_heads=modelconf['decoder_attention_heads'],
                            d_ff=modelconf['dim_feedforward'],
                            device=DEVICE)
+
+    
     model_tot_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    encoder_tot_params = sum(p.numel() for p in model.encoder.parameters() if p.requires_grad)
+    decoder_tot_params = 2 * sum(p.numel() for p in model.decoder0.parameters() if p.requires_grad)
+    
+    logger.info(f"Decoder0: {model.decoder0}")
     logger.info(f"Creating model with {model_tot_params} trainable params")
+    logger.info(f"Encoder tot params: {encoder_tot_params} ")
+    logger.info(f"Decoder tot params: {decoder_tot_params} ")
 
     if statedict is not None:
         logger.info(f"Initializing model weights from state dict")
