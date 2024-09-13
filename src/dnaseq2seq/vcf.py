@@ -9,6 +9,7 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class Variant:
     """

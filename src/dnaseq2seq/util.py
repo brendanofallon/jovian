@@ -1,6 +1,8 @@
+import collections
 import itertools
 import datetime
 import os
+import bisect
 import time
 
 import torch
@@ -535,3 +537,43 @@ class WarmupCosineLRScheduler:
             lr = self.min_lr + coeff * (self.max_lr - self.min_lr)
         self.last_lr = lr
         return lr
+
+class RegionProgressCounter:
+
+    def __init__(self, bed):
+        self.bed = bed
+        self.bychrom = self._init_regions()
+
+    def _init_regions(self):
+        bychrom = collections.defaultdict(list)
+        regions = list(read_bed_regions(self.bed))
+        for chrom, start, end in regions:
+            bychrom[chrom].append((start, end, None))
+
+        for chrom, creg in bychrom.items():
+            creg = sorted(creg, key=lambda x: x[0])
+            bychrom[chrom] = creg
+
+        tot_regions, tot_bases = count_bed(self.bed)
+        prog = 0
+        start_pct = 0
+        for chrom, start, end in regions:
+            prog += end - start
+            pct = prog / tot_bases
+            i = bychrom[chrom].index((start, end, None))
+            bychrom[chrom][i] = (start, end, start_pct, pct)
+            start_pct = pct
+        return bychrom
+
+    def prog(self, chrom, pos):
+        regions = self.bychrom[chrom]
+        index = bisect.bisect_right([r[0] for r in regions], pos) - 1
+        if index >= 0:
+            start, end, start_pct, end_pct = regions[index]
+            # clamp pos to start, end
+            pos = max(start, min(end, pos))
+            actual_pct = start_pct + (end_pct - start_pct) * (pos - start) / (end - start)
+            return actual_pct
+        else:
+            return None
+

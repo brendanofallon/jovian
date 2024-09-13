@@ -18,5 +18,5 @@ echo "Master addr: $MASTER_ADDR, master port: $MASTER_PORT"
 export ENABLE_COMET=1
 export COMET_GIT_DIRECTORY=jovian/
 
-$HOME/miniconda3/envs/py3/bin/torchrun --nnodes=1 --nproc_per_node=1 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
+$HOME/miniconda3/envs/py3/bin/torchrun --nnodes=1 --nproc_per_node=4 --rdzv_id=$SLURM_JOBID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT $RUNCMD
 

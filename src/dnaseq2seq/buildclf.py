@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import random
 from enum import Enum
+from typing import List
 import yaml
 import numpy as np
 import bisect
@@ -11,11 +12,11 @@ import multiprocessing as mp
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
-import xgboost
-from xgboost import XGBClassifier
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import logging
 import argparse
+from itertools import islice
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ def read_support(read, offset, ref, alt):
 
 
 
-def bamfeats(var, aln):
+def bamfeats(chrom, start, ref, alt, aln):
     tot_reads = 0
     pos_ref = 0
     pos_alt = 0
@@ -191,12 +192,12 @@ def bamfeats(var, aln):
     min_mq = 10
     highmq_ref = 0
     highmq_alt = 0
-    pos_offset, trimref, trimalt = full_prefix_trim(var.ref, var.alts[0])
+    pos_offset, trimref, trimalt = full_prefix_trim(ref, alt)
     if len(trimref) == 0 and len(trimalt) == 0:
         return 0, 0, 0, 0, 0, 0, 0
 
-    varstart = var.start + pos_offset
-    for read in aln.fetch(var.chrom, var.start-1, var.start+1):
+    varstart = start + pos_offset
+    for read in aln.fetch(chrom, start-1, start+1):
         try:
             offset = get_query_pos(read, varstart)
             support_val = read_support(read, offset, trimref, trimalt)
@@ -224,9 +225,9 @@ def bamfeats(var, aln):
 
 
 
-def var_feats(var, aln, var_freq_file):
+def var_feats(var, bam_features):
     feats = []
-    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bamfeats(var, aln)
+    amreads, pos_ref, pos_alt, neg_ref, neg_alt, highmq_ref, highmq_alt = bam_features # bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
     if amreads > 0:
         vaf = (pos_alt + neg_alt) / amreads
     else:
@@ -245,7 +246,7 @@ def var_feats(var, aln, var_freq_file):
     feats.append(min(var.info['WIN_OFFSETS']))
     feats.append(max(var.info['WIN_OFFSETS']))
     feats.append(var.samples[0]['DP'])
-    #feats.append(var_af(var_freq_file, var.chrom, var.pos, var.ref, var.alts[0]))
+    
     feats.append(1 if 0 in var.samples[0]['GT'] else 0)
     feats.append(vaf)
     feats.append(amreads)
@@ -316,16 +317,19 @@ def vcf_sampling_iter(vcf, max_snvs=float("inf"), max_dels=float("inf"), max_ins
 
         yield var
 
-def rec_extract_feats(var, aln, var_freq_file):
-    feats = var_feats(var, aln, var_freq_file)
+
+def rec_extract_feats(var, aln):
+    bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
+    feats = var_feats(var, bam_features)
     fstr = ",".join(str(x) for x in [varstr(var)] + list(feats))
     return feats, fstr
 
-def extract_feats(vcf, aln, var_freq_file):
+
+def extract_feats(vcf, aln):
     allfeats = []
     featstrs = []
     for var in vcf:
-        feats, fstr = rec_extract_feats(var, aln, var_freq_file)
+        feats, fstr = rec_extract_feats(var, aln)
         allfeats.append(feats)
         featstrs.append(fstr)
     return allfeats, featstrs
@@ -338,7 +342,7 @@ def save_model(mdl, path):
         
 
 def load_model(path):
-    logger.info(f"Loading model from {path}")
+    logger.debug(f"Loading model from {path}")
     if str(path).endswith(".json") or str(path).endswith(".xgb"):
         bst = xgboost.Booster()
         bst.load_model(path)
@@ -356,10 +360,8 @@ def _find_var(chrom, pos, ref, alts, vcf):
     return None
 
 def _process_sample(args):
-    sample, bampath, reference_filename, varoutputs, tps, fps, var_freq_file = args
-    if var_freq_file:
-        logger.info(f"Loading variant frequency file from {var_freq_file}")
-        var_freq_file = pysam.VariantFile(var_freq_file)
+    sample, bampath, reference_filename, varoutputs, tps, fps = args
+
     logger.info(f"Processing sample {sample}")
     aln = pysam.AlignmentFile(bampath, reference_filename=reference_filename)
     allfeats = []
@@ -390,7 +392,7 @@ def _process_sample(args):
                     if tpvar is None:
                         logger.warning(f"Couldn't find true pos match for {var}")
                         continue
-                    feats, fstr = rec_extract_feats(tpvar, aln, var_freq_file)
+                    feats, fstr = rec_extract_feats(tpvar, aln)
                     allfeats.append(feats)
                     featstrs.append(fstr)
                     labels.append(1)
@@ -409,7 +411,7 @@ def _process_sample(args):
                 if fpvar is None:
                     logger.warning(f"Couldn't find FP match for find variant {var}")
                     continue
-                feats, fstr = rec_extract_feats(fpvar, aln, var_freq_file)
+                feats, fstr = rec_extract_feats(fpvar, aln)
                 allfeats.append(feats)
                 featstrs.append(fstr)
                 labels.append(0)
@@ -418,7 +420,7 @@ def _process_sample(args):
     return allfeats, featstrs, labels
 
 
-def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, reference_filename=None):
+def train_model(conf, threads, feat_csv=None, labels_csv=None, reference_filename=None):
     if feat_csv:
         logger.info(f"Writing feature dump to {feat_csv}")
         feat_fh = open(feat_csv, "w")
@@ -432,7 +434,7 @@ def train_model(conf, threads, var_freq_file, feat_csv=None, labels_csv=None, re
         label_fh = None
 
     with mp.Pool(threads) as pool:
-        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps'), var_freq_file) for sample in conf.keys()))
+        results = pool.map(_process_sample, ((sample, conf[sample]['bam'], reference_filename, conf[sample].get('vars'), conf[sample].get('tps'), conf[sample].get('fps')) for sample in conf.keys()))
 
     y = []
     feats = []
@@ -476,33 +478,92 @@ def predict(model, vcf, **kwargs):
     model = load_model(model)
     bam = pysam.AlignmentFile(kwargs.get('bam'))
     vcf = pysam.VariantFile(vcf, ignore_truncation=True)
-    if kwargs.get('freq_file'):
-        var_freq_file = pysam.VariantFile(kwargs.get('freq_file'))
-    else:
-        var_freq_file = None
     print(vcf.header, end='')
     for var in vcf:
-        proba = predict_one_record(model, var, bam, var_freq_file)
+        proba = predict_one_record(model, var, bam)
         var.qual = proba
         print(var, end='')
 
 
-def predict_one_record(loaded_model, var_rec, aln, **kwargs):
+def batch(iterable, n):
+    "Batch data into lists of length n. The last batch may be shorter."
+    it = iter(iterable)
+    while True:
+        chunk = list(islice(it, n))
+        if not chunk:
+            return
+        yield chunk
+
+
+def process_batch(batch, bampath, refpath):
+    results = []
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+    for chrom, start, ref, alt in batch:
+        result = bamfeats(chrom, start, ref, alt, aln)
+        results.append(result)
+    return results
+
+
+def var_keys(var: pysam.VariantRecord):
+    return var.chrom, var.start, var.ref, var.alts[0]
+
+
+def collect_bam_features(var_records: List[pysam.VariantRecord], bampath: str, refpath: str, threads: int):
+    """ 
+    """
+    futs = []
+    batchsize = max(1, len(var_records) // threads)
+    logger.debug(f"Processing {len(var_records)} with {threads} threads, batch size is: {batchsize}")
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        for batch_records in batch(var_records, batchsize):
+            vkeys = [var_keys(v) for v in batch_records]
+            futs.append(pool.submit(process_batch, vkeys, bampath, refpath))
+
+    bam_feat_results = []
+    for i, fut in enumerate(futs):
+        results = fut.result(timeout=60)        
+        bam_feat_results.extend(results)  
+
+    return bam_feat_results
+
+
+def predict_records(varrecs: List[pysam.VariantRecord], loaded_model: RandomForestClassifier, bampath: str, refpath: str, threads: int):
+    logger.debug(f"Predicting classifications for {len(varrecs)} records")
+    bam_features = collect_bam_features(varrecs, bampath, refpath, threads)
+    assert len(bam_features) == len(varrecs), f"Unequal numbers of features {len(bam_features)} and records: {len(varrecs)}"
+
+    allfeats = []
+    for var, bfeats in zip(varrecs, bam_features):
+        feats = var_feats(var, bfeats)
+        allfeats.append(feats)
+
+    a = np.array(allfeats)
+    if a.ndim == 1:
+        a = a[np.newaxis, ...]  # Reshape to 2D array with one row
+    
+    predictions = loaded_model.predict_proba(a)[:, 1]
+    return predictions.tolist()
+
+
+def predict_one_record(var, loaded_model, bampath, refpath):
     """
     given a loaded model object and a pysam variant record, return classifier quality
     :param loaded_model: loaded model object for classifier
-    :param var_rec: single pysam vcf record
+    :param var: single pysam vcf record
     :param kwargs:
     :return: classifier quality
     """
-    feats = var_feats(var_rec, aln, None)
+    aln = pysam.AlignmentFile(bampath, reference_filename=refpath)
+
+    bam_features = bamfeats(var.chrom, var.start, var.ref, var.alts[0], aln)
+    feats = var_feats(var, bam_features)
+
     #logger.debug(f"Feats for record: {var_rec.chrom}:{var_rec.pos} {var_rec.ref}->{var_rec.alts[0]} : {feats}")
     if isinstance(loaded_model, RandomForestClassifier):
         prediction = loaded_model.predict_proba(feats[np.newaxis, ...])
         return prediction[0, 1]
     else:
         prediction = loaded_model.predict(xgboost.DMatrix(feats[np.newaxis, ...]))
-        logger.info(f"Prediction: {prediction}")
         return prediction
 
 
@@ -511,7 +572,6 @@ def train(conf, output, **kwargs):
     conf = yaml.safe_load(open(conf).read())
     model = train_model(conf, 
             threads=kwargs.get('threads'), 
-            var_freq_file=kwargs.get('freq_file'),
             feat_csv=kwargs.get('feat_csv'),
             labels_csv=kwargs.get('labels_csv'),
             reference_filename=kwargs.get('reference'))
@@ -529,7 +589,6 @@ def main():
     trainparser.add_argument("-t", "--threads", help="thread count", default=24, type=int)
     trainparser.add_argument("-o", "--output", help="Output path")
     trainparser.add_argument("-r", "--reference", help="Reference genome fasta")
-    trainparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     trainparser.add_argument("--feat-csv", help="Feature dump CSV")
     trainparser.add_argument("--labels-csv", help="Label dump CSV")
     trainparser.set_defaults(func=train)
@@ -537,7 +596,6 @@ def main():
     predictparser = subparser.add_parser("predict", help="Predict")
     predictparser.add_argument("-m", "--model", help="Model file")
     predictparser.add_argument("-b", "--bam", help="Path to the bam")
-    predictparser.add_argument("-f", "--freq-file", help="Variant frequency file (Gnomad or similar)")
     predictparser.add_argument("-v", "--vcf", help="Input VCF")
     predictparser.set_defaults(func=predict)
 
@@ -550,10 +608,14 @@ if __name__ == "__main__":
                     datefmt='%m-%d %H:%M:%S',
                     level=logging.INFO)
 
-    main()
+    # main()
 
-    #aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
-    #vcf = pysam.VariantFile("test.vcf")
-    #var = next(vcf)
-    #x = bamfeats(var, aln)
+    # aln = pysam.AlignmentFile("/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", reference_filename="/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    vcf = pysam.VariantFile("test.vcf")
+    records = list(vcf)
+    model = load_model("/Users/brendan/data/jovian/g44e280_clf.model")
+
+    preds = predict_records(records, model, "/Users/brendan/data/WGS/99702111878_NA12878_1ug.cram", "/Users/brendan/data/ref_genome/human_g1k_v37_decoy_phiXAdaptr.fasta.gz")
+    print(preds)
+
    # print(x)

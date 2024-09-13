@@ -5,7 +5,6 @@ import logging
 import os
 
 import re
-import torch
 import sklearn
 
 import argparse
@@ -46,7 +45,6 @@ def alphanumeric_no_spaces(name):
 def main():
     logger.debug("Turning on DEBUG log level")
     logger.info(f"Jenever version {VERSION}")
-    logger.info(f"PyTorch version: {torch.__version__}")
     logger.info(f"Scikit-learn version: {sklearn.__version__}")
     parser = argparse.ArgumentParser(description='NGS variant detection with transformers')
     subparser = parser.add_subparsers()
@@ -100,7 +98,9 @@ def main():
     callparser.add_argument("-v", "--vcf-out", help="Output vcf file", required=True)
     callparser.add_argument("-t", "--threads", help="Number of processes to use", type=int, default=1)
     callparser.add_argument("-td", "--temp-dir", help="Temporary data storage location", default=os.environ.get("JV_TMPDIR", "."))
-    callparser.add_argument("-mx", "--max-batch-size", help="Max number of regions to process at once", type=int, default=64)
+    callparser.add_argument("-mx", "--max-batch-size", help="Max number of regions to process at once", type=int, default=128)
+    callparser.add_argument("-np", "--no-progress", help="Turn off progress bars", action='store_true')
+
 
     callparser.set_defaults(func=do_call)
 

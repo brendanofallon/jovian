@@ -1,16 +1,17 @@
 
 import sys
-print(f"Sys.path: {sys.path}")
-
 import pytest
-import util
-from util import merge_overlapping_regions, VariantSortedBuffer, records_overlap, expand_to_bases, bases_to_kvec
+import dnaseq2seq.util as util
+from dnaseq2seq.util import merge_overlapping_regions, VariantSortedBuffer, records_overlap, expand_to_bases, bases_to_kvec
 from pathlib import Path
 from io import StringIO
 from typing import List
 from dataclasses import dataclass
 import random
 from tempfile import NamedTemporaryFile
+
+
+DATADIR = Path(__file__).parent / "test_data"
 
 @dataclass
 class MockVariantRecord:
@@ -235,3 +236,15 @@ def test_cluster_positions_no_overlap():
     expected = [(2, 18), (112, 128), (222, 238), (332, 348)]
     result = list(util.cluster_positions(poslist, maxdist))
     assert result == expected, f"Expected {expected}, got {result}"
+
+def test_bed_prog_counter():
+    testbed = DATADIR / "test.bed"
+    counter = util.RegionProgressCounter(testbed)
+    assert counter.prog('1', 500) == 0
+    assert counter.prog('1', 750) == 0.0625
+    assert counter.prog('1', 1000) == 0.125
+    assert counter.prog('1', 1500) == 0.25
+    assert counter.prog('1', 15000) == 0.5
+    assert counter.prog('2', 100) == 0.5
+    assert counter.prog('2', 1100) == 0.75
+    assert counter.prog('2', 1600) == 0.75 + 0.125

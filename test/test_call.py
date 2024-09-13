@@ -6,28 +6,6 @@ from typing import List
 
 
 
-# def test_merge_genotypes():
-    # gconf = [
-    #     ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-    #      []),
-    #     ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-    #      []),
-    #     ([],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)]),
-    # ]
-
-
-    # gconf = [
-    #     ([],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)]),
-    #
-    #     ([vcf.Variant(pos=10, ref='A', alt='T', qual=1), vcf.Variant(pos=20, ref='G', alt='C', qual=1)],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1)]),
-    #
-    #     ([],
-    #      [vcf.Variant(pos=10, ref='A', alt='T', qual=1)]),
-    # ]
-
 def test_resolve_haplotypes_ambiguous():
     gconf = [
         ([vcf.Variant(chrom='X', pos=10, ref='A', alt='T', qual=1)],
