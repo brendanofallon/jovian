@@ -18,7 +18,6 @@ The current Jenever model has been trained on Illumina WGS germline short-read d
 Jenever 1.3 introduces better parallelization for the variant quality score calculation, leading to higher overall performance. We've also added progress bars for calling (you can disable with the `--no-prog` option), and done a lot of behind-the-scenes code cleanup and testing. Precision and recall statistics should be the same as for Jenever 1.2.
 
 
-
 #### A note on Jovian
 
 An earlier version of this tool, called Jovian, was made available in 2022 (see [preprint](https://www.biorxiv.org/content/10.1101/2022.09.12.506413v1) for details).
@@ -53,27 +52,20 @@ on the command line. There are some pretty large dependencies (pytorch, pysam, s
 
 It's a good idea to install in a separate conda environment or python virtualenv if possible, but not required unless there are dependency conflicts. 
 
-### Model weights
+### Model checkpoints
 
-Model weights are stored using [git lfs](https://git-lfs.com/), under the `models/` directory. If you don't have `git lfs` installed, the weights files will appear as small stub files with references to the actual weights objects. If you install `git lfs` after you've already cloned the repo, run
+Transformer model checkpoints and variant quality models available from [this bucket](https://storage.googleapis.com/jenever-models/). You'll need to download a transformer model and a classifier model in order to use Jenever. Here is a table with the available models:
 
-    git lfs fetch
+| Model file                                                                                                                       | Description                                                                                    |
+|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| [bwa_ft_100M_run5_epoch80.model](https://storage.googleapis.com/jenever-models/bwa_ft_100M_run5_epoch80.model)                                                 | A model fine-tuned on BWA-aligned data, with improved performance for BWA data    |
+| [good44fix_epoch280.model](https://storage.googleapis.com/jenever-models/good44fix_epoch280.model)                               | A new transformer model with better precision and sensitivity for SNVs                         |
+| [g44e280_clf.model](https://storage.googleapis.com/jenever-models/g44e280_clf.model)                                             | A new classifier model trained with calls form the "good44fix" transformer                     |
+| [100M_s28_cont_mapsus_lolr2_epoch2.model](https://storage.googleapis.com/jenever-models/100M_s28_cont_mapsus_lolr2_epoch4.model) | The v1.0  weights for the main transformer model, as used in the Jenever publication           |
+| [s28ce40_bamfix.model](https://storage.googleapis.com/jenever-models/s28ce40_bamfix.model)                                       | The v1.0 classifier model, as used in the Jenever publication                                  |
+| [paraclf.model](https://storage.googleapis.com/jenever-models/paraclf.model)                                                     | A classifier model trained on more data with slightly higher performance the the previous model |
 
-followed by
-
-    git lfs checkout
-
-to actually download the weights.
-
-There are two types of model files. The first stores weights for the main transformer model used for haplotype generation. These are big, often over 1GB. The second is the 'classifier' model which predicts variant quality from multiple overlapping haplotypes. The classifier model files are typically much smaller (~40MB)
-
-#### Model files:
-- **good44fix_epoch280.model**: New in v1.2, this contains weights for an improved transformer model with better precision and sensitivity for SNVs
-- **g44e280_clf.model**: New in v1.2, this is a new classifier model trained with calls form the "good44fix" transformer.
-- **100M_s28_cont_mapsus_lolr2_epoch2.model**: The v1.0  weights for the main transformer model, as used in the Jenever publication. It has been trained on short-read WGS data aligned with the [GEM-mapper](https://github.com/smarco/gem3-mapper) aligner. Performance on BWA-aligned data is a bit lower.
-- **s28ce40_bamfix.model**: The v1.0 classifier model, as used in the Jenever publication
-- **paraclf.model**: New in v1.1, this classifier model was trained on more data with slightly higher performance the the previous model. 
-
+The model files are large because they are full checkpoints, and hence include the  optimizer state and other metadata. This means they can be used for fine-tuning (see Training section below). Smaller versions without the optimizer state are available on request.
 
 
 ## Calling variants
@@ -121,6 +113,8 @@ choose from each region type, and a list of BAMs + labels, like this:
         'deletion': 500
         'insertion': 500
         'mnv': 1000
+
+    input_model: /path/to/transformer/model # Optional, if you want to start from a checkpoint and fine-tune an existing model
 
     data:
       - bam: /path/to/a/bam
