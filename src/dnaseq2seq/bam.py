@@ -124,12 +124,15 @@ class ReadEncoder:
         :param ref_end: Reference coordinate of the end of the window
         :return: Encoded tensor
         """
-        if self.encoded_chunk is None:
-            return self._from_scratch(ref_start, ref_end)
-        elif self.window_start < ref_start < self.window_end:
-            return self.shift(ref_start, ref_end)
-        else:
-            return self._from_scratch(ref_start, ref_end)
+        # FIXME this is slow
+        return self._from_scratch(ref_start, ref_end)
+        
+        #if self.encoded_chunk is None:
+        #    return self._from_scratch(ref_start, ref_end)
+        #elif self.window_start < ref_start < self.window_end:
+        #    return self.shift(ref_start, ref_end)
+        #else:
+        #    return self._from_scratch(ref_start, ref_end)
 
 
 
@@ -352,10 +355,10 @@ def iterate_bases(rec, skip=0):
     is_seq_consumed = cigop in {0, 1, 3, 4, 7}  # 1 is insertion, 3 is 'ref skip'
     is_clipped = cigop in {4, 5}
     if bases is None:
-        logger.warning(f"No bases for {rec.query_name}, skipping")
+        #logger.warning(f"No bases for {rec.query_name}, skipping")
         return
     if quals is None:
-        logger.warning(f"No quals for {rec.query_name}, skipping")
+        #logger.warning(f"No quals for {rec.query_name}, skipping")
         return
 
     for i, (base, qual) in enumerate(zip(bases, quals)):

@@ -22,8 +22,8 @@ ds2s=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/src/dnaseq2seq/main.py
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/wgs_lcbig_sus_5more_chrsE.yaml
 #CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/dnaseq2seq/decoder_fpfn_chr1_conf.yaml
 
-CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/pregen_confs/ont_chr21and22.yaml
-DEST=/scratch/general/vast/u0379426/pregen/ont_chr21and22
+CONF=/uufs/chpc.utah.edu/common/home/u0379426/src/jovian/pregen_confs/ont_first4_hard.yaml
+DEST=/scratch/general/vast/u0379426/pregen/ont_first4_hard
 
 
 BATCH_SIZE=512
