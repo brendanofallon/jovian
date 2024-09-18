@@ -18,6 +18,7 @@ import torch.multiprocessing as mp
 import queue
 import pysam
 import numpy as np
+from string import ascii_letters, digits
 
 from dnaseq2seq.model import VarTransformer
 from dnaseq2seq import buildclf
@@ -475,6 +476,14 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
             else:
                 allencoded = batch_encoded[0]
             allencoded = allencoded.float()
+
+            # Crazy debug code
+            #uid = "".join(random.choices(ascii_letters + digits, k=4))
+            #logger.info(f"Saving tensors with uid: {uid}")
+            #torch.save(allencoded, f"allencoded_{uid}.pt")
+            #torch.save(batch_start_pos, f"batch_start_pos_{uid}.pt")
+            #torch.save(batch_regions, f"batch_regions_{uid}.pt")
+
             hap0, hap1= call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference,
                                         max_batch_size)
 
@@ -493,6 +502,13 @@ def call_multi_paths(datas, model, refpath, bampath, classifier_model, vcf_templ
         else:
             allencoded = batch_encoded[0]
         allencoded = allencoded.float()
+        
+        uid = "".join(random.choices(ascii_letters + digits, k=4))
+        #logger.info(f"Saving tensors with uid: {uid}")
+        #torch.save(allencoded, f"allencoded_{uid}.pt")
+        #torch.save(batch_start_pos, f"batch_start_pos_{uid}.pt")
+        #torch.save(batch_regions, f"batch_regions_{uid}.pt")
+
         hap0, hap1 = call_and_merge(allencoded, batch_start_pos, batch_regions, model, reference, max_batch_size)
         var_records.extend(
             vars_hap_to_records(hap0, hap1, bampath, refpath, classifier_model, vcf_template)
@@ -638,7 +654,7 @@ def accumulate_regions_and_call(modelpath: str,
 
 def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_size):
     """
-    Generate haplotypes for the batch, identify variants in each, and then 'merge genotypes' across the overlapping
+    Generate haplotypes for the batch, identify variants in each, and then 'resolve_haplotypes' across the overlapping
     windows with the ad-hoc algo in the resolve_haplotypes function. This also filters out any variants not found
     in the 'regions' tuple
 
@@ -682,6 +698,7 @@ def call_and_merge(batch, batch_offsets, regions, model, reference, max_batch_si
 
         logger.debug(f"Sub-batch size: {len(subbatch_offsets)}   max dist: {max(subbatch_dists)},  n_tokens: {n_output_toks}")
         batchvars = call_batch(subbatch, subbatch_offsets, subbatch_regions, model, reference, n_output_toks, max_batch_size=max_batch_size)
+
         logger.debug(f"Called {len(batchvars)} in {subbatch_regions}")
         for region, bvars in zip(subbatch_regions, batchvars):
             byregion[region].append(bvars)
