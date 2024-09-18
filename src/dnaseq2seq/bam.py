@@ -124,12 +124,14 @@ class ReadEncoder:
         :param ref_end: Reference coordinate of the end of the window
         :return: Encoded tensor
         """
-        if self.encoded_chunk is None:
-            return self._from_scratch(ref_start, ref_end)
-        elif self.window_start < ref_start < self.window_end:
-            return self.shift(ref_start, ref_end)
-        else:
-            return self._from_scratch(ref_start, ref_end)
+        return self._from_scratch(ref_start, ref_end)
+        
+        #if self.encoded_chunk is None:
+        #    return self._from_scratch(ref_start, ref_end)
+        #elif self.window_start < ref_start < self.window_end:
+        #    return self.shift(ref_start, ref_end)
+        #else:
+        #    return self._from_scratch(ref_start, ref_end)
 
 
 

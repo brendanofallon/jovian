@@ -45,6 +45,7 @@ def alphanumeric_no_spaces(name):
 
 def main():
     logger.debug("Turning on DEBUG log level")
+    logger.info("ONT branch")
     logger.info(f"Jenever version {VERSION}")
     logger.info(f"PyTorch version: {torch.__version__}")
     logger.info(f"Scikit-learn version: {sklearn.__version__}")
