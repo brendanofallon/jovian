@@ -276,30 +276,39 @@ def call_vars_in_parallel(
     priority_func = partial(region_priority, chrom_order=bed_chrom_order)
     progress_tracker = util.RegionProgressCounter(bed)
 
-    # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
-    region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads, show_progress))
-    region_finder.start()
 
-    region_workers = [mp.Process(target=generate_tensors,
-                                 args=(regions_queue, tensors_queue, bampath, refpath, region_keepalive_queue))
-                      for _ in range(threads)]
+    with mp.Manager() as manager:
+        callstate = manager.dict()
+        callstate['exception'] = None
+        callstate['region_keepalive'] = True
 
-    for p in region_workers:
-        p.start()
+        # This one processes the input BED file and find 'suspect regions', and puts them in the regions_queue
+        region_finder = mp.Process(target=find_regions, args=(regions_queue, bed, bampath, refpath, threads, show_progress))
+        region_finder.start()
 
-    model_proc = mp.Process(target=accumulate_regions_and_call,
-                            args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, region_keepalive_queue, progress_tracker, show_progress))
-    model_proc.start()
+        region_workers = [mp.Process(target=generate_tensors,
+                                     args=(regions_queue, tensors_queue, bampath, refpath, callstate))
+                          for _ in range(threads)]
 
-    region_finder.join()
-    logger.debug("Done finding regions")
+        for p in region_workers:
+            p.start()
 
-    for p in region_workers:
-        p.join()
-    logger.debug("Region workers are done")
+        model_proc = mp.Process(target=accumulate_regions_and_call,
+                                args=(model_path, tensors_queue, priority_func, refpath, bampath, classifier_path, max_batch_size, vcf_out, vcf_header_extras, threads, callstate, progress_tracker, show_progress))
+        model_proc.start()
 
-    model_proc.join()
+        region_finder.join()
+        logger.debug("Done finding regions")
 
+        for p in region_workers:
+            p.join()
+        logger.debug("Region workers are done")
+
+        model_proc.join()
+
+        if callstate['exception'] is not None:
+            logger.error(f"Found an exception in the calling process: {callstate['exception']}")
+            raise callstate['exception']
 
 
 def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
@@ -322,25 +331,33 @@ def find_regions(regionq, inputbed, bampath, refpath, n_signals, show_progress):
     logger.info(f"Found {tot_regions} regions with {util.format_bp(tot_bases)} in {inputbed}")
     
     for idx, (chrom, window_start, window_end) in enumerate(util.split_large_regions(util.read_bed_regions(inputbed), max_region_size=10000)):
-        region_count += 1
-        tot_size_bp += window_end - window_start
+        if callstate['exception'] is not None:
+            logger.error(f"Found an exception in the calling process: {callstate['exception']}")
+            break
 
-        sus_regions = cluster_positions_for_window(
-            (chrom, idx, window_start, window_end),
-            bamfile=bampath,
-            reference_fasta=refpath,
-            maxdist=100,
-        )
-        sus_regions = util.merge_overlapping_regions(sus_regions)
-        if progbar is not None:
-            progbar.update(round(100 * (tot_size_bp) / tot_bases, 2) - progbar.n)
-            progbar.refresh()
-        else:
-            logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
-        for i, r in enumerate(sus_regions):
-            sus_region_count += 1
-            sus_region_bp += r[-1] - r[-2]
-            regionq.put(IndexedRegion(chrom, r[-2], r[-1], idx))
+        try:
+            region_count += 1
+            tot_size_bp += window_end - window_start
+            sus_regions = cluster_positions_for_window(
+                (chrom, idx, window_start, window_end),
+                bamfile=bampath,
+                reference_fasta=refpath,
+                maxdist=100,
+            )
+            sus_regions = util.merge_overlapping_regions(sus_regions)
+            if progbar is not None:
+                progbar.update(round(100 * (tot_size_bp) / tot_bases, 2) - progbar.n)
+                progbar.refresh()
+            else:
+                logger.info(f"Identified regions {tot_size_bp} of {tot_bases} bp ({tot_size_bp / tot_bases * 100 :.2f} done)")
+            for i, r in enumerate(sus_regions):
+                sus_region_count += 1
+                sus_region_bp += r[-1] - r[-2]
+                regionq.put(IndexedRegion(chrom, r[-2], r[-1], idx))
+        except Exception as ex:
+            logger.error(f"Exception in region finder: {ex}")
+            callstate['exception'] = ex
+            raise ex
 
     logger.debug("Done finding regions")
     for i in range(n_signals):
@@ -382,7 +399,7 @@ def encode_region(bampath, refpath, idxregion, max_read_depth, window_size, min_
     return data
 
 
-def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, keepalive_queue: mp.Queue, max_read_depth=150, window_size=150):
+def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, refpath, callstate: dict, max_read_depth=150, window_size=150):
     """
     Consume regions from the region_queue and generate input tensors for each and put them into the output_queue
     """
@@ -393,6 +410,10 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
 
     encoded_region_count = 0
     while True:
+        if callstate['exception'] is not None:
+            logger.error(f"Found an exception in the calling process: {callstate['exception']}")
+            break
+
         region = region_queue.get()
         if isinstance(region, RegionStopSignal):
             logger.debug("Region worker found end token")
@@ -408,15 +429,17 @@ def generate_tensors(region_queue: mp.Queue, output_queue: mp.Queue, bampath, re
                     output_queue.put(data)
 
             except Exception as ex:
-                output_queue.put(CallingErrorSignal(errormsg=str(ex)))
+                logger.error(f"Exception in region worker: {ex}")
+                callstate['exception'] = ex
                 raise ex
     
     # It is CRITICAL to keep these processes alive, even after they're done doing everything. Pytorch will clean up the 
     # the tensors *that have already been queued* when these processes die, even if the tensors haven't been processed yet
     # This will lead to errors when the calling process polls the queue, leading to missed variant calls. Instead, we wait for
-    # the calling process to put a signal into the 'keepalive' queue to signal that it is all done and we can finally exit
-    logger.debug(f"Polling keepalive queue after generating {encoded_region_count} tensors")
-    result = keepalive_queue.get()
+    # the calling process to signal callstate dict that it's done by setting region_keepalive to True, then we can die
+    logger.debug(f"Polling callstate dict after generating {encoded_region_count} tensors")
+    while callstate['region_keepalive'] and callstate['exception'] is None:
+        time.sleep(1)
     logger.debug(f"Region worker {os.getpid()} is shutting down after generating {encoded_region_count} encoded regions")
 
 
@@ -477,7 +500,7 @@ def accumulate_regions_and_call(modelpath: str,
                                 vcf_out_path: str,
                                 header_extras: str,
                                 n_region_workers: int,
-                                keepalive_queue: mp.Queue,
+                                callstate: dict,
                                 progress_tracker: util.RegionProgressCounter,
                                 show_progress: bool):
     """
@@ -523,6 +546,10 @@ def accumulate_regions_and_call(modelpath: str,
     process_time_total = 0
     total_windows_found = 0
     while True:
+        if callstate['exception'] is not None:
+            logger.error(f"Found an exception in the calling process: {callstate['exception']}")
+            break
+
         try:
             t0 = time.perf_counter()
             data = inputq.get(timeout=10) # Timeout is in seconds, we count these and error out if there are too many
@@ -533,12 +560,9 @@ def accumulate_regions_and_call(modelpath: str,
             timeouts += 1
             data = None
             logger.debug(f"Got a timeout in model queue, have {timeouts} total")
-        except FileNotFoundError as ex:
-            # This happens when region workers exit prematurely, it's bad
-            logger.warning(f"Got a FNF error polling tensor input queue, ignoring it, datas len: {len(datas)}")
-            raise ex
         except Exception as ex:
             logger.error(f"Exception polling calling input queue: {ex}")
+            callstate['exception'] = ex
             raise ex
 
         if isinstance(data, CallingErrorSignal):
@@ -601,9 +625,7 @@ def accumulate_regions_and_call(modelpath: str,
             break
 
     logger.debug(f"Calling process is cleaning up, got {tot_regions_submitted} regions submitted, found {regions_found} regions and processed {regions_processed} regions")
-    for i in range(n_region_workers):
-        logger.debug(f"Sending kill msg to region {i}")
-        keepalive_queue.put(None)
+    callstate['region_keepalive'] = False
 
     logger.debug(f"Writing final {len(vbuff)} variants...")
     if progbar:
