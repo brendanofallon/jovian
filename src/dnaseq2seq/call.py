@@ -617,7 +617,6 @@ def accumulate_regions_and_call(modelpath: str,
             regions_processed += len(datas)
             # Store the variants in a buffer so we can sort big groups of them (no guarantees about sort order for
             # variants coming out of queue)
-            raise Exception("This is a test")
             vbuff.put_all(records)
 
         if n_finished_workers == n_region_workers:
